@@ -1,0 +1,181 @@
+"""Formatters: golden text produced from real r2 measurements.
+
+The expected strings here were captured from r2 6.2.5 on an ARM32 firmware
+binary (``-e scr.color=0``), so a change that breaks compatibility with r2
+fails a test rather than quietly drifting.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pytest
+
+from idare2.config import Config
+from idare2.fmt import disasm as fmt_disasm
+from idare2.fmt import memory as fmt_memory
+from idare2.fmt.colors import Colors
+
+
+@dataclass
+class FakeSession:
+    config: Config
+    info: dict
+    colors: Colors
+
+    def __init__(self, **info) -> None:
+        self.config = Config()
+        self.info = {"bits": 32, **info}
+        self.colors = Colors(0)
+
+    def comment_at(self, ea: int) -> str:
+        return ""
+
+
+@pytest.fixture
+def session() -> FakeSession:
+    return FakeSession()
+
+
+def function_result(lines, *, func=None, mode="count"):
+    return {"mode": mode, "ea": lines[0]["ea"], "func": func, "lines": lines}
+
+
+def insn(ea, raw, text, comment="", size=None):
+    return {
+        "ea": ea,
+        "size": size if size is not None else len(bytes.fromhex(raw)),
+        "bytes": bytes.fromhex(raw),
+        "text": text,
+        "comment": comment,
+        "is_call": False,
+        "is_jump": False,
+        "targets": [],
+    }
+
+
+LINES = [
+    insn(0x00015E50, "b4379fe5", "LDR R3, [PC,#0x1C]", ""),
+    insn(0x00015E54, "03308fe0", "ADD R3, PC, R3", ""),
+    insn(0x00015E58, "0310a0e1", "MOV R1, R3", ""),
+]
+
+
+def test_disasm_columns(session: FakeSession) -> None:
+    out = fmt_disasm.format_disasm(function_result(LINES), session)
+    assert len(out) == 3
+    # Measured r2 layout: gutter at 0, address at 12, bytes at 28, text at 43.
+    first = out[0]
+    assert first[0] == "┌"
+    assert first.index("0x00015e50") == 12
+    assert first.index("b4379fe5") == 28
+    assert first.index("LDR") == 43
+    assert out[-1][0] == "└"
+    assert out[1][0] == "│"
+
+
+def test_disasm_comment_column_is_absolute(session: FakeSession) -> None:
+    line = insn(0x00015E50, "b4379fe5", "LDR R3", "argc")
+    out = fmt_disasm.format_disasm(function_result([line]), session)
+    assert out[0].index("; argc") == 71
+
+
+def test_disasm_without_lines_has_no_gutter(session: FakeSession) -> None:
+    session.config.set("asm.lines", False)
+    out = fmt_disasm.format_disasm(function_result(LINES), session)
+    assert out[0].startswith("0x00015e50")
+    assert "│" not in "".join(out)
+
+
+def test_disasm_without_bytes(session: FakeSession) -> None:
+    # The r2 baseline for `e asm.bytes=false` was captured with the gutter off.
+    session.config.set("asm.bytes", False)
+    session.config.set("asm.lines", False)
+    out = fmt_disasm.format_disasm(function_result(LINES), session)
+    assert "b4379fe5" not in out[0]
+    assert out[0].index("LDR") == 16
+
+
+def test_function_header_only_at_a_function_start(session: FakeSession) -> None:
+    start = LINES[0]["ea"]
+    func = {"name": "main", "start": start, "end": start + 2036,
+            "signature": "int main(int argc, char **argv)"}
+    header = fmt_disasm.format_disasm(
+        function_result(LINES, func=func), session
+    )[0]
+    assert header == "┌ 2036: int main(int argc, char **argv)"
+    # Starting mid-function prints no header.
+    elsewhere = {"name": "main", "start": 0x1000, "end": 0x2000}
+    mid = fmt_disasm.format_disasm(
+        function_result(LINES, func=elsewhere), session
+    )
+    assert not mid[0].startswith("┌ 2036")
+
+
+HEXDUMP = {
+    "ea": 0x00008D10,
+    "count": 32,
+    "data": bytes.fromhex(
+        "9e0000000000000000000000" "30000000"
+        "000000000000000000000000" "49000000"
+    ),
+}
+
+
+def test_hexdump_matches_r2(session: FakeSession) -> None:
+    out = fmt_memory.format_hexdump(HEXDUMP, session)
+    assert out[0] == (
+        "- offset -  1011 1213 1415 1617 1819 1A1B 1C1D 1E1F  "
+        "0123456789ABCDEF"
+    )
+    assert out[1] == (
+        "0x00008d10  9e00 0000 0000 0000 0000 0000 3000 0000  "
+        "............0..."
+    )
+    assert out[2].startswith("0x00008d20")
+
+
+def test_hexdump_wrap_at_ff(session: FakeSession) -> None:
+    payload = {"ea": 0x00008D1B, "count": 16, "data": bytes.fromhex("00300000" + "00" * 12)}
+    out = fmt_memory.format_hexdump(payload, session)
+    assert out[0].startswith("- offset -  1B1C 1D1E 1F20")
+    # The ASCII header is the low nibble of each offset, uppercase.
+    assert out[0].endswith("BCDEF0123456789A")
+
+
+def test_hexdump_header_can_be_disabled(session: FakeSession) -> None:
+    session.config.set("hex.header", False)
+    out = fmt_memory.format_hexdump(HEXDUMP, session)
+    assert out[0].startswith("0x00008d10")
+
+
+def test_hexdump_cols(session: FakeSession) -> None:
+    session.config.set("hex.cols", 8)
+    out = fmt_memory.format_hexdump(HEXDUMP, session)
+    assert out[0] == "- offset -  1011 1213 1415 1617  01234567"
+    assert out[1].startswith("0x00008d10  9e00 0000 0000 0000  ........")
+
+
+def test_value_rendering(session: FakeSession) -> None:
+    payload = {
+        "ea": 0x1000,
+        "width": 4,
+        "value": 0xFFFFFFF0,
+        "bytes": bytes.fromhex("f0ffffff"),
+        "big_endian": False,
+    }
+    out = fmt_memory.format_value(payload, session)
+    assert "hex     0xfffffff0" in out
+    assert "uint    4294967280" in out
+    assert "int     -16" in out
+
+
+def test_string_rendering(session: FakeSession) -> None:
+    assert fmt_memory.format_string({"text": "httpd"}, session) == ["httpd"]
+
+
+def test_jsonable_bytes_become_hex() -> None:
+    from idare2.fmt import jsonable
+
+    assert jsonable({"bytes": b"\x10\x48"}) == {"bytes": "1048"}
+    assert jsonable([b"\xff"]) == ["ff"]

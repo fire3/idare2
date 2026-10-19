@@ -1,0 +1,247 @@
+"""Type operations backing ``t*`` and ``dt``.
+
+Described through ``tinfo_t``'s own methods rather than ``TypeDetails``: the
+latter is a dataclass whose shape follows ida-domain's version, while the
+``tinfo_t`` predicates are IDA's stable SDK surface.
+"""
+
+from __future__ import annotations
+
+import contextlib
+from collections.abc import Iterator
+from typing import Any
+
+from idare2 import protocol
+from idare2.remote import helpers
+from idare2.remote.dispatch import op
+
+
+def _text(tinfo: Any) -> str:
+    try:
+        return tinfo.dstr()
+    except Exception:
+        return str(tinfo)
+
+
+def _describe(tinfo: Any) -> dict[str, Any]:
+    """Name, size, declaration and category for one type."""
+    def flag(name: str) -> bool:
+        try:
+            return bool(getattr(tinfo, name)())
+        except Exception:
+            return False
+
+    with contextlib.suppress(Exception):
+        size = int(tinfo.get_size())
+
+    category = "other"
+    for name, label in (
+        ("is_struct", "struct"),
+        ("is_union", "union"),
+        ("is_enum", "enum"),
+        ("is_func", "func"),
+        ("is_ptr", "ptr"),
+        ("is_array", "array"),
+        ("is_bitfield", "bitfield"),
+        ("is_scalar", "scalar"),
+    ):
+        if flag(name):
+            category = label
+            break
+
+    return {
+        "name": _text(tinfo),
+        "size": size,
+        "category": category,
+        "declaration": _text(tinfo),
+        "is_const": flag("is_const"),
+        "is_volatile": flag("is_volatile"),
+    }
+
+
+@op("types_list")
+def types_list(
+    db: Any,
+    pattern: str | None = None,
+    offset: int = 0,
+    count: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Named types in the database (``t``)."""
+    predicate = helpers.name_filter(pattern)
+
+    def make() -> Iterator[dict[str, Any]]:
+        for tinfo in db.types.get_all():
+            text = _text(tinfo)
+            if predicate(text):
+                yield {
+                    "name": text,
+                    "size": _size(tinfo),
+                    "category": _describe(tinfo)["category"],
+                }
+
+    return helpers.paged(make, offset, count)
+
+
+def _size(tinfo: Any) -> int:
+    try:
+        return int(tinfo.get_size())
+    except Exception:
+        return 0
+
+
+@op("type_info")
+def type_info(db: Any, name: str) -> dict[str, Any]:
+    """One named type (``ts``)."""
+    tinfo = db.types.get_by_name(name)
+    if tinfo is None:
+        helpers.fail(protocol.NOT_FOUND, f"no type named {name!r}")
+    return _describe(tinfo)
+
+
+@op("type_at")
+def type_at(db: Any, ea: int) -> dict[str, Any]:
+    """The type applied at ``ea`` (``tp``)."""
+    tinfo = db.types.get_at(ea)
+    if tinfo is None:
+        helpers.fail(protocol.NOT_FOUND, f"no type at 0x{ea:x}")
+    return {"ea": ea, **_describe(tinfo)}
+
+
+@op("type_parse", writes=True)
+def type_parse(db: Any, declaration: str) -> dict[str, Any]:
+    """Parse C declarations into the database (``tc``).
+
+    ``parse_declarations`` returns the number of **parse errors**, so zero
+    means success -- the opposite of the "truthy means it worked" convention,
+    which is worth stating because getting it backwards rejects every valid
+    declaration.
+    """
+    import ida_typeinf
+
+    if not declaration.strip():
+        helpers.fail(protocol.BAD_ARGS, "tc needs a C declaration")
+    til = ida_typeinf.get_idati()
+    errors = int(db.types.parse_declarations(til, declaration))
+    if errors:
+        helpers.fail(
+            protocol.BAD_ARGS,
+            f"C parser reported {errors} error(s) in {declaration.strip()!r}",
+        )
+    created = _declared_names(declaration)
+    missing = [name for name in created if db.types.get_by_name(name) is None]
+    if created and len(missing) == len(created):
+        helpers.fail(
+            protocol.BAD_ARGS,
+            f"C parser accepted {declaration.strip()!r} but defined no named type",
+        )
+    return {"errors": errors, "created": [n for n in created if n not in missing]}
+
+
+def _declared_names(declaration: str) -> list[str]:
+    """Best-effort list of the type names a declaration block defines."""
+    import re
+
+    names = re.findall(
+        r"\b(?:struct|union|enum|typedef)\s+([A-Za-z_]\w*)", declaration
+    )
+    return [name for name in dict.fromkeys(names) if name]
+
+
+@op("type_apply", writes=True)
+def type_apply(db: Any, ea: int, name: str) -> dict[str, Any]:
+    """Apply a named type at ``ea`` (``tt``)."""
+    tinfo = db.types.get_by_name(name)
+    if tinfo is None:
+        helpers.fail(protocol.NOT_FOUND, f"no type named {name!r}")
+    if not db.types.apply_at(tinfo, ea):
+        # IDA refuses to lay a struct over code, among other things; say what
+        # the address currently is so the message is actionable.
+        kind = "code" if db.bytes.is_code_at(ea) else "data"
+        helpers.fail(
+            protocol.IDA_ERROR,
+            f"IDA refused to apply {name!r} at 0x{ea:x} (the address is {kind})",
+        )
+    return {"ea": ea, "name": name}
+
+
+@op("type_delete", writes=True)
+def type_delete(db: Any, name: str) -> dict[str, Any]:
+    """Delete a named type (``t-``).
+
+    ida-domain has no delete API, so this reaches for ``ida_typeinf``.
+    """
+    import ida_typeinf
+
+    til = ida_typeinf.get_idati()
+    tinfo = db.types.get_by_name(name)
+    if tinfo is None:
+        helpers.fail(protocol.NOT_FOUND, f"no type named {name!r}")
+    ordinal = tinfo.get_ordinal()
+    if not ordinal:
+        helpers.fail(protocol.IDA_ERROR, f"{name!r} has no ordinal to delete")
+    if not ida_typeinf.del_numbered_type(til, ordinal):
+        helpers.fail(protocol.IDA_ERROR, f"IDA refused to delete {name!r}")
+    return {"name": name}
+
+
+@op("type_members")
+def type_members(db: Any, name: str) -> dict[str, Any]:
+    """Struct/union members (``td``)."""
+    tinfo = db.types.get_by_name(name)
+    if tinfo is None:
+        helpers.fail(protocol.NOT_FOUND, f"no type named {name!r}")
+    members = [
+        {
+            "name": member.name,
+            "type": _text(member.type),
+            "offset": int(member.offset),
+            "size": int(member.size),
+            "bitfield": bool(member.is_bitfield),
+        }
+        for member in db.types.get_udt_members(tinfo)
+    ]
+    if not members:
+        helpers.fail(protocol.BAD_ARGS, f"{name!r} is not a struct or union with members")
+    return {"name": name, "size": _size(tinfo), "members": members}
+
+
+@op("type_enum_members")
+def type_enum_members(db: Any, name: str) -> dict[str, Any]:
+    """Enum members (``te``)."""
+    tinfo = db.types.get_by_name(name)
+    if tinfo is None:
+        helpers.fail(protocol.NOT_FOUND, f"no type named {name!r}")
+    members = [
+        {"name": member.name, "value": int(member.value)}
+        for member in db.types.get_enum_members(tinfo)
+    ]
+    if not members:
+        helpers.fail(protocol.BAD_ARGS, f"{name!r} is not an enum")
+    return {"name": name, "members": members}
+
+
+@op("object_at")
+def object_at(db: Any, ea: int, name: str) -> dict[str, Any]:
+    """Read a typed value at ``ea`` (``dt``).
+
+    ``parse_object_at`` returns an ``object_t`` whose ``__dict__`` holds one
+    entry per struct member (plus ``__at__`` for the address).  That dict is the
+    portable representation; the object itself is not JSON-serialisable.
+    """
+    tinfo = db.types.get_by_name(name)
+    if tinfo is None:
+        helpers.fail(protocol.NOT_FOUND, f"no type named {name!r}")
+    obj = db.types.parse_object_at(ea, tinfo)
+    if obj is None:
+        helpers.fail(protocol.IDA_ERROR, f"cannot read a {name} at 0x{ea:x}")
+    fields = {
+        key: value
+        for key, value in getattr(obj, "__dict__", {}).items()
+        if not key.startswith("__")
+    }
+    return {
+        "ea": ea,
+        "name": name,
+        "size": _size(tinfo),
+        "fields": fields,
+    }

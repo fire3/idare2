@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "idare2"
+version = "0.1.0"
+description = "radare2-style CLI over IDA Pro databases, driven by ida-nexus"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "fire3" }]
+keywords = ["reverse-engineering", "ida", "radare2", "disassembler"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3",
+]
+dependencies = ["ida-nexus>=0.13"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+idare2 = "idare2.cli:main"
+ir2 = "idare2.cli:main"
+
+[project.urls]
+Repository = "https://github.com/fire3/idare2"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/idare2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The default run is offline and fast.  The IDA-backed suites are opt-in
+# because they need an installed IDA and take a minute.
+addopts = "-ra -m 'not real_ida and not parity'"
+markers = [
+    "real_ida: requires an installed IDA with idalib configured",
+    "parity: requires radare2 in PATH for r2/idare2 output comparison",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.uv]
+prerelease = "allow"
