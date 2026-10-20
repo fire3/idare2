@@ -251,6 +251,33 @@ def test_f_size_and_address_follow_r2_order(session) -> None:
     assert int(size) == 16
 
 
+def test_seek_history_matches_r2_shape(session) -> None:
+    """`s=` used to be a by-name lookup ("s= needs a name") rather than history.
+
+    r2's chain is the undo history, oldest first, with the current seek left
+    out: from 0xf3ac, `s 0x1000; s 0x2000; s 0x3000` gives
+    `0xf3ac > 0x1000 > 0x2000`.  The session is shared across this module, so
+    the test appends to whatever history is already there rather than assuming
+    a clean one.  Address padding is idare2's own (it also drives the prompt).
+    """
+    session.failed = False
+    current = session.run("s")[0]
+    before = session.run("s=")[0]
+
+    def chain(*extra: str) -> str:
+        return " > ".join(part for part in (before, current, *extra) if part)
+
+    session.run("s 0x1000")
+    assert session.run("s=") == [chain()]
+    session.run("s 0x2000")
+    assert session.run("s=") == [chain("0x00001000")]
+    session.run("s 0x3000")
+    assert session.run("s=") == [chain("0x00001000", "0x00002000")]
+    session.run("s-")
+    assert session.run("s=") == [chain("0x00001000")]
+    assert not session.failed, session.last_error
+
+
 def test_asm_arch_and_bits_reflect_the_database(session) -> None:
     """The README documented these as read-only; the keys did not exist."""
     session.failed = False

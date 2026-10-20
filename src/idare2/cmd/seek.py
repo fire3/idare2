@@ -33,7 +33,7 @@ DETAIL = [
     ("sn", "[n]", "seek to the next instruction"),
     ("so", "[n]", "seek to the next instruction (skipping calls)"),
     ("sp", "[n]", "seek to the previous instruction"),
-    ("s=", "name", "seek to a flag or symbol"),
+    ("s=", "", "list the undo seek history (oldest first)"),
     ("s:", "", "print the current address, zero padded"),
 ]
 
@@ -87,11 +87,9 @@ def seek(session: Session, statement: Statement) -> list[str]:
         digits = session.eval(argument) if argument else width
         return [f"0x{session.seek:0{int(digits)}x}"]
 
-    if suffix == "=":
-        if not argument:
-            raise UsageError("s= needs a name")
-        session.seek_to(session.resolve(argument))
-        return []
+    if suffix.startswith("="):
+        return _history(session, suffix)
+
 
     if suffix == "b":
         payload = session.remote.call("block_info", ea=session.resolve(argument or None))
@@ -128,6 +126,32 @@ def seek(session: Session, statement: Statement) -> list[str]:
         return []
 
     raise UsageError(f"unsupported seek modifier '{suffix}' (see s?)")
+
+
+#: r2 documents ``s[j*=!]``; 5.5.0 accepts all of them and prints the same
+#: chain, so idare2 says plainly which ones it has not implemented rather than
+#: inventing output for them.
+_HISTORY_MODIFIERS = {
+    "==": "the explicit list form",
+    "=*": "the history as radare2 commands",
+    "=!": "the history as flag names",
+    "=j": "the history as JSON",
+}
+
+
+def _history(session: Session, suffix: str) -> list[str]:
+    """``s=`` -- the undo seek history, oldest first, `` > ``-joined.
+
+    Matches r2 5.5.0 exactly: the *current* seek is not part of the chain, and
+    an empty history prints an empty line.  ``s`` already seeks to a flag or
+    symbol by name, so this does not double as a lookup.
+    """
+    if suffix != "=":
+        raise UsageError(
+            f"s{suffix} ({_HISTORY_MODIFIERS[suffix]}) is not implemented yet; "
+            "use s= for the plain history"
+        )
+    return [" > ".join(session.format_addr(ea) for ea in session.seek_history)]
 
 
 def _undo(session: Session) -> list[str]:

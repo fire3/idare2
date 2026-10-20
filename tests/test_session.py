@@ -680,3 +680,53 @@ def test_asm_keys_have_a_help_row() -> None:
     lines = session.run("e asm.arch?")
     assert any("asm.arch" in line for line in lines)
     assert any("read-only" in line for line in lines)
+
+
+# ---------------------------------------------------------------------------
+# s= -- the undo seek history, as r2 prints it
+# ---------------------------------------------------------------------------
+
+
+def test_seek_history_is_empty_before_any_seek() -> None:
+    session, _remote = make_session()
+    assert session.run("s=") == [""]
+
+
+def test_seek_history_starts_with_the_initial_address() -> None:
+    session, _remote = make_session()
+    session.run("s 0x2000")
+    assert session.run("s=") == ["0x00001000"]
+
+
+def test_seek_history_is_oldest_first_and_excludes_the_current_seek() -> None:
+    """r2: `0xf3ac > 0x1000 > 0x2000` after three seeks from 0xf3ac."""
+    session, _remote = make_session()
+    session.run("s 0x2000")
+    session.run("s 0x3000")
+    session.run("s 0x4000")
+    assert session.run("s=") == ["0x00001000 > 0x00002000 > 0x00003000"]
+
+
+def test_undo_shortens_the_history() -> None:
+    session, _remote = make_session()
+    session.run("s 0x2000")
+    session.run("s 0x3000")
+    session.run("s-")
+    assert session.run("s=") == ["0x00001000"]
+
+
+def test_history_modifiers_are_reported_as_unimplemented() -> None:
+    """r2 documents s[j*=!]; saying so beats inventing output for them."""
+    session, _remote = make_session()
+    for token in ("s==", "s=*", "s=!", "s=j"):
+        session.failed = False
+        assert session.run(token) == []
+        assert session.failed, token
+        assert "not implemented yet" in str(session.last_error)
+
+
+def test_s_still_seeks_to_a_name() -> None:
+    """`s=` used to be the by-name lookup; plain `s name` keeps working."""
+    session, _remote = make_session()
+    session.run("s helper")
+    assert session.seek == 0x2000
