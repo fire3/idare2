@@ -17,7 +17,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from idare2.errors import NoDatabaseError, NotReadyError, TransportError
+from idare2.errors import (
+    Idare2Error,
+    NoDatabaseError,
+    NotReadyError,
+    QuitRequested,
+    TransportError,
+)
 
 #: Keep a spawned worker alive this long after our last lease closes, so that a
 #: sequence of CLI invocations reuses one loaded IDB (and IDA's in-memory undo
@@ -254,7 +260,12 @@ def connect(target: Target, *, timeout: float, linger: float, wait: str = "wait"
         handle = _open_with_retry(selection, target, timeout=timeout, linger=linger)
         await_analysis(handle, timeout, wait)
         yield handle
-    except (NoDatabaseError, NotReadyError):
+    except (Idare2Error, QuitRequested):
+        # Deliberate control flow raised by the `with` body.  An idare2 error
+        # already carries its own exit code, and `q` raises QuitRequested to
+        # unwind all the way to the CLI -- wrapping either here turned
+        # `idare2 -qc 'q'` into `ERROR: QuitRequested: quit with 0` with exit
+        # code 4 (EXIT_TRANSPORT) instead of a clean 0.
         raise
     except Exception as exc:
         raise TransportError(f"{type(exc).__name__}: {exc}") from exc

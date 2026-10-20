@@ -239,6 +239,34 @@ def test_tmpseek_applies_to_one_statement_only() -> None:
     assert disassembled == [0x2222]
 
 
+def test_run_propagates_quit_instead_of_reporting_it_as_an_error() -> None:
+    """`q` must unwind out of the whole line, not be logged and skipped.
+
+    Output is collected through `emit`, which is the path the CLI uses: `q`
+    aborts the statement loop, so nothing after it runs, and it is not recorded
+    as a command failure (which would have set the exit code to 1).
+    """
+    from idare2.errors import QuitRequested
+
+    session, _remote = make_session()
+    seen: list[str] = []
+    with pytest.raises(QuitRequested) as caught:
+        session.run("?e before; q; ?e after", emit=seen.extend)
+    assert caught.value.code == 0
+    assert seen == ["before"]
+    assert not session.failed
+    assert session.last_error is None
+
+
+def test_quit_carries_the_requested_exit_code() -> None:
+    from idare2.errors import QuitRequested
+
+    session, _remote = make_session()
+    with pytest.raises(QuitRequested) as caught:
+        session.run("q 3")
+    assert caught.value.code == 3
+
+
 def test_grep_and_pipe_apply_per_statement() -> None:
     session, _ = make_session()
     session.seek = 0x1000
