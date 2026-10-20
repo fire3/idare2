@@ -145,6 +145,22 @@ def test_sf_and_sF_seek(session) -> None:
     assert session.seek > start
 
 
+def test_iz_survives_decompilation(session) -> None:
+    """Regression: after `pdc`, `iz` died with "16 is not a valid StringType".
+
+    Hex-Rays can leave behind a string whose type code ida-domain's `StringType`
+    IntEnum rejects; the failure was persistent across sessions, so the ordering
+    matters more than the target.
+    """
+    session.failed = False
+    session.run("pdc @ 0x00016bb4")
+    assert not session.failed, session.last_error
+    lines = session.run("iz")
+    assert not session.failed, session.last_error
+    assert len(lines) > 2
+    assert lines[0].startswith("nth")
+
+
 def test_ph_hashes_exactly_what_p8_reads(session) -> None:
     """`ph` and `p8` must agree byte for byte -- including IDA's ELF fixups.
 

@@ -235,3 +235,93 @@ def test_item_flags_no_longer_collapses_to_zero() -> None:
 
     db = SimpleNamespace(bytes=FlagBytes(ByteFlags.CODE | ByteFlags.WORD))
     assert helpers.item_flags(db, 0x1000) == 3
+
+
+# ---------------------------------------------------------------------------
+# iz: one odd string must not take the listing down
+# ---------------------------------------------------------------------------
+
+
+class OddString:
+    """A literal whose type code ida-domain's ``StringType`` IntEnum rejects.
+
+    Reproduces ``ValueError: 16 is not a valid StringType``, which Hex-Rays can
+    leave behind after ``pdc`` and which used to abort the whole ``iz`` walk.
+    """
+
+    address = 0xC8C48
+    length = 20
+    internal_type = 16
+    contents = b"still readable"
+
+    @property
+    def type(self):
+        raise ValueError("16 is not a valid StringType")
+
+    @property
+    def encoding(self):
+        raise ValueError("16 is not a valid StringType")
+
+
+class PlainString:
+    address = 0xC8C48
+    length = 6
+    internal_type = 0
+    contents = b"abc"
+    type = "0"
+    encoding = "ascii"
+
+
+RODATA = [(0xC8000, 0xF0000, ".rodata", 0xC0C48)]
+
+
+def test_string_type_falls_back_on_an_unknown_enum_value() -> None:
+    from idare2.remote.ops.info import _string_type
+
+    assert _string_type(OddString()) == "0x10"
+    assert _string_type(PlainString()) == "0"
+
+
+def test_string_encoding_falls_back_on_an_unknown_enum_value() -> None:
+    from idare2.remote.ops.info import _string_encoding
+
+    assert _string_encoding(OddString()) == ""
+    assert _string_encoding(PlainString()) == "ascii"
+
+
+def test_string_row_survives_a_string_ida_domain_cannot_classify() -> None:
+    """Regression: this ValueError aborted `iz` for the whole database."""
+    from idare2.remote.ops.info import _string_row
+
+    row = _string_row(OddString(), RODATA)
+    assert row is not None
+    assert row["text"] == "still readable"
+    assert row["ea"] == 0xC8C48
+    assert row["section"] == ".rodata"
+    assert row["paddr"] == 0xC0C48 + (0xC8C48 - 0xC8000)
+    assert row["type"] == "0x10"
+
+
+def test_string_row_keeps_the_normal_path_intact() -> None:
+    from idare2.remote.ops.info import _string_row
+
+    row = _string_row(PlainString(), RODATA)
+    assert row == {
+        "ea": 0xC8C48,
+        "paddr": 0xC0C48 + (0xC8C48 - 0xC8000),
+        "section": ".rodata",
+        "length": 3,
+        "size": 6,
+        "type": "0",
+        "encoding": "ascii",
+        "text": "abc",
+    }
+
+
+def test_string_row_skips_an_unrenderable_literal() -> None:
+    from idare2.remote.ops.info import _string_row
+
+    class NoContents(PlainString):
+        contents = None
+
+    assert _string_row(NoContents(), RODATA) is None

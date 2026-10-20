@@ -273,28 +273,57 @@ def strings(
 
     def make() -> Iterator[dict[str, Any]]:
         for item in db.strings.get_all():
-            contents = item.contents
-            if contents is None:
+            row = _string_row(item, segments)
+            if row is None or not predicate(row["text"]):
                 continue
-            text = contents.decode("utf-8", errors="replace")
-            if not predicate(text):
-                continue
-            ea = int(item.address)
-            paddr, section = _locate(segments, ea)
-            yield {
-                "ea": ea,
-                "paddr": paddr,
-                "section": section,
-                # r2's `len` is the character count; `size` is the bytes on
-                # disk including the terminator, which IDA stores in .length.
-                "length": len(text),
-                "size": int(item.length),
-                "type": str(item.type),
-                "encoding": item.encoding,
-                "text": text,
-            }
+            yield row
 
     return helpers.paged(make, offset, count)
+
+
+def _string_row(item: Any, segments: list[tuple[int, int, str, int | None]]) -> dict[str, Any] | None:
+    """One ``iz`` row, or ``None`` when IDA cannot render the literal."""
+    contents = item.contents
+    if contents is None:
+        return None
+    text = contents.decode("utf-8", errors="replace")
+    ea = int(item.address)
+    paddr, section = _locate(segments, ea)
+    return {
+        "ea": ea,
+        "paddr": paddr,
+        "section": section,
+        # r2's `len` is the character count; `size` is the bytes on disk
+        # including the terminator, which IDA stores in .length.
+        "length": len(text),
+        "size": int(item.length),
+        "type": _string_type(item),
+        "encoding": _string_encoding(item),
+        "text": text,
+    }
+
+
+def _string_type(item: Any) -> str:
+    """Type name of a string, tolerant of codes ida-domain's enum rejects.
+
+    ``StringItem.type`` evaluates ``StringType(get_str_type_code(internal))``,
+    and an ``IntEnum`` raises ``ValueError`` for any value outside its members
+    -- ``16 is not a valid StringType``.  Decompiling with ``pdc`` can leave
+    such a string behind, and without this guard one odd literal took the whole
+    ``iz`` listing down with it, permanently, across sessions.
+    """
+    try:
+        return str(item.type)
+    except ValueError:
+        return f"0x{int(getattr(item, 'internal_type', 0)):x}"
+
+
+def _string_encoding(item: Any) -> str:
+    """Encoding name; same tolerance as :func:`_string_type`."""
+    try:
+        return item.encoding or ""
+    except (ValueError, TypeError):
+        return ""
 
 
 def _segment_index(db: Any) -> list[tuple[int, int, str, int | None]]:
