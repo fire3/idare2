@@ -199,23 +199,30 @@ def _seg_type(db: Any, segment: Any) -> str:
 
 
 @op("imports")
-def imports(db: Any, pattern: str | None = None) -> list[dict[str, Any]]:
-    """Import table (``ii``)."""
+def imports(
+    db: Any, pattern: str | None = None, offset: int = 0, count: int | None = None
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Import table (``ii``).
+
+    Paginated exactly like ``symbols``/``strings``: the client passes
+    ``offset``/``count`` for ``ii``/``iij``, so a handler that does not accept
+    them fails the dispatcher's ``signature.bind`` before it ever runs.
+    """
     predicate = helpers.name_filter(pattern)
-    out = []
-    for item in db.imports.get_all_imports():
-        name = item.name or ""
-        if not predicate(name):
-            continue
-        out.append(
-            {
+
+    def make() -> Iterator[dict[str, Any]]:
+        for item in db.imports.get_all_imports():
+            name = item.name or ""
+            if not predicate(name):
+                continue
+            yield {
                 "ea": int(item.address),
                 "name": name,
                 "module": item.module_name or "",
                 "ordinal": int(item.ordinal),
             }
-        )
-    return out
+
+    return helpers.paged(make, offset, count)
 
 
 @op("entries")

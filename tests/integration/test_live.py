@@ -130,6 +130,32 @@ def test_iz(session) -> None:
     assert lines[0].startswith("nth")
 
 
+def test_ii(session) -> None:
+    """``ii`` used to die in the dispatcher: the handler took no offset/count."""
+    session.failed = False
+    lines = session.run("ii")
+    assert not session.failed, session.last_error
+    assert lines
+    for line in lines[:5]:
+        ordinal, ea, _module, name = line.split(None, 3)
+        # IDA reports 0 for imports it has no explicit ordinal for.
+        assert ordinal.isdigit()
+        assert ea.startswith("0x")
+        assert name
+
+
+def test_ii_paginates(session) -> None:
+    def rows(lines: list[str]) -> list[str]:
+        # `with_more` appends r2's "[+more; resume with -o N]" hint.
+        return [line for line in lines if not line.startswith("[+")]
+
+    first = rows(session.run("ii 2"))
+    assert len(first) == 2
+    rest = rows(session.run("ii -o 2"))
+    assert rest
+    assert rest[0] != first[0]
+
+
 def test_grep_filter(session) -> None:
     everything = session.run("afl")
     name = everything[0].split()[-1]
