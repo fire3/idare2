@@ -251,6 +251,14 @@ def test_f_size_and_address_follow_r2_order(session) -> None:
     assert int(size) == 16
 
 
+def test_f_query_reports_the_address(session) -> None:
+    """`f? name` used to print the whole `f` help table instead of an answer."""
+    session.run("f queried_flag @ 0x10000")
+    assert session.run("f? queried_flag") == ["0x00010000"]
+    assert session.run("f?queried_flag") == ["0x00010000"]
+    assert session.run("f? never_defined_flag") == []
+
+
 def test_flags_degrade_to_session_local_when_readonly(session) -> None:
     """`f` is a naming convenience, so read-only mode keeps the r2 behaviour.
 

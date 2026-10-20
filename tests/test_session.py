@@ -373,3 +373,43 @@ def test_f_rejects_a_fourth_positional() -> None:
     assert session.run("f zz7 16 0x10000 extra") == []
     assert session.failed
     assert "unexpected argument" in str(session.last_error)
+
+
+# ---------------------------------------------------------------------------
+# f? -- a query, not help
+# ---------------------------------------------------------------------------
+
+
+def test_f_query_with_a_space_reports_the_address() -> None:
+    """Regression: `f? name` printed the whole `f` help table instead."""
+    session, _remote = make_session()
+    session.run("f probe_flag @ 0x4242")
+    assert session.run("f? probe_flag") == ["0x00004242"]
+
+
+def test_f_query_without_a_space_reports_the_address() -> None:
+    """r2 spells it `f?name`; the parser keeps that as a single token."""
+    session, _remote = make_session()
+    session.run("f probe_flag @ 0x4242")
+    assert session.run("f?probe_flag") == ["0x00004242"]
+
+
+def test_f_query_for_a_missing_flag_is_silent() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    assert session.run("f? no_such_flag") == []
+    assert not session.failed
+    assert session.run("f?no_such_flag") == []
+
+
+def test_bare_f_query_still_prints_help() -> None:
+    session, _remote = make_session()
+    lines = session.run("f?")
+    assert lines and lines[0].startswith("Usage: f")
+
+
+def test_help_stays_help_for_commands_that_did_not_opt_in() -> None:
+    """`query_suffix` is opt-in: `pd? foo` must still print the pd table."""
+    session, _remote = make_session()
+    lines = session.run("pd? 5")
+    assert lines and lines[0].startswith("Usage: p[dDiI]")

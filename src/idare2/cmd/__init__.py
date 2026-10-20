@@ -36,6 +36,9 @@ class Command:
     writes: bool = False
     #: Additional rows for the ``?`` help table: ``(token, args, description)``.
     detail: list[tuple[str, str, str]] = field(default_factory=list)
+    #: ``<cmd>? <arg>`` is a *query*, not a help request (r2's ``f?name``).
+    #: A bare ``<cmd>?`` still prints the help table.
+    query_suffix: bool = False
 
     def __post_init__(self) -> None:
         self._literal = _literal_count(self.pattern)
@@ -76,6 +79,7 @@ def command(
     summary: str = "",
     writes: bool = False,
     detail: list[tuple[str, str, str]] | None = None,
+    query_suffix: bool = False,
 ):
     """Register a command implementation."""
 
@@ -88,6 +92,7 @@ def command(
                 summary=summary,
                 writes=writes,
                 detail=list(detail or []),
+                query_suffix=query_suffix,
             )
         )
         return function

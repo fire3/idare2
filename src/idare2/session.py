@@ -249,7 +249,12 @@ class Session:
         if found is None:
             raise _unknown(statement.cmd)
         command, _remainder = found
-        if statement.help:
+        # `f? name` is a query, not a help request -- but only for commands that
+        # opted in, so `pd? foo` keeps printing the pd table, and a bare `f?`
+        # still does too.
+        if statement.help and (
+            not command.query_suffix or not statement.args.strip()
+        ):
             return cmd.help_for(command)
         if command.writes:
             cmd.require_write(self, f"'{statement.cmd}'")

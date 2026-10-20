@@ -23,11 +23,26 @@ FLAG_DETAIL = [
 ]
 
 
-@command("f", usage="[name] [sz] [addr]", summary="manage flags", detail=FLAG_DETAIL)
+@command(
+    "f",
+    usage="[name] [sz] [addr]",
+    summary="manage flags",
+    detail=FLAG_DETAIL,
+    query_suffix=True,
+)
 def flags(session: Session, statement: Statement) -> list[str]:
     session._ensure_flags()
     suffix = statement.cmd[1:]
     rest, count, _offset = numeric_args(session, statement)
+
+    if suffix.startswith("?"):
+        # r2 writes the query without a space: `f?name`.
+        name = suffix[1:]
+        return _query(session, ([name] if name else []) + rest)
+    if statement.help:
+        # The spaced form, `f? name`.  `invoke` only got us here because the
+        # command declared `query_suffix`; a bare `f?` printed the table already.
+        return _query(session, rest)
 
     if suffix == "-":
         return _remove(session, rest)
@@ -35,7 +50,22 @@ def flags(session: Session, statement: Statement) -> list[str]:
     if not rest and suffix in ("", "*", ","):
         return _list(session, suffix)
 
-    return _create(session, rest, count, suffix)
+    return _create(session, rest, count)
+
+
+def _query(session: Session, rest: list[str]) -> list[str]:
+    """``f? name`` / ``f?name`` -- where a flag lives, or nothing if it does not.
+
+    r2 documents `f?flagname` as an existence check and (in 5.5.0) prints
+    neither 1 nor 0, so there is no output to match.  idare2's own help promises
+    the address, which also answers existence: absent == no output.
+    """
+    if not rest:
+        raise UsageError("f? needs a flag name")
+    found = session.flags.lookup(rest[0])
+    if found is None:
+        return []
+    return [fmt_addr(found, addr_width(session.info.get("bits")))]
 
 
 def _list(session: Session, suffix: str) -> list[str]:
@@ -53,7 +83,7 @@ def _list(session: Session, suffix: str) -> list[str]:
     return [f"{fmt_addr(flag.ea, width)} {flag.size:>5} {flag.name}" for flag in rows]
 
 
-def _create(session: Session, rest: list[str], count: int | None, suffix: str) -> list[str]:
+def _create(session: Session, rest: list[str], count: int | None) -> list[str]:
     """``f name [sz] [addr]`` -- r2's order is size first, address second.
 
     ``numeric_args`` cannot do this split: it only recognises a count in the
@@ -64,12 +94,6 @@ def _create(session: Session, rest: list[str], count: int | None, suffix: str) -
     flag of size 0x40000 at the seek, not a flag at 0x40000.
     """
     name = rest[0]
-    if suffix == "?":
-        found = session.flags.lookup(name)
-        if found is None:
-            return []
-        return [fmt_addr(found, addr_width(session.info.get("bits")))]
-
     words = rest[1:]
     size = count if count is not None else 1
     if words and count is None:
