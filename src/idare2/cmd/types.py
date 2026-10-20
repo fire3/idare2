@@ -32,7 +32,7 @@ TYPE_DETAIL = [
 ]
 
 
-@command("t", usage="[pat]", summary="types", detail=TYPE_DETAIL)
+@command("t", usage="[pat]", summary="types", detail=TYPE_DETAIL, json_suffix=True)
 def types(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     suffix = token[1:]

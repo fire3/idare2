@@ -60,7 +60,35 @@ class FakeRemote:
                 "mode": "count",
                 "ea": arguments["ea"],
                 "func": None,
-                "lines": [],
+                "lines": [
+                    {
+                        "ea": arguments["ea"],
+                        "size": 4,
+                        # The wire layer hands these back as bytes, not hex.
+                        "bytes": b"\x00\xb0\xa0\xe3",
+                        "text": "MOV R11, #0",
+                        "comment": "",
+                        "is_call": False,
+                        "is_jump": False,
+                        "targets": [],
+                    }
+                ],
+            },
+            "functions": lambda: [{"ea": 0x1000, "nbbs": 2, "size": 8, "name": "main"}],
+            "blocks": lambda: [{"start": 0x1000, "end": 0x1008, "size": 8, "index": 0}],
+            "function_info": lambda: {
+                "ea": arguments["ea"],
+                "end": arguments["ea"] + 8,
+                "name": "main",
+                "size": 8,
+                "nbbs": 1,
+                "ninstrs": 2,
+                "callers": 0,
+                "callees": 0,
+                "locals": 0,
+                "noreturn": False,
+                "signature": "int main(void)",
+                "flags": 0,
             },
         }
         if operation not in handlers:
@@ -515,3 +543,72 @@ def test_ccr_without_text_names_itself_in_the_error() -> None:
     assert session.run("CCr") == []
     assert session.failed
     assert "CCr needs comment text" in str(session.last_error)
+
+
+# ---------------------------------------------------------------------------
+# -j: JSON becomes the default for the commands that have a `j` form
+# ---------------------------------------------------------------------------
+
+
+def _json_default() -> tuple[Session, FakeRemote]:
+    session, remote = make_session()
+    session.json_default = True
+    return session, remote
+
+
+def test_json_default_switches_pd_to_json() -> None:
+    import json
+
+    session, _remote = _json_default()
+    payload = json.loads("\n".join(session.run("pd 2 @ 0x1000")))
+    assert payload["mode"] == "count"
+
+
+def test_json_default_leaves_commands_without_a_j_form_alone() -> None:
+    """A blanket "append j" would turn `px` into a usage error."""
+    session, _remote = _json_default()
+    lines = session.run("px 8 @ 0x1000")
+    assert lines[0].startswith("- offset -")
+
+
+def test_json_default_is_off_by_default() -> None:
+    session, _remote = make_session()
+    lines = session.run("pd 2 @ 0x1000")
+    assert any("MOV R11, #0" in line for line in lines)
+    assert not lines[0].startswith(("{", "["))
+
+
+def test_json_default_does_not_double_the_suffix() -> None:
+    import json
+
+    session, _remote = _json_default()
+    json.loads("\n".join(session.run("pdj 2 @ 0x1000")))
+
+
+def test_json_default_keeps_help_as_help() -> None:
+    session, _remote = _json_default()
+    assert session.run("pd?")[0].startswith("Usage: p[dDiI]")
+
+
+def test_json_default_switches_afl_and_afi() -> None:
+    import json
+
+    session, _remote = _json_default()
+    assert json.loads("\n".join(session.run("afl")))[0]["name"] == "main"
+    assert json.loads("\n".join(session.run("afi @ 0x1000")))["name"] == "main"
+
+
+def test_afb_and_afi_json_forms_are_reachable() -> None:
+    """`afbj`/`afij` used to fall through to "unsupported function command".
+
+    The JSON branch inside each guard was dead code: the guard compared the
+    whole token, so `afbj != "afb"` never entered the branch that tested for
+    the `j` suffix.
+    """
+    import json
+
+    session, _remote = make_session()
+    blocks = json.loads("\n".join(session.run("afbj @ 0x1000")))
+    assert blocks[0]["start"] == 0x1000
+    info = json.loads("\n".join(session.run("afij @ 0x1000")))
+    assert info["name"] == "main"

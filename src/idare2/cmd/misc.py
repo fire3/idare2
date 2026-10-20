@@ -151,7 +151,7 @@ def quit_(session: Session, statement: Statement) -> list[str]:
     raise QuitRequested(code)
 
 
-@command("b", usage="[n]", summary="block size")
+@command("b", usage="[n]", summary="block size", json_suffix=True)
 def blocksize(session: Session, statement: Statement) -> list[str]:
     # r2 lets the argument be glued to the command (`b+16`, `b-16`), so the
     # suffix may carry the amount as well as the sign.

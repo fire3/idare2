@@ -258,6 +258,16 @@ class Session:
             return cmd.help_for(command)
         if command.writes:
             cmd.require_write(self, f"'{statement.cmd}'")
+        if (
+            self.json_default
+            and command.json_suffix
+            and not statement.cmd.endswith("j")
+        ):
+            # `-j` makes the JSON form the default for the commands that have
+            # one.  Opt-in per command on purpose: `pxj`/`f j` are not tokens
+            # any handler accepts, so a blanket "append j" would turn working
+            # commands into usage errors.
+            statement = replace(statement, cmd=statement.cmd + "j")
         return command.handler(self, statement)
 
     def postprocess(self, lines: list[str], statement: Statement) -> list[str]:

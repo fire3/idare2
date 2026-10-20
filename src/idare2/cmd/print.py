@@ -48,7 +48,13 @@ def _json_mode(token: str) -> bool:
     return token.endswith("j")
 
 
-@command("p[dDiI]", usage="[n]", summary="print disassembly", detail=DISASM_DETAIL)
+@command(
+    "p[dDiI]",
+    usage="[n]",
+    summary="print disassembly",
+    detail=DISASM_DETAIL,
+    json_suffix=True,
+)
 def print_disasm(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     rest, count, offset = numeric_args(session, statement)

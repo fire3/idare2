@@ -40,7 +40,7 @@ CONTEXT = 16
 _KINDS = {"": "text", "x": "bytes", "v": "immediate", "r": "regex"}
 
 
-@command("/", usage="[xvr] [pattern]", summary="search", detail=SEARCH_DETAIL)
+@command("/", usage="[xvr] [pattern]", summary="search", detail=SEARCH_DETAIL, json_suffix=True)
 def search(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
 

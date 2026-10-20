@@ -251,6 +251,35 @@ def test_f_size_and_address_follow_r2_order(session) -> None:
     assert int(size) == 16
 
 
+def test_json_default_switches_the_commands_that_have_a_j_form(session) -> None:
+    """`-j` used to be an empty switch: set on the session, read by nobody."""
+    import json
+
+    session.json_default = True
+    try:
+        session.failed = False
+        payload = json.loads("\n".join(session.run("pd 2 @ 0x00016bb4")))
+        assert payload["lines"][0]["ea"] == 0x00016BB4
+        assert isinstance(json.loads("\n".join(session.run("afl"))), list)
+        # No `j` form: must still render as text, not become a usage error.
+        assert session.run("px 8 @ 0x00016bb4")[0].startswith("- offset -")
+        assert not session.failed, session.last_error
+    finally:
+        session.json_default = False
+
+
+def test_afb_and_afi_json_forms(session) -> None:
+    """Regression: the `afbj`/`afij` guards were unreachable dead branches."""
+    import json
+
+    session.failed = False
+    blocks = json.loads("\n".join(session.run("afbj @ 0x00016bb4")))
+    assert blocks and blocks[0]["start"] == 0x00016BB4
+    info = json.loads("\n".join(session.run("afij @ 0x00016bb4")))
+    assert info["ea"] == 0x00016BB4
+    assert not session.failed, session.last_error
+
+
 def test_bare_cc_lists_comments(session) -> None:
     """`CC` used to be unreachable: it demanded -w, then demanded text."""
     session.failed = False

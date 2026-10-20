@@ -39,6 +39,8 @@ class Command:
     #: ``<cmd>? <arg>`` is a *query*, not a help request (r2's ``f?name``).
     #: A bare ``<cmd>?`` still prints the help table.
     query_suffix: bool = False
+    #: The command has a ``j`` form, so ``-j`` may default it to JSON.
+    json_suffix: bool = False
 
     def __post_init__(self) -> None:
         self._literal = _literal_count(self.pattern)
@@ -80,6 +82,7 @@ def command(
     writes: bool = False,
     detail: list[tuple[str, str, str]] | None = None,
     query_suffix: bool = False,
+    json_suffix: bool = False,
 ):
     """Register a command implementation."""
 
@@ -93,6 +96,7 @@ def command(
                 writes=writes,
                 detail=list(detail or []),
                 query_suffix=query_suffix,
+                json_suffix=json_suffix,
             )
         )
         return function

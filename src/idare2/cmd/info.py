@@ -34,7 +34,7 @@ LISTING_DETAIL = {
 }
 
 
-@command("i", usage="[j]", summary="file information", detail=INFO_DETAIL)
+@command("i", usage="[j]", summary="file information", detail=INFO_DETAIL, json_suffix=True)
 def file_info(session: Session, statement: Statement) -> list[str]:
     payload = session.remote.call("file_info")
     session.info.update({k: v for k, v in payload.items() if v is not None})
@@ -43,7 +43,12 @@ def file_info(session: Session, statement: Statement) -> list[str]:
     return fmt_listing.format_info(payload, session)
 
 
-@command("i[SsEeiz]", usage="[pat]", summary="list segments, symbols, imports, strings")
+@command(
+    "i[SsEeiz]",
+    usage="[pat]",
+    summary="list segments, symbols, imports, strings",
+    json_suffix=True,
+)
 def listing(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     base = token[:2]

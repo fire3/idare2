@@ -42,8 +42,10 @@ FUNCTION_DETAIL = [
     ("af", "", "create a function at the current address"),
     ("afr", "", "re-analyse the current function"),
     ("afi", "", "function details"),
+    ("afij", "", "function details as JSON"),
     ("afl", "[pat]", "list functions"),
     ("afb", "", "list the basic blocks of the current function"),
+    ("afbj", "", "the basic blocks as JSON"),
     ("afc", "", "callers of the current function"),
     ("afC", "", "callees of the current function"),
 ]
@@ -71,7 +73,13 @@ def _await_analysis(session: Session, *, deep: bool) -> list[str]:
     return [f"-- analysis complete{suffix} --"]
 
 
-@command("a[fF]", usage="[?]", summary="function analysis", detail=FUNCTION_DETAIL)
+@command(
+    "a[fF]",
+    usage="[?]",
+    summary="function analysis",
+    detail=FUNCTION_DETAIL,
+    json_suffix=True,
+)
 def function_analysis(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     rest, count, offset = numeric_args(session, statement)
@@ -98,14 +106,17 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
             return [to_json(payload)]
         return with_more(fmt_listing.format_functions(payload, session), meta)
 
-    if token == "afb":
+    # `afbj`/`afij` have to be named explicitly: the JSON branch inside used to
+    # be unreachable because the guard above it compared the whole token, so
+    # `afij` fell through to "unsupported function command".
+    if token in ("afb", "afbj"):
         target = session.resolve(rest[0]) if rest else session.seek
         blocks = session.remote.call("blocks", ea=target)
         if token.endswith("j"):
             return [to_json(blocks)]
         return fmt_disasm.format_blocks(blocks, session)
 
-    if token == "afi":
+    if token in ("afi", "afij"):
         target = session.resolve(rest[0]) if rest else session.seek
         payload = session.remote.call("function_info", ea=target)
         if token.endswith("j"):
@@ -134,7 +145,7 @@ def _rename(session: Session, rest: list[str]) -> list[str]:
     return []
 
 
-@command("a[xX]", usage="[addr]", summary="cross-references")
+@command("a[xX]", usage="[addr]", summary="cross-references", json_suffix=True)
 def xrefs(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     rest, _count, _offset = numeric_args(session, statement)
@@ -146,7 +157,7 @@ def xrefs(session: Session, statement: Statement) -> list[str]:
     return fmt_xrefs.format_xrefs(payload, session)
 
 
-@command("a[bB]", usage="", summary="basic block at the current address")
+@command("a[bB]", usage="", summary="basic block at the current address", json_suffix=True)
 def basic_block(session: Session, statement: Statement) -> list[str]:
     payload = session.remote.call("block_info", ea=session.seek)
     if statement.cmd.endswith("j"):
