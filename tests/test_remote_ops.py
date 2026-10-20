@@ -117,3 +117,121 @@ def test_symbols_pages_like_imports() -> None:
     assert protocol.is_ok(envelope), envelope
     assert [row["name"] for row in envelope["result"]] == ["helper"]
     assert envelope["meta"]["next_offset"] == 2
+
+
+# ---------------------------------------------------------------------------
+# enum.Flag values (afi / sf / sF / Cd.)
+# ---------------------------------------------------------------------------
+
+
+class _Func:
+    start_ea = 0x15E10
+    end_ea = 0x16604
+
+
+class FlagFunctions:
+    """The ``db.functions`` surface ``function_info`` touches."""
+
+    def __init__(self, flags) -> None:
+        self._flags = flags
+
+    def get_at(self, ea: int):
+        return _Func()
+
+    def get_flowchart(self, func):
+        return [_Func(), _Func()]
+
+    def get_instructions(self, func):
+        return range(75)
+
+    def get_callers(self, func):
+        return range(19)
+
+    def get_callees(self, func):
+        return range(64)
+
+    def get_name(self, func) -> str:
+        return "main"
+
+    def is_far(self, func) -> bool:
+        return False
+
+    def does_return(self, func) -> bool:
+        return True
+
+    def get_flags(self, func):
+        return self._flags
+
+
+class FlagBytes:
+    def __init__(self, flags) -> None:
+        self._flags = flags
+
+    def get_flags_at(self, ea: int):
+        return self._flags
+
+
+def test_flag_value_reads_enum_flag() -> None:
+    """``enum.Flag`` has no ``__int__``; ``.value`` does."""
+    import enum
+
+    from idare2.remote.helpers import flag_value
+
+    class Bits(enum.Flag):
+        NONE = 0
+        FRAME = 1
+        THUNK = 2
+
+    assert flag_value(Bits.FRAME | Bits.THUNK) == 3
+    assert flag_value(Bits.NONE) == 0
+    assert flag_value(None) == 0
+    assert flag_value(42) == 42
+    # Anything unconvertible degrades to 0 instead of raising.
+    assert flag_value(object()) == 0
+
+
+def test_function_info_survives_a_flag_enum() -> None:
+    """Regression: ``int(FunctionFlags)`` raised TypeError and killed afi/sf/sF."""
+    import enum
+
+    from idare2.remote.helpers import flag_value  # noqa: F401  (documented pairing)
+
+    class FunctionFlags(enum.Flag):
+        FRAME = 1
+        THUNK = 2
+
+    db = SimpleNamespace(functions=FlagFunctions(FunctionFlags.FRAME))
+    envelope = dispatch.invoke(db, "function_info", {"ea": 0x15E10})
+    assert protocol.is_ok(envelope), envelope
+    payload = envelope["result"]
+    assert payload["flags"] == 1
+    assert payload["ea"] == 0x15E10
+    assert payload["size"] == 0x16604 - 0x15E10
+    assert payload["nbbs"] == 2
+    assert payload["noreturn"] is False
+
+
+def test_function_info_reports_a_zero_flag_set() -> None:
+    import enum
+
+    class FunctionFlags(enum.Flag):
+        FRAME = 1
+
+    db = SimpleNamespace(functions=FlagFunctions(FunctionFlags(0)))
+    envelope = dispatch.invoke(db, "function_info", {"ea": 0x15E10})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"]["flags"] == 0
+
+
+def test_item_flags_no_longer_collapses_to_zero() -> None:
+    """``item_flags`` used to swallow the TypeError and report 0 for every ea."""
+    import enum
+
+    from idare2.remote import helpers
+
+    class ByteFlags(enum.Flag):
+        CODE = 1
+        WORD = 2
+
+    db = SimpleNamespace(bytes=FlagBytes(ByteFlags.CODE | ByteFlags.WORD))
+    assert helpers.item_flags(db, 0x1000) == 3

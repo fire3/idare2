@@ -112,7 +112,7 @@ def function_info(db: Any, ea: int) -> dict[str, Any]:
         "does_return": bool(db.functions.does_return(func)),
         "noreturn": not bool(db.functions.does_return(func)),
         "signature": _signature(db, func),
-        "flags": int(db.functions.get_flags(func) or 0),
+        "flags": helpers.flag_value(db.functions.get_flags(func)),
     }
 
 

@@ -188,9 +188,27 @@ def read_bytes(db: Any, ea: int, count: int) -> bytes:
     return bytes(data)
 
 
+def flag_value(flags: Any) -> int:
+    """Numeric value of an ida-domain flag set.
+
+    ida-domain models flag sets as ``enum.Flag`` -- *not* ``IntFlag`` -- and
+    Python's ``Flag`` deliberately has no ``__int__``, so ``int(flags)`` raises
+    ``TypeError``.  Reading ``.value`` works for ``Flag``, ``IntFlag`` and plain
+    ints alike, which makes this the one place that conversion happens: without
+    it ``afi``/``sf``/``sF`` crash and ``Cd.``'s ``flags`` silently reads 0.
+    """
+    if flags is None:
+        return 0
+    value = getattr(flags, "value", flags)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def item_flags(db: Any, ea: int) -> int:
     try:
-        return int(db.bytes.get_flags_at(ea))
+        return flag_value(db.bytes.get_flags_at(ea))
     except Exception:
         return 0
 

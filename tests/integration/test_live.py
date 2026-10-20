@@ -119,6 +119,32 @@ def test_afl_lists_functions(session) -> None:
     assert all(line.startswith("0x") for line in lines)
 
 
+def test_afi_reports_function_info(session) -> None:
+    """Regression: ``int(FunctionFlags)`` raised TypeError and killed ``afi``."""
+    start = int(session.run("afl")[0].split()[0], 16)
+    session.failed = False
+    lines = session.run(f"afi @ 0x{start:x}")
+    assert not session.failed, session.last_error
+    assert f"addr: 0x{start:08x}" in lines
+    assert any(line.startswith("size: ") and int(line.split()[1]) > 0 for line in lines)
+    assert any(line.startswith("nbbs: ") for line in lines)
+
+
+def test_sf_and_sF_seek(session) -> None:
+    """``sf``/``sF`` both go through ``function_info`` and used to crash there."""
+    start = int(session.run("afl")[0].split()[0], 16)
+    session.failed = False
+
+    session.run(f"s 0x{start:x}")
+    session.run("sf")
+    assert not session.failed, session.last_error
+    assert session.seek == start
+
+    session.run("sF")
+    assert not session.failed, session.last_error
+    assert session.seek > start
+
+
 def test_axt(session) -> None:
     lines = session.run("axt @ 0x00016bb4")
     assert lines
