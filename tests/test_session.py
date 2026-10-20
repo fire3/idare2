@@ -230,3 +230,73 @@ def test_grep_and_pipe_apply_per_statement() -> None:
     out = session.run("?e first~irs")
     assert out == ["first"]
     assert grep.apply_spec(["x"], "x") == ["x"]
+
+
+# ---------------------------------------------------------------------------
+# ph (hash of a block)
+# ---------------------------------------------------------------------------
+
+
+def _block(byte: int, n: int) -> bytes:
+    return bytes([byte]) * n
+
+
+def test_ph_lists_algorithms_when_bare() -> None:
+    """r2 prints the algorithm list for a bare `ph` rather than a digest."""
+    session, _remote = make_session()
+    lines = session.run("ph")
+    assert len(lines) == 1
+    assert "sha256" in lines[0].split()
+    assert "md5" in lines[0].split()
+
+
+def test_ph_digest_is_bare_hex_over_the_block_size() -> None:
+    """r2 prints the digest with no algorithm prefix, sized by `b`."""
+    import hashlib
+
+    session, _remote = make_session()
+    session.blocksize = 8
+    # FakeRemote answers every read_bytes with 0xaa * count.
+    assert session.run("ph sha256") == [hashlib.sha256(_block(0xAA, 8)).hexdigest()]
+
+
+def test_ph_length_is_the_second_positional() -> None:
+    import hashlib
+
+    session, _remote = make_session()
+    session.blocksize = 64
+    assert session.run("ph sha256 8") == [hashlib.sha256(_block(0xAA, 8)).hexdigest()]
+    assert session.run("ph md5 4") == [hashlib.md5(_block(0xAA, 4)).hexdigest()]
+
+
+def test_ph_numeric_first_argument_is_a_length_not_a_symbol() -> None:
+    """`ph 16` must not be resolved as an address named "16"."""
+    import hashlib
+
+    session, _remote = make_session()
+    session.blocksize = 64
+    assert session.run("ph 16") == [hashlib.sha256(_block(0xAA, 16)).hexdigest()]
+
+
+def test_ph_algorithm_is_not_resolved_as_an_address() -> None:
+    """Regression: `target = resolve(rest[0])` used to run before the ph branch."""
+    session, remote = make_session()
+    session.failed = False
+    session.run("ph md5")
+    assert not session.failed, session.last_error
+    assert all(call[0] == "read_bytes" for call in remote.calls)
+
+
+def test_ph_unknown_algorithm_is_an_explicit_error() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    assert session.run("ph nosuch") == []
+    assert session.failed
+    assert "unknown hash algorithm" in str(session.last_error)
+
+
+def test_ph_reads_at_the_seek() -> None:
+    session, remote = make_session()
+    session.seek = 0x2000
+    session.run("ph sha256 4")
+    assert ("read_bytes", {"ea": 0x2000, "count": 4}) in remote.calls

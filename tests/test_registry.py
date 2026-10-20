@@ -20,9 +20,11 @@ def registered() -> None:
         ("pdf", "p[dDiI]"),
         ("pdj", "p[dDiI]"),
         ("pi", "p[dDiI]"),
-        ("px", "p[x8ruvscw]"),
-        ("p8", "p[x8ruvscw]"),
-        ("pwd", "p[x8ruvscw]"),
+        ("px", "p[x8hruvscw]"),
+        ("p8", "p[x8hruvscw]"),
+        ("pwd", "p[x8hruvscw]"),
+        # `ph` was documented in `p?` and in the README but never registered.
+        ("ph", "p[x8hruvscw]"),
         ("s", "s"),
         ("s+", "s"),
         ("sf", "s"),
@@ -45,10 +47,10 @@ def test_unknown_command() -> None:
 
 
 def test_longest_match_wins() -> None:
-    # `pwd` beats the `p[x8ruvscw]` family even though both match.
+    # `pwd` beats the `p[x8hruvscw]` family even though both match.
     found = cmd.lookup("pwd")
     assert found is not None
-    assert found[0].pattern == "p[x8ruvscw]"
+    assert found[0].pattern == "p[x8hruvscw]"
     assert found[1] == "d"
 
 

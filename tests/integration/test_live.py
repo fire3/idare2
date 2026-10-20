@@ -145,6 +145,28 @@ def test_sf_and_sF_seek(session) -> None:
     assert session.seek > start
 
 
+def test_ph_hashes_exactly_what_p8_reads(session) -> None:
+    """`ph` and `p8` must agree byte for byte -- including IDA's ELF fixups.
+
+    Against the raw file the digest would differ (IDA turns the GOT add at
+    0x15e2c into a NOP), so the oracle is idare2's own read path.
+    """
+    import hashlib
+
+    address = "0x00016bb4"
+    hexbytes = session.run(f"p8 64 @ {address}")[0]
+    expected = hashlib.sha256(bytes.fromhex(hexbytes)).hexdigest()
+    assert session.run(f"ph sha256 64 @ {address}") == [expected]
+
+
+def test_ph_is_registered_and_lists_algorithms(session) -> None:
+    session.failed = False
+    lines = session.run("ph")
+    assert not session.failed, session.last_error
+    assert len(lines) == 1
+    assert "sha256" in lines[0].split()
+
+
 def test_axt(session) -> None:
     lines = session.run("axt @ 0x00016bb4")
     assert lines

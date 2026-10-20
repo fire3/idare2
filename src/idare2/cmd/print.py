@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from idare2.cmd import command, numeric_args, with_more
+from idare2.cmd import _NUMERIC, command, numeric_args, with_more
 from idare2.errors import UsageError
 from idare2.fmt import disasm as fmt_disasm
 from idare2.fmt import memory as fmt_memory
@@ -40,7 +40,7 @@ MEMORY_DETAIL = [
     ("ps", "[n]", "string at the current offset"),
     ("psw", "[n]", "wide (UTF-16) string"),
     ("pv", "[n]", "value of the given size (1, 2, 4, 8)"),
-    ("ph", "[algo]", "hash of a block"),
+    ("ph", "[algo] [n]", "hash of a block; bare `ph` lists the algorithms"),
 ]
 
 
@@ -96,10 +96,18 @@ def _decompile(session: Session, target: int, count: int | None, offset: int) ->
     return with_more(list(payload.get("lines") or []), meta)
 
 
-@command("p[x8ruvscw]", usage="[n]", summary="print memory and values", detail=MEMORY_DETAIL)
+@command("p[x8hruvscw]", usage="[n]", summary="print memory and values", detail=MEMORY_DETAIL)
 def print_memory(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     rest, count, _offset = numeric_args(session, statement)
+
+    if token == "ph":
+        # r2 gives `ph`'s positional slot to the *length*, never an address, so
+        # this has to run before `rest[0]` is resolved as one -- otherwise
+        # `ph md5` tries to seek to a symbol called "md5".  `@ addr` still
+        # works because the temporary seek wraps the whole statement.
+        return _hash(session, session.seek, rest, count)
+
     target = session.resolve(rest[0]) if rest else session.seek
     width = session.info.get("bits") or 32
 
@@ -119,9 +127,6 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
         size = _value_width(token, width)
         payload = session.remote.call("read_value", ea=target, width=size)
         return fmt_memory.format_value(payload, session)
-
-    if token == "ph":
-        return _hash(session, target, count or 256, rest)
 
     if token.startswith("px") and token not in ("px", "pxw", "pxq", "pxd", "pxu"):
         raise UsageError(f"unsupported print modifier '{token[2:]}' (see px?)")
@@ -165,14 +170,60 @@ def _value_width(token: str, bits: Any) -> int:
     return 8 if bits == 64 else 4
 
 
-def _hash(session: Session, target: int, size: int, rest: list[str]) -> list[str]:
+#: What bare ``ph`` advertises.  Deliberately the CPython-guaranteed set rather
+#: than r2's full list (crc32, xxhash, ...): idare2 delegates to ``hashlib``,
+#: and promising a hash it cannot compute would be worse than a short list.
+_HASH_ALGORITHMS = (
+    "md5",
+    "sha1",
+    "sha224",
+    "sha256",
+    "sha384",
+    "sha512",
+    "sha3_224",
+    "sha3_256",
+    "sha3_384",
+    "sha3_512",
+    "blake2b",
+    "blake2s",
+)
+
+
+def _hash(
+    session: Session, ea: int, rest: list[str], count: int | None
+) -> list[str]:
+    """``ph [algo] [n]`` over the block at the seek.
+
+    Matches r2 where it matters: the digest is **bare hex** (no algorithm
+    prefix), the default length is the block size, and a bare ``ph`` prints the
+    algorithm list.  An unknown algorithm is an explicit error rather than r2's
+    empty output, which reads as "no data here".
+    """
     import hashlib
 
-    algorithm = rest[1] if len(rest) > 1 else "sha256"
+    words = list(rest)
+    if not words and count is None:
+        return [" ".join(_HASH_ALGORITHMS)]
+
+    algorithm = "sha256"
+    if words and not _NUMERIC.match(words[0]):
+        algorithm = words.pop(0)
+    size = count
+    if words:
+        size = session.eval(words.pop(0))
+    if words:
+        raise UsageError(f"ph: unexpected argument {words[0]!r} (see ph?)")
+
     try:
         digest = hashlib.new(algorithm)
     except ValueError:
-        raise UsageError(f"unknown hash algorithm {algorithm!r}") from None
-    payload = session.remote.call("read_bytes", ea=target, count=size)
+        known = " ".join(_HASH_ALGORITHMS)
+        raise UsageError(
+            f"unknown hash algorithm {algorithm!r}; algorithms: {known}"
+        ) from None
+
+    payload = session.remote.call(
+        "read_bytes", ea=ea, count=session.blocksize if size is None else size
+    )
     digest.update(bytes(payload.get("data") or b""))
-    return [f"{algorithm} {digest.hexdigest()}"]
+    return [digest.hexdigest()]
