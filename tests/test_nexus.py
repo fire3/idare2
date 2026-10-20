@@ -83,3 +83,32 @@ def test_the_handle_is_closed_on_the_way_out(stubbed_nexus) -> None:
     with connect(_target(), timeout=1, linger=3600):
         pass
     assert stubbed_nexus.closed
+
+
+def test_processor_hint_selects_the_arm_subtype() -> None:
+    from idare2.nexus import _processor_hint
+
+    assert _processor_hint("arm", 32) == "arm:ARMv7"
+    assert _processor_hint("arm", 64) == "arm:ARMv8"
+    assert _processor_hint("arm", None) == "arm"
+    assert _processor_hint("arm:ARMv7", 64) == "arm:ARMv7"
+
+
+def test_connect_applies_import_hints_before_analysis(stubbed_nexus, monkeypatch) -> None:
+    import idare2.nexus as nexus
+
+    seen = []
+    monkeypatch.setattr(
+        nexus, "_apply_import_hints", lambda handle, target: seen.append((handle, target))
+    )
+    target = Target(path="/nonexistent-on-purpose", processor="arm", bits=32)
+    with connect(target, timeout=1, linger=3600):
+        pass
+    assert seen == [(stubbed_nexus, target)]
+
+
+def test_hints_are_not_requested_for_an_attached_record() -> None:
+    import idare2.nexus as nexus
+
+    target = Target(record_id="1234-abcd", processor="arm", bits=32)
+    assert not nexus._import_hints_requested(target)

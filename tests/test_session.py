@@ -11,7 +11,7 @@ import pytest
 from idare2 import filter as grep
 from idare2 import parser
 from idare2.config import Config
-from idare2.errors import CommandError, ReadOnlyError, UnknownCommand
+from idare2.errors import CommandError, ReadOnlyError, UnknownCommand, UsageError
 from idare2.session import Session
 
 
@@ -21,6 +21,18 @@ class FakeRemote:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
         self.fail: set[str] = set()
+        self.search_hits = [0x1000, 0x1010]
+        self.read_floor: int | None = None
+
+    def _read_bytes(self, arguments: dict):
+        ea = arguments["ea"]
+        if self.read_floor is not None and ea < self.read_floor:
+            raise CommandError(f"read outside mapped segment at 0x{ea:x}")
+        return {
+            "ea": ea,
+            "count": arguments["count"],
+            "data": b"\xaa" * arguments["count"],
+        }
 
     def call(self, operation: str, **arguments):
         self.calls.append((operation, arguments))
@@ -32,13 +44,16 @@ class FakeRemote:
                 {"ea": 0x2000, "name": "helper"},
             ],
             "read_value": lambda: {"ea": arguments["ea"], "width": 4, "value": 0x11223344},
-            "read_bytes": lambda: {
-                "ea": arguments["ea"],
-                "count": arguments["count"],
-                "data": b"\xaa" * arguments["count"],
+            "read_bytes": lambda: self._read_bytes(arguments),
+            "search": lambda: {
+                "hits": list(self.search_hits),
+                "kind": "bytes",
+                "pattern": "aa",
             },
-            "search": lambda: {"hits": [0x1000, 0x1010], "kind": "bytes", "pattern": "aa"},
             "search_ranges": lambda: [{"start": 0x1000, "end": 0x2000, "name": ".text"}],
+            "segments": lambda: [
+                {"vaddr": 0x1000, "vsize": 0x1000, "paddr": 0x4000, "name": ".text"}
+            ],
             "patch_bytes": lambda: {"ea": arguments["ea"], "size": 2},
             "patch_many": lambda: {"patches": len(arguments["patches"])},
             "set_name": lambda: {"ea": arguments["ea"], "name": arguments["name"]},
@@ -730,3 +745,122 @@ def test_s_still_seeks_to_a_name() -> None:
     session, _remote = make_session()
     session.run("s helper")
     assert session.seek == 0x2000
+
+
+# ---------------------------------------------------------------------------
+# $ variables, ? commands and the i/w command families
+# ---------------------------------------------------------------------------
+
+
+def test_dollar_assignment_and_query_are_distinct_commands() -> None:
+    session, _remote = make_session()
+    assert session.run("$foo=0x1234") == []
+    assert session.run("$foo") == ["0x00001234"]
+    assert session.run("$foo-") == []
+    session.failed = False
+    assert session.run("$foo") == []
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+
+
+def test_question_set_last_result() -> None:
+    session, _remote = make_session()
+    assert session.run("?= 5") == []
+    assert session.run("?v $?") == ["0x5"]
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("?h abc", ["0x0ad5a985"]),
+        ("?l abc", ["3"]),
+        ("?f 5 abc", ["AC"]),
+        ("?s 1 5 2", ["1 3 5 "]),
+    ],
+)
+def test_question_value_commands(command: str, expected: list[str]) -> None:
+    session, _remote = make_session()
+    assert session.run(command) == expected
+
+
+def test_question_version_is_not_the_generic_help() -> None:
+    session, _remote = make_session()
+    lines = session.run("?V")
+    assert lines[0].startswith("idare2")
+    assert not any(line.startswith("Usage: ?") for line in lines)
+
+
+@pytest.mark.parametrize("command", ["?d", "?d 5"])
+def test_unsupported_question_command_is_an_error(command: str) -> None:
+    session, _remote = make_session()
+    assert session.run(command) == []
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported question command" in str(session.last_error)
+
+
+@pytest.mark.parametrize(("command", "expected"), [("wi1+1", "45"), ("wi1-1", "43"), ("wi2+ 1", "4533"), ("wi4- 1", "43332211")])
+def test_write_increment_forms(command: str, expected: str) -> None:
+    session, remote = make_session()
+    assert session.run(command) == []
+    patches = [arguments for name, arguments in remote.calls if name == "patch_bytes"]
+    assert patches[-1]["data"] == expected
+
+
+def test_bare_write_increment_is_a_noop() -> None:
+    session, remote = make_session()
+    assert session.run("wi1") == []
+    assert not session.failed
+    assert "patch_bytes" not in remote.operations
+
+
+def test_write_increment_requires_a_width() -> None:
+    session, _remote = make_session()
+    assert session.run("wi+1") == []
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [("w6d YWJj", "616263"), ("w6e abc", "59574a6a"), ("w6x 616263", "59574a6a")],
+)
+def test_base64_write_modes(command: str, expected: str) -> None:
+    session, remote = make_session()
+    assert session.run(command) == []
+    patches = [arguments for name, arguments in remote.calls if name == "patch_bytes"]
+    assert patches[-1]["data"] == expected
+
+
+@pytest.mark.parametrize("command", ["w6 !!!", "w6 hello", "w6d !!!"])
+def test_invalid_base64_write_is_a_usage_error(command: str) -> None:
+    session, remote = make_session()
+    assert session.run(command) == []
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "w6" in str(session.last_error)
+    assert "patch_bytes" not in remote.operations
+
+
+@pytest.mark.parametrize("command", ["ir", "ic", "iee", "iic", "izz"])
+def test_unimplemented_info_commands_do_not_fall_through(command: str) -> None:
+    session, _remote = make_session()
+    assert session.run(command) == []
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported information command" in str(session.last_error)
+
+
+def test_iM_reports_main_virtual_and_physical_addresses() -> None:
+    session, _remote = make_session()
+    assert session.run("iM") == ["vaddr=0x00001000 paddr=0x00004000"]
+
+
+def test_text_search_context_is_clamped_to_the_mapped_segment() -> None:
+    session, remote = make_session()
+    remote.search_hits = [0x1004]
+    remote.read_floor = 0x1000
+    lines = session.run("/ needle")
+    assert lines == [f'0x00001004 hit0_0 "{"." * 20}"']
+    reads = [arguments for name, arguments in remote.calls if name == "read_bytes"]
+    assert reads[-1] == {"ea": 0x1000, "count": 0x14}

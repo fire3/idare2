@@ -154,10 +154,21 @@ def _context(session: Session, ea: int, kind: str, width: int | None) -> str:
             return ""
         return bytes(payload.get("data") or b"").hex()
 
+    start = max(ea - CONTEXT, 0)
+    end = ea + CONTEXT
+    for segment in session.search_segments():
+        segment_start = int(segment["start"])
+        segment_end = int(segment["end"])
+        if segment_start <= ea < segment_end:
+            # Reading a fixed ea-16 window crosses the preceding segment for a
+            # hit near its start.  IDA correctly rejects that short/foreign read,
+            # which used to make every such text hit render as "".
+            start = max(start, segment_start)
+            end = min(end, segment_end)
+            break
+
     try:
-        payload = session.remote.call(
-            "read_bytes", ea=max(ea - CONTEXT, 0), count=CONTEXT * 2
-        )
+        payload = session.remote.call("read_bytes", ea=start, count=max(end - start, 1))
     except Exception:
         return '""'
     raw = bytes(payload.get("data") or b"")

@@ -223,7 +223,8 @@ def _target_from(options: argv_parser.Options) -> Target:
         spawn=options.spawn,
         backend=options.backend,
         processor=options.arch,
-        image_base=_parse_address(options.base) if options.base else None,
+        bits=_parse_bits(options.bits) if options.bits else None,
+        image_base=_parse_base(options.base) if options.base else None,
         auto_analysis=not options.no_analysis,
         save_on_close=bool(options.save_on_close),
         readonly=options.readonly,
@@ -235,6 +236,25 @@ def _parse_address(text: str) -> int:
         return int(text, 0)
     except ValueError:
         raise UsageError(f"expected a number, got {text!r}") from None
+
+
+def _parse_base(text: str) -> int:
+    value = _parse_address(text)
+    if value < 0:
+        raise UsageError(f"load base must be non-negative, got {text!r}")
+    if value % 16:
+        raise UsageError(f"load base must be 16-byte aligned, got {text!r}")
+    return value
+
+
+def _parse_bits(text: str) -> int:
+    try:
+        bits = int(text, 0)
+    except ValueError:
+        raise UsageError(f"expected a bit width, got {text!r}") from None
+    if bits not in (16, 32, 64):
+        raise UsageError(f"-b must be 16, 32 or 64, not {bits}")
+    return bits
 
 
 def _run_scripts(session: Session, options: argv_parser.Options) -> int | None:

@@ -87,6 +87,16 @@ def command(
     """Register a command implementation."""
 
     def decorate(function: Handler) -> Handler:
+        # A duplicate pattern is always a bug: prefix dispatch silently keeps
+        # whichever registration comes first (or last, for an exact tie), which
+        # makes one implementation unreachable without any visible error.
+        for existing in REGISTRY:
+            if existing.pattern == pattern:
+                raise ValueError(
+                    f"duplicate command pattern {pattern!r}: "
+                    f"{existing.handler.__module__}.{existing.handler.__name__} and "
+                    f"{function.__module__}.{function.__name__}"
+                )
         REGISTRY.append(
             Command(
                 pattern=pattern,

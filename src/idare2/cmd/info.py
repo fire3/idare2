@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from idare2.cmd import command, numeric_args, with_more
+from idare2.errors import UsageError
 from idare2.fmt import listing as fmt_listing
 from idare2.fmt import to_json
 
@@ -22,7 +23,10 @@ INFO_DETAIL = [
     ("iz", "[pat]", "strings"),
     ("ie", "", "entry points"),
     ("iE", "", "exports"),
+    ("iM", "", "main address"),
 ]
+
+FILE_TOKENS = frozenset({"i", "iI", "ij"})
 
 LISTING_DETAIL = {
     "iS": [("iS", "", "segments with permissions"), ("iSj", "", "segments as JSON")],
@@ -31,11 +35,18 @@ LISTING_DETAIL = {
     "iz": [("iz", "[pat]", "strings"), ("izj", "[pat]", "strings as JSON")],
     "ie": [("ie", "", "entry points"), ("iej", "", "entry points as JSON")],
     "iE": [("iE", "", "exports"), ("iEj", "", "exports as JSON")],
+    "iM": [("iM", "", "main address")],
 }
+
+LISTING_TOKENS = frozenset(
+    token for rows in LISTING_DETAIL.values() for token, _args, _description in rows
+)
 
 
 @command("i", usage="[j]", summary="file information", detail=INFO_DETAIL, json_suffix=True)
 def file_info(session: Session, statement: Statement) -> list[str]:
+    if statement.cmd not in FILE_TOKENS:
+        raise UsageError(f"unsupported information command '{statement.cmd}' (see i?)")
     payload = session.remote.call("file_info")
     session.info.update({k: v for k, v in payload.items() if v is not None})
     if statement.cmd.endswith("j") or statement.cmd == "ij":
@@ -44,15 +55,21 @@ def file_info(session: Session, statement: Statement) -> list[str]:
 
 
 @command(
-    "i[SsEeiz]",
+    "i[SsEeizM]",
     usage="[pat]",
     summary="list segments, symbols, imports, strings",
     json_suffix=True,
 )
 def listing(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
+    if token not in LISTING_TOKENS:
+        raise UsageError(f"unsupported information command '{token}' (see i?)")
     base = token[:2]
     as_json = token.endswith("j")
+
+    if base == "iM":
+        return _main_address(session)
+
     rest, count, offset = numeric_args(session, statement)
     pattern = rest[0] if rest else None
     meta = None
@@ -88,3 +105,27 @@ def listing(session: Session, statement: Statement) -> list[str]:
         "iE": fmt_listing.format_entries,
     }[base]
     return with_more(formatter(rows, session), meta)
+
+
+def _main_address(session: Session) -> list[str]:
+    """``iM`` -- main (or the entry point when no ``main`` symbol exists)."""
+    rows, _meta = session.remote.call_with_meta(
+        "symbols", pattern="main", offset=0, count=-1
+    )
+    target = next((int(row["ea"]) for row in rows if row["name"] == "main"), None)
+    if target is None:
+        target = int(session.info.get("start_ip") or 0)
+        if target >= (1 << 63):
+            target = 0
+    if not target:
+        raise UsageError("cannot locate main or an entry point")
+
+    paddr = target
+    for segment in session.remote.call("segments"):
+        start = int(segment["vaddr"])
+        end = start + int(segment["vsize"])
+        base = segment.get("paddr")
+        if base is not None and start <= target < end:
+            paddr = int(base) + (target - start)
+            break
+    return [f"vaddr=0x{target:08x} paddr=0x{paddr:08x}"]

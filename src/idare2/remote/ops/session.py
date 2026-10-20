@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from idare2 import protocol
+from idare2.remote import helpers
 from idare2.remote.dispatch import op
 
 
@@ -20,9 +22,9 @@ def open_summary(db: Any) -> dict[str, Any]:
         "bitness": db.bitness,
         "format": db.format,
         "endian": "big" if ida_ida.inf_is_be() else "little",
-        "base_address": db.base_address,
+        "base_address": helpers.base_address(db),
         "filesize": db.filesize,
-        "start_ip": db.start_ip,
+        "start_ip": helpers.start_ip(db),
         "minimum_ea": db.minimum_ea,
         "maximum_ea": db.maximum_ea,
         "execution_mode": str(db.execution_mode),
@@ -34,6 +36,51 @@ def open_summary(db: Any) -> dict[str, Any]:
         "function_count": _count(db.functions.get_all()),
         "segment_count": _count(db.segments.get_all()),
     }
+
+
+@op("apply_import_hints", writes=True)
+def apply_import_hints(
+    db: Any, bits: int | None = None, entry: int | None = None
+) -> dict[str, Any]:
+    """Apply raw-binary import hints before autoanalysis starts.
+
+    IDA Nexus has no ``bits`` field in ``DatabaseOpenOptions`` (IDA's own
+    ``-b`` is a load address).  Changing a segment's addressing mode after the
+    loader has guessed the width is supported through ida_segment, but it
+    deletes instructions, so idare2 opens hinted databases with analysis paused
+    and calls this operation before draining it.
+    """
+    import ida_auto
+    import ida_ida
+    import ida_segment
+
+    if not helpers._is_binary(db):
+        return {"applied": False, "reason": "not a raw binary"}
+    if bits is not None and bits not in (16, 32, 64):
+        helpers.fail(protocol.BAD_ARGS, f"bits must be 16, 32 or 64, not {bits}")
+
+    segments = list(db.segments.get_all())
+    if bits is not None:
+        ida_ida.inf_set_app_bitness(bits)
+        # ida_segment wants the encoded addressing mode (0/1/2), while
+        # inf_set_app_bitness() wants the actual width (16/32/64).
+        addressing = {16: 0, 32: 1, 64: 2}[bits]
+        for segment in segments:
+            if not ida_segment.set_segment_addressing(int(segment.start_ea), addressing):
+                helpers.fail(
+                    protocol.IDA_ERROR,
+                    f"IDA refused to set segment 0x{int(segment.start_ea):x} to {bits}-bit",
+                )
+
+    start = entry if entry is not None else helpers.start_ip(db)
+    if start is not None and not ida_ida.inf_set_start_ip(start):
+        helpers.fail(protocol.IDA_ERROR, f"IDA refused entry point 0x{start:x}")
+    if start is not None:
+        # set_segment_addressing() deletes the instructions the loader may have
+        # created. Queue the entry point again so the analysis that connect()
+        # drains immediately afterwards starts from a code address.
+        ida_auto.auto_mark(start, ida_auto.AU_CODE)
+    return {"applied": True, "bits": bits, "start_ip": start}
 
 
 def _hexrays_available(ida_hexrays: Any) -> bool:

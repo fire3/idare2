@@ -109,16 +109,26 @@ def _terminator(raw: bytes, unit: int) -> int:
 
 
 @op("data_info")
-def data_info(db: Any, ea: int) -> dict[str, Any]:
-    """Size and kind of the item at ``ea`` (``Cd.``, ``pA``)."""
-    size = db.bytes.get_data_size_at(ea)
-    flags = helpers.item_flags(db, ea)
+def data_info(db: Any, ea: int, size: int = 0) -> dict[str, Any]:
+    """Size and kind of the item at ``ea`` (``Cd.``, ``pA``).
+
+    There used to be a second ``data_info`` in ``comments.py``.  Because both
+    modules registered the same op name, import order silently selected the
+    smaller implementation, so ``Cd.`` never saw the byte/word/dword flags.
+    This is the single handler for both callers.
+    """
+    item_size = db.bytes.get_data_size_at(ea)
     return {
         "ea": ea,
-        "size": int(size) if size else 0,
+        "size": int(item_size) if item_size else size,
         "is_code": bool(db.bytes.is_code_at(ea)),
         "is_data": bool(db.bytes.is_data_at(ea)),
         "is_unknown": bool(db.bytes.is_unknown_at(ea)),
         "is_string": bool(db.bytes.is_string_literal_at(ea)),
-        "flags": flags,
+        "is_struct": bool(db.bytes.is_struct_at(ea)),
+        "is_byte": bool(db.bytes.is_byte_at(ea)),
+        "is_word": bool(db.bytes.is_word_at(ea)),
+        "is_dword": bool(db.bytes.is_dword_at(ea)),
+        "is_qword": bool(db.bytes.is_qword_at(ea)),
+        "flags": helpers.item_flags(db, ea),
     }

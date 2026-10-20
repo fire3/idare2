@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from idare2 import protocol
+from idare2.remote.helpers import RemoteError
 
 #: op name -> function
 HANDLERS: dict[str, Callable[..., Any]] = {}
@@ -25,6 +26,16 @@ def op(name: str, *, writes: bool = False):
     """
 
     def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+        # Dict assignment used to let a later module silently replace an
+        # earlier handler.  That is never intentional: the client keeps calling
+        # the operation name, so the loser becomes unreachable.
+        if name in HANDLERS:
+            previous = HANDLERS[name]
+            raise ValueError(
+                f"duplicate remote operation {name!r}: "
+                f"{previous.__module__}.{previous.__name__} and "
+                f"{function.__module__}.{function.__name__}"
+            )
         function._ire2_writes = writes  # type: ignore[attr-defined]
         HANDLERS[name] = function
         return function
@@ -45,6 +56,8 @@ def _create_undo_point(name: str) -> None:
 
 def _translate(exc: BaseException) -> dict[str, Any]:
     """Map an ida-domain / IDAPython exception onto an envelope error."""
+    if isinstance(exc, RemoteError):
+        return protocol.build_error(exc.code, str(exc), exc.data)
     name = type(exc).__name__
     message = f"{name}: {exc}"
     if name == "InvalidEAError":

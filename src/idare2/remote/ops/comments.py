@@ -84,21 +84,3 @@ def set_data_type(db: Any, ea: int, kind: str, count: int = 1) -> dict[str, Any]
         helpers.fail(protocol.BAD_ARGS, "count must be positive")
     ok = maker(ea, count)
     return {"ea": ea, "kind": kind, "count": count, "created": bool(ok)}
-
-
-@op("data_info")
-def data_info(db: Any, ea: int, size: int = 0) -> dict[str, Any]:
-    """What kind of item sits at ``ea`` (``Cd.``, ``Cf`` lookup)."""
-    return {
-        "ea": ea,
-        "size": int(db.bytes.get_data_size_at(ea) or 0) or size,
-        "is_code": bool(db.bytes.is_code_at(ea)),
-        "is_data": bool(db.bytes.is_data_at(ea)),
-        "is_unknown": bool(db.bytes.is_unknown_at(ea)),
-        "is_string": bool(db.bytes.is_string_literal_at(ea)),
-        "is_struct": bool(db.bytes.is_struct_at(ea)),
-        "is_byte": bool(db.bytes.is_byte_at(ea)),
-        "is_word": bool(db.bytes.is_word_at(ea)),
-        "is_dword": bool(db.bytes.is_dword_at(ea)),
-        "is_qword": bool(db.bytes.is_qword_at(ea)),
-    }

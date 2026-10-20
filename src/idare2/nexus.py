@@ -45,6 +45,7 @@ class Target:
     backend: str = "any"
     #: Import hints, applied only when Nexus has to create the database.
     processor: str | None = None
+    bits: int | None = None
     image_base: int | None = None
     auto_analysis: bool = True
     save_on_close: bool = False
@@ -151,14 +152,18 @@ def open_handle(selection: Any, target: Target, *, timeout: float, linger: float
     from ida_nexus import DatabaseHandle, DatabaseOpenOptions, NexusConnectionError
 
     if isinstance(selection, str):
+        hints = _import_hints_requested(target)
         return DatabaseHandle.open(
             selection,
             options=DatabaseOpenOptions(
                 startup_timeout=timeout,
                 keepalive=linger,
                 spawn=target.spawn,
-                auto_analysis=target.auto_analysis,
-                processor=target.processor,
+                # Import hints must be applied before analysis.  The worker
+                # starts quiet, idare2 applies the raw-binary bitness/entry,
+                # and connect() drains analysis afterwards.
+                auto_analysis=target.auto_analysis and not hints,
+                processor=_processor_hint(target.processor, target.bits),
                 image_base=target.image_base,
             ),
         )
@@ -258,6 +263,7 @@ def connect(target: Target, *, timeout: float, linger: float, wait: str = "wait"
     try:
         selection = resolve(target)
         handle = _open_with_retry(selection, target, timeout=timeout, linger=linger)
+        _apply_import_hints(handle, target)
         await_analysis(handle, timeout, wait)
         yield handle
     except (Idare2Error, QuitRequested):
@@ -274,3 +280,32 @@ def connect(target: Target, *, timeout: float, linger: float, wait: str = "wait"
             if linger <= 0:
                 shutdown_if_ours(handle, save=not target.readonly)
             handle.close()
+
+
+def _import_hints_requested(target: Target) -> bool:
+    return bool(
+        not target.record_id
+        and (target.processor or target.bits is not None or target.image_base is not None)
+    )
+
+
+def _processor_hint(processor: str | None, bits: int | None) -> str | None:
+    """Choose the processor subtype that matches a requested bitness."""
+    if not processor or bits is None or ":" in processor:
+        return processor
+    if processor.lower() == "arm":
+        if bits == 32:
+            return f"{processor}:ARMv7"
+        if bits == 64:
+            return f"{processor}:ARMv8"
+    return processor
+
+
+def _apply_import_hints(handle: Any, target: Target) -> None:
+    if not _import_hints_requested(target):
+        return
+    from idare2.rpc import Remote
+
+    Remote(handle, timeout=60).call(
+        "apply_import_hints", bits=target.bits, entry=target.image_base
+    )

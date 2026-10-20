@@ -63,6 +63,78 @@ def test_dispatcher_rejects_unknown_keyword() -> None:
     assert "unexpected keyword argument" in envelope["error"]["message"]
 
 
+def test_dispatcher_preserves_handler_error_codes(monkeypatch) -> None:
+    from idare2.remote import helpers
+
+    def failing(db):
+        helpers.fail(protocol.NOT_FOUND, "missing thing", {"ea": 0x1234})
+
+    monkeypatch.setitem(dispatch.HANDLERS, "test_failing_op", failing)
+    envelope = dispatch.invoke(SimpleNamespace(), "test_failing_op", {})
+    assert not protocol.is_ok(envelope)
+    assert envelope["error"] == {
+        "code": protocol.NOT_FOUND,
+        "message": "missing thing",
+        "data": {"ea": 0x1234},
+    }
+
+
+def test_duplicate_remote_operation_fails_loudly() -> None:
+    with pytest.raises(ValueError, match="duplicate remote operation 'imports'"):
+        dispatch.op("imports")(lambda db: None)
+
+
+def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None:
+    import sys
+
+    calls = []
+    ida_ida = SimpleNamespace(
+        inf_set_app_bitness=lambda bits: calls.append(("bits", bits)),
+        inf_set_start_ip=lambda ea: calls.append(("entry", ea)) or True,
+    )
+    ida_segment = SimpleNamespace(
+        set_segment_addressing=lambda ea, mode: calls.append(("segment", ea, mode)) or True
+    )
+    ida_auto = SimpleNamespace(
+        AU_CODE=1, auto_mark=lambda ea, kind: calls.append(("mark", ea, kind))
+    )
+    monkeypatch.setitem(sys.modules, "ida_ida", ida_ida)
+    monkeypatch.setitem(sys.modules, "ida_segment", ida_segment)
+    monkeypatch.setitem(sys.modules, "ida_auto", ida_auto)
+    db = SimpleNamespace(
+        format="Binary file",
+        segments=SimpleNamespace(get_all=lambda: [SimpleNamespace(start_ea=0x1000)]),
+    )
+
+    envelope = dispatch.invoke(
+        db, "apply_import_hints", {"bits": 32, "entry": 0x1000}
+    )
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {"applied": True, "bits": 32, "start_ip": 0x1000}
+    assert calls == [
+        ("bits", 32),
+        ("segment", 0x1000, 1),
+        ("entry", 0x1000),
+        ("mark", 0x1000, 1),
+    ]
+
+
+def test_function_info_skips_hexrays_when_unavailable(monkeypatch) -> None:
+    import sys
+
+    from idare2.remote.ops.analysis import _local_count
+
+    monkeypatch.setitem(
+        sys.modules, "ida_hexrays", SimpleNamespace(init_hexrays_plugin=lambda: False)
+    )
+    db = SimpleNamespace(
+        functions=SimpleNamespace(
+            get_local_variables=lambda func: pytest.fail("decompiler must not run")
+        )
+    )
+    assert _local_count(db, object()) == 0
+
+
 def test_imports_accepts_the_client_offset_and_count() -> None:
     """``ii`` passes offset/count; the handler must take them (was TypeError)."""
     envelope = dispatch.invoke(

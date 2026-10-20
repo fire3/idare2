@@ -188,6 +188,32 @@ def read_bytes(db: Any, ea: int, count: int) -> bytes:
     return bytes(data)
 
 
+def _is_binary(db: Any) -> bool:
+    return "binary" in str(getattr(db, "format", "") or "").lower()
+
+
+def base_address(db: Any) -> int | None:
+    """IDA's base address, with raw binaries falling back to their first EA."""
+    base = getattr(db, "base_address", None)
+    if base:
+        return int(base)
+    if _is_binary(db) and db.minimum_ea is not None:
+        return int(db.minimum_ea)
+    return int(base) if base is not None else None
+
+
+def start_ip(db: Any) -> int | None:
+    """The entry point, treating a raw binary without one as load-at-first-EA."""
+    import ida_idaapi
+
+    value = getattr(db, "start_ip", None)
+    if value is None or int(value) == ida_idaapi.BADADDR:
+        if _is_binary(db) and db.minimum_ea is not None:
+            return int(db.minimum_ea)
+        return None
+    return int(value)
+
+
 def flag_value(flags: Any) -> int:
     """Numeric value of an ida-domain flag set.
 

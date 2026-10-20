@@ -118,6 +118,16 @@ def function_info(db: Any, ea: int) -> dict[str, Any]:
 
 def _local_count(db: Any, func: Any) -> int:
     """Hex-Rays local count, or 0 when the decompiler is unavailable."""
+    # Calling ida-domain's get_local_variables() without checking this first
+    # hard-crashes the worker on processors with no Hex-Rays support (m68k,
+    # s390x, SH4, SPARC, ...).  It does not raise a Python exception.
+    try:
+        import ida_hexrays
+
+        if not ida_hexrays.init_hexrays_plugin():
+            return 0
+    except Exception:
+        return 0
     try:
         variables = db.functions.get_local_variables(func)
         return len(list(variables)) if variables is not None else 0

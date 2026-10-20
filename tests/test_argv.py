@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from idare2 import argv
+from idare2 import argv, cli
 from idare2.errors import UsageError
 
 
@@ -53,6 +53,25 @@ def test_eval_requires_a_value() -> None:
 def test_import_hints() -> None:
     options = argv.parse(["-a", "arm", "-b", "32", "-B", "0x8000"])
     assert (options.arch, options.bits, options.base) == ("arm", "32", "0x8000")
+
+
+def test_import_hints_become_typed_target_fields() -> None:
+    target = cli._target_from(
+        argv.parse(["-a", "arm", "-b", "32", "-B", "0x8000", "firmware.bin"])
+    )
+    assert (target.processor, target.bits, target.image_base) == ("arm", 32, 0x8000)
+
+
+@pytest.mark.parametrize("bits", ["0", "24", "128", "not-a-number"])
+def test_invalid_bitness_is_a_usage_error(bits: str) -> None:
+    with pytest.raises(UsageError, match="bit width|-b must be"):
+        cli._target_from(argv.parse(["-b", bits, "firmware.bin"]))
+
+
+@pytest.mark.parametrize(("base", "message"), [("0x1001", "16-byte aligned"), ("-16", "non-negative")])
+def test_invalid_load_base_is_a_usage_error(base: str, message: str) -> None:
+    with pytest.raises(UsageError, match=message):
+        cli._target_from(argv.parse(["-B", base, "firmware.bin"]))
 
 
 def test_m_is_an_alias_for_base() -> None:

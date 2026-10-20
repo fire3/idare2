@@ -30,7 +30,7 @@ def registered() -> None:
         ("sf", "s"),
         ("afl", "a[fF]"),
         ("axt", "a[xX]"),
-        ("iS", "i[SsEeiz]"),
+        ("iS", "i[SsEeizM]"),
         ("ij", "i"),
         ("f", "f"),
         ("q", "q"),
@@ -58,8 +58,8 @@ def test_pattern_matching() -> None:
     assert cmd.match_pattern("p[dD]", "pd") == 2
     assert cmd.match_pattern("p[dD]", "pD") == 2
     assert cmd.match_pattern("p[dD]", "px") is None
-    assert cmd.match_pattern("i[SsEeiz]", "iS") == 2
-    assert cmd.match_pattern("i[SsEeiz]", "ij") is None
+    assert cmd.match_pattern("i[SsEeizM]", "iS") == 2
+    assert cmd.match_pattern("i[SsEeizM]", "ij") is None
 
 
 def test_help_is_generated_from_the_pattern() -> None:
@@ -81,3 +81,13 @@ def test_duplicate_patterns_are_not_registered_twice() -> None:
     patterns = [command.pattern for command in cmd.all_commands()]
     # `pwd` is handled by the p-family, not a second command.
     assert patterns.count("pwd") == 0
+
+
+def test_registered_patterns_are_unique() -> None:
+    patterns = [command.pattern for command in cmd.all_commands()]
+    assert len(patterns) == len(set(patterns))
+
+
+def test_duplicate_registration_fails_loudly() -> None:
+    with pytest.raises(ValueError, match=r"duplicate command pattern 'p\[dDiI\]'"):
+        cmd.command("p[dDiI]")(lambda session, statement: [])

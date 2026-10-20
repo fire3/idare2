@@ -29,6 +29,7 @@ WRITE_DETAIL = [
     ("wd", " off len", "copy len bytes from off to the current offset"),
     ("wf", " file", "write the contents of a file"),
     ("wi", "[1248][+-]n", "increment or decrement a value in place"),
+    ("w6", "[d|e|x] data", "write base64-decoded, base64-encoded or hex-encoded bytes"),
     ("wc", "", "list buffered writes (io.cache)"),
     ("wc+", "", "commit buffered writes as one undoable patch"),
     ("wc-", "", "discard buffered writes"),
@@ -77,8 +78,8 @@ def write(session: Session, statement: Statement) -> list[str]:
     if suffix.startswith("i"):
         return _increment(session, suffix, argument)
 
-    if suffix == "6":
-        return _base64(session, argument)
+    if suffix.startswith("6"):
+        return _base64(session, suffix[1:], argument)
 
     raise UsageError(f"unsupported write modifier '{suffix}' (see w?)")
 
@@ -180,37 +181,59 @@ def _write_file(session: Session, argument: str) -> list[str]:
 
 
 def _increment(session: Session, suffix: str, argument: str) -> list[str]:
-    width = 1
-    for candidate in (8, 4, 2, 1):
-        if suffix.startswith(f"i{candidate}"):
-            width = candidate
-            break
-    op = suffix[len(f"i{width}") :]
-    delta = session.eval(argument) if argument else 1
-    if op == "-":
+    body = suffix[1:]  # strip the leading "i" in "wi..."
+    if not body or body[0] not in "1248":
+        raise UsageError("wi needs a width: wi1, wi2, wi4 or wi8 (for example wi1+1)")
+
+    width = int(body[0])
+    body = body[1:]
+    if not body:
+        # r2's `wi1` is a no-op, not an implicit increment.
+        return []
+    if body[0] not in "+-":
+        raise UsageError(f"wi{width} needs '+' or '-', not {body[0]!r}")
+
+    sign = body[0]
+    glued = body[1:].strip()
+    if glued and argument:
+        raise UsageError(f"wi{width}{sign}: give the amount either glued or separated, not both")
+    amount = glued or argument
+    delta = session.eval(amount) if amount else 1
+    if sign == "-":
         delta = -delta
-    elif op not in ("", "+"):
-        raise UsageError(f"unsupported increment form 'w{suffix}'")
 
     payload = session.remote.call("read_value", ea=session.seek, width=width)
     value = (int(payload["value"]) + delta) & ((1 << (width * 8)) - 1)
     return _patch(session, value.to_bytes(width, "big" if payload.get("big_endian") else "little"))
 
 
-def _base64(session: Session, argument: str) -> list[str]:
+def _base64(session: Session, modifier: str, argument: str) -> list[str]:
     import base64
+    import binascii
 
-    if not argument:
-        raise UsageError("w6 needs data")
-    if argument.startswith("d"):
+    kind = modifier[:1]
+    glued = modifier[1:]
+    if not kind:
+        raise UsageError("w6 needs d (decode), e (encode) or x (encode hexpairs)")
+    if kind not in ("d", "e", "x"):
+        raise UsageError(f"unsupported w6 modifier {kind!r} (use d, e or x)")
+    if glued and argument:
+        raise UsageError(f"w6{kind}: give the data either glued or separated, not both")
+    data = argument or glued
+    if not data:
+        raise UsageError(f"w6{kind} needs data")
+
+    if kind == "d":
         try:
-            data = base64.b64decode(argument[1:])
-        except Exception as exc:  # noqa: BLE001
+            decoded = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError) as exc:
             raise UsageError(f"w6d: bad base64: {exc}") from None
-        return _patch(session, data)
-    if argument.startswith("e"):
-        return _patch(session, argument[1:].encode("utf-8"))
-    return _patch(session, base64.b64decode(argument))
+        if not decoded:
+            raise UsageError("w6d: base64 payload is empty")
+        return _patch(session, decoded)
+
+    raw = _hexpairs(data, "w6x") if kind == "x" else data.encode("utf-8")
+    return _patch(session, base64.b64encode(raw))
 
 
 # --------------------------------------------------------------------------

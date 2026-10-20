@@ -28,10 +28,15 @@ uv pip install -e '.[test]'
 idare2 firmware.bin                      # 交互式，提示符 [0x00015e10]>
 idare2 -qc 's main; pd 10' firmware.bin  # 批处理
 idare2 -qc 'pd 10' firmware.bin | grep call
+idare2 -a arm -b 32 -B 0x1000 firmware.bin   # 裸二进制：处理器/位宽/加载基址
 idare2 --idb saved.i64 -qc 'afl~main'    # 直接用现成的 IDB
 idare2 --attach 12345-a1b2c3 -qc 'axt'   # 附着到已打开的 IDA GUI
 idare2 -L                                # 列出在线的数据库
 ```
+
+对没有 ELF/PE 头的裸二进制，`-a` 是处理器提示，`-b` 必须是 `16`/`32`/`64`，
+`-B` 是加载基址且必须非负、16 字节对齐。三者只在新建 IDB 时生效；入口点会设为
+`-B` 指定的地址（未指定时回退到首个有效地址）。
 
 真实输出（一个 ARM32 固件 `httpd`）：
 
@@ -67,15 +72,15 @@ _start 0xf3cc [DATA:r--] LDR R0, =main
 | 定位 | `s` `s+` `s-` `s++` `s--` `sf` `sF` `sb` `sn` `so` `sp` `s=`（seek 历史）`s:` `s*` |
 | 反汇编 | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc`（Hex-Rays） |
 | 内存 | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `ps` `psw` `pv` `ph` `pwd` |
-| 信息 | `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE`（含 `j` 后缀） |
+| 信息 | `i` `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE` `iM`（可用处支持 `j` 后缀） |
 | 分析 | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` |
 | 搜索 | `/` `/x` `/v` `/r` `//` `/+`（含 `j` 后缀） |
-| 写操作 | `w` `wq` `wx` `w0` `wd` `wf` `wi` `w6` `wc` `wc+` `wc-` `u` `U` |
+| 写操作 | `w` `wq` `wx` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
 | 元信息 | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |
 | 类型 | `t` `tj` `t*` `ts` `tp` `tc` `tt` `t-` `td` `te` `dt` |
 | 标志 | `f` `f*` `f,` `f-` `f?`（默认写回 IDB，`e ida.flags.write=false` 可关） |
 | 会话 | `$` 别名、`S` 脚本、`Ps`/`Po`/`P-`/`Pj`/`P` 工程、`y`/`yy`/`yx`/`yt`/`yf` 剪贴板、`cc`/`c1` 块比较 |
-| 其它 | `?` `?v` `?x` `?b` `?o` `?u` `?e` `?$` `b` `e` `q` `L` `_` |
+| 其它 | `?` `?v` `?vi` `?vx` `?X` `?x` `?b` `?o` `?u` `?f` `?h` `?l` `?s` `?r` `?e` `?=` `?$` `?P` `?p` `?V` `b` `e` `q` `L` `_` |
 
 操作符：`;`、`@ addr`、`@!n`、`@{from to}`、`@@f` `@@i` `@@b` `@@=` `@@s:`、`~`（完整 r2 语义）、
 `|`、`>`、`>>`、`!`、`.`、重复前缀 `3pd`、裸数字定位。
@@ -90,14 +95,17 @@ _start 0xf3cc [DATA:r--] LDR R0, =main
 
 - **`aa` 通常是 no-op**：IDA 打开数据库时已经分析完了；`afl` 不需要先跑 `aa`。
 - **`asm.arch` / `asm.bits` 只读**：架构由 IDB 决定，不能中途切换；用 `-a`/`-b` 在**新建**时指定。
+  `-B` 是加载基址，不是入口点；裸二进制未指定时会用首个有效地址作为入口。
 - **默认只读**，`-w` 才允许写。
 - **`w` 单独使用 = 保存 IDB**。
 - **`f name [sz] [addr]` 会写回 IDB**（因为是共享数据库），可用 `e ida.flags.write=false` 关闭。
   参数顺序与 r2 相同：size 在前、地址在后；`f zz 0x40000` 是「大小 0x40000、落在当前 seek」。
 - **`-j` 会让有 `j` 形式的命令默认输出 JSON**（`pd`、`afl`、`afi`、`iI`、`iz`、`C`、`t`、`b`、`/` 等）；
   没有 `j` 形式的命令（如 `px`、`f`、`s`）不受影响。
-- **`wa`（汇编）在 ARM 上不可用**：IDA 9.5 的 ARM 处理器模块没有注册汇编器
-  （`ida_idp.ph.asm is None`）。idare2 会明确报错；r2 用 keystone 覆盖了这块。
+- **`wa`（汇编）不保证可用**：实测 IDA 9.5 的 x86-64、ARM 和通用 pc 模块都没有注册
+  汇编器（`ida_idp.ph.asm is None`），idare2 会明确报错；r2 用 keystone 覆盖了这块。
+- **`ie` / `iE` 当前输出同一套 IDA entries**：idare2 尚未按导出/入口点语义过滤。
+  `ir`、`ic`、`iee`、`iic`、`izz` 等未实现的信息命令会明确报错，不会静默回落成 `iI`。
 - **CLI 参数分三档**：21 个实现、12 个接受但忽略、7 个明确拒绝（`-d` 等会静默给出错误结果的）。
 
 ## 开发
@@ -108,6 +116,10 @@ uv run pytest -m real_ida              # 真实 IDA 集成测试
 uv run pytest -m parity                # 与 radare2 的输出一致性测试
 uv run ruff check src tests
 ```
+
+当前自动化与合成目标矩阵覆盖 19 种机器：x86-64、i386、ARM32 LE/BE、AArch64、
+MIPS32 LE/BE、MIPS64 LE/BE、PPC32 BE、PPC64 BE/LE、RISC-V32/64、s390x、m68k、
+SPARC、SPARC64、SH4。
 
 集成与一致性测试会先把目标复制到临时目录——**IDA 只要打开过 `.i64`，关闭时就会重写它**，
 即使没有做任何修改。
