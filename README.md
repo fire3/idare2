@@ -64,7 +64,7 @@ _start 0xf3cc [DATA:r--] LDR R0, =main
 
 | 族 | 命令 |
 |---|---|
-| 定位 | `s` `s+` `s-` `s++` `s--` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
+| 定位 | `s` `s+` `s-` `s++` `s--` `sf` `sF` `sb` `sn` `so` `sp` `s=`（seek 历史）`s:` `s*` |
 | 反汇编 | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc`（Hex-Rays） |
 | 内存 | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `ps` `psw` `pv` `ph` `pwd` |
 | 信息 | `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE`（含 `j` 后缀） |
@@ -80,8 +80,9 @@ _start 0xf3cc [DATA:r--] LDR R0, =main
 操作符：`;`、`@ addr`、`@!n`、`@{from to}`、`@@f` `@@i` `@@b` `@@=` `@@s:`、`~`（完整 r2 语义）、
 `|`、`>`、`>>`、`!`、`.`、重复前缀 `3pd`、裸数字定位。
 
-多语句出错时**不中断**：`idare2 -qc '?e one; bogus; ?e three'` 会打印 `one`、错误到 stderr、`three`，
-与 r2 一致；批量模式只要有一条失败，退出码就是 1。
+多语句出错时**不中断**：`idare2 -qc '?e one; zzz; ?e three'` 会打印 `one`、把 `unknown command 'zzz'`
+写到 stderr、再打印 `three`（`zzz` 只是随便一个 idare2 里不存在的命令）；
+批量模式只要有一条失败，退出码就是 1。
 
 ## 与 r2 的差异
 
@@ -91,7 +92,10 @@ _start 0xf3cc [DATA:r--] LDR R0, =main
 - **`asm.arch` / `asm.bits` 只读**：架构由 IDB 决定，不能中途切换；用 `-a`/`-b` 在**新建**时指定。
 - **默认只读**，`-w` 才允许写。
 - **`w` 单独使用 = 保存 IDB**。
-- **`f name @ addr` 会写回 IDB**（因为是共享数据库），可用 `e ida.flags.write=false` 关闭。
+- **`f name [sz] [addr]` 会写回 IDB**（因为是共享数据库），可用 `e ida.flags.write=false` 关闭。
+  参数顺序与 r2 相同：size 在前、地址在后；`f zz 0x40000` 是「大小 0x40000、落在当前 seek」。
+- **`-j` 会让有 `j` 形式的命令默认输出 JSON**（`pd`、`afl`、`afi`、`iI`、`iz`、`C`、`t`、`b`、`/` 等）；
+  没有 `j` 形式的命令（如 `px`、`f`、`s`）不受影响。
 - **`wa`（汇编）在 ARM 上不可用**：IDA 9.5 的 ARM 处理器模块没有注册汇编器
   （`ida_idp.ph.asm is None`）。idare2 会明确报错；r2 用 keystone 覆盖了这块。
 - **CLI 参数分三档**：21 个实现、12 个接受但忽略、7 个明确拒绝（`-d` 等会静默给出错误结果的）。
