@@ -108,6 +108,8 @@ class Session:
         self.config.reflect("ida.instance", getattr(instance, "record_id", ""))
         self.config.reflect("ida.hexrays", bool(self.info.get("hexrays")))
         self.config.reflect("cfg.bigendian", self.info.get("endian") == "big")
+        self.config.reflect("asm.arch", self.info.get("architecture") or "unknown")
+        self.config.reflect("asm.bits", self.info.get("bitness") or 0)
         self._resolve_color()
 
     def _resolve_color(self) -> None:

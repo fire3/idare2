@@ -53,6 +53,11 @@ KEYS: tuple[Key, ...] = (
     Key("asm.sub.names", True, BOOL, "show IDA's sub_/loc_ dummy names"),
     Key("asm.describe", False, BOOL, "describe operands"),
     Key("asm.emu", False, BOOL, "reserved; idare2 does not emulate"),
+    #: Derived from the database, like cfg.bigendian.  They exist so scripts
+    #: that read `e asm.arch` work; `set()` refuses them, because the only way
+    #: to change the architecture is to import the file with -a/-b.
+    Key("asm.arch", "unknown", STR, "architecture (reflects the database)", readonly=True),
+    Key("asm.bits", 0, INT, "word size in bits (reflects the database)", readonly=True),
     # -- hexdump -----------------------------------------------------------
     Key("hex.cols", 16, INT, "bytes per hexdump row", minimum=1, maximum=64),
     Key("hex.pairs", True, BOOL, "group hexdump bytes in pairs"),

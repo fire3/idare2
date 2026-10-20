@@ -612,3 +612,71 @@ def test_afb_and_afi_json_forms_are_reachable() -> None:
     assert blocks[0]["start"] == 0x1000
     info = json.loads("\n".join(session.run("afij @ 0x1000")))
     assert info["name"] == "main"
+
+
+# ---------------------------------------------------------------------------
+# e asm.arch / asm.bits -- derived, read-only, but present
+# ---------------------------------------------------------------------------
+
+
+def _setup_session(**info) -> tuple[Session, FakeRemote]:
+    """A session that has run `setup()`, which reflects the database facts."""
+    from types import SimpleNamespace
+
+    remote = FakeRemote()
+    session = Session(
+        handle=SimpleNamespace(
+            instance=SimpleNamespace(backend="idalib", record_id="1234-abcd")
+        ),
+        remote=remote,
+        config=Config(),
+        info={
+            "bits": 32,
+            "start_ip": 0x1000,
+            "filesize": 0x1000,
+            "base_address": 0x1000,
+            "architecture": "ARM",
+            "bitness": 32,
+            "endian": "little",
+            **info,
+        },
+        readonly=True,
+    )
+    session.setup()
+    return session, remote
+
+
+def test_asm_arch_and_bits_are_readable() -> None:
+    """Regression: the README called them read-only, but the keys did not exist."""
+    session, _remote = _setup_session()
+    assert session.run("e asm.arch") == ["ARM"]
+    assert session.run("e asm.bits") == ["32"]
+
+
+def test_asm_arch_and_bits_appear_in_the_config_listing() -> None:
+    session, _remote = _setup_session()
+    listing = session.run("e")
+    assert any(line.startswith("asm.arch") for line in listing)
+    assert any(line.startswith("asm.bits") for line in listing)
+
+
+def test_asm_arch_reflects_the_database() -> None:
+    session, _remote = _setup_session(architecture="MIPS", bitness=64)
+    assert session.run("e asm.arch") == ["MIPS"]
+    assert session.run("e asm.bits") == ["64"]
+
+
+def test_asm_arch_cannot_be_set() -> None:
+    """The only way to change the architecture is to import with -a/-b."""
+    session, _remote = _setup_session()
+    session.failed = False
+    session.run("e asm.arch=x86")
+    assert session.failed
+    assert "read-only" in str(session.last_error)
+
+
+def test_asm_keys_have_a_help_row() -> None:
+    session, _remote = _setup_session()
+    lines = session.run("e asm.arch?")
+    assert any("asm.arch" in line for line in lines)
+    assert any("read-only" in line for line in lines)

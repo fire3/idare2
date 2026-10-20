@@ -251,6 +251,21 @@ def test_f_size_and_address_follow_r2_order(session) -> None:
     assert int(size) == 16
 
 
+def test_asm_arch_and_bits_reflect_the_database(session) -> None:
+    """The README documented these as read-only; the keys did not exist."""
+    session.failed = False
+    arch = session.run("e asm.arch")
+    bits = session.run("e asm.bits")
+    assert not session.failed, session.last_error
+    assert arch == [session.info["architecture"]]
+    assert bits == [str(session.info["bitness"])]
+
+    session.failed = False
+    session.run("e asm.arch=x86")
+    assert session.failed, "asm.arch must not be settable"
+    assert "read-only" in str(session.last_error)
+
+
 def test_json_default_switches_the_commands_that_have_a_j_form(session) -> None:
     """`-j` used to be an empty switch: set on the session, read by nobody."""
     import json
