@@ -251,6 +251,19 @@ def test_f_size_and_address_follow_r2_order(session) -> None:
     assert int(size) == 16
 
 
+def test_bare_cc_lists_comments(session) -> None:
+    """`CC` used to be unreachable: it demanded -w, then demanded text."""
+    session.failed = False
+    lines = session.run("CC")
+    assert not session.failed, session.last_error
+    assert lines
+    assert all(line.startswith("0x") for line in lines[:10])
+    # The read must not have needed a write.
+    session.failed = False
+    session.run("CC")
+    assert not session.failed
+
+
 def test_f_query_reports_the_address(session) -> None:
     """`f? name` used to print the whole `f` help table instead of an answer."""
     session.run("f queried_flag @ 0x10000")

@@ -43,6 +43,19 @@ class FakeRemote:
             "patch_many": lambda: {"patches": len(arguments["patches"])},
             "set_name": lambda: {"ea": arguments["ea"], "name": arguments["name"]},
             "delete_name": lambda: {"ea": arguments["ea"]},
+            "comments": lambda: (
+                [{"ea": arguments["ea"], "comment": "here", "repeatable": False}]
+                if "ea" in arguments
+                else [
+                    {"ea": 0x1000, "comment": "first", "repeatable": False},
+                    {"ea": 0x2000, "comment": "second", "repeatable": True},
+                ]
+            ),
+            "set_comment": lambda: {
+                "ea": arguments["ea"],
+                "text": arguments["text"],
+                "repeatable": arguments.get("repeatable", False),
+            },
             "disasm": lambda: {
                 "mode": "count",
                 "ea": arguments["ea"],
@@ -413,3 +426,64 @@ def test_help_stays_help_for_commands_that_did_not_opt_in() -> None:
     session, _remote = make_session()
     lines = session.run("pd? 5")
     assert lines and lines[0].startswith("Usage: p[dDiI]")
+
+
+# ---------------------------------------------------------------------------
+# C / CC: the comment list must not demand -w
+# ---------------------------------------------------------------------------
+
+
+def _readonly() -> tuple[Session, FakeRemote]:
+    from idare2.config import Config
+
+    remote = FakeRemote()
+    session = Session(
+        handle=object(),
+        remote=remote,
+        config=Config(),
+        info={"bits": 32, "start_ip": 0x1000, "filesize": 0x1000, "base_address": 0x1000},
+        readonly=True,
+    )
+    return session, remote
+
+
+def test_bare_cc_lists_comments_in_a_readonly_session() -> None:
+    """Regression: `CC` errored with "would modify the database" instead."""
+    session, remote = _readonly()
+    session.failed = False
+    lines = session.run("CC")
+    assert not session.failed, session.last_error
+    assert lines == ["0x00001000 first", "0x00002000 second"]
+    assert all(name != "set_comment" for name in remote.operations)
+
+
+def test_cc_with_text_still_requires_a_write() -> None:
+    session, _remote = _readonly()
+    session.failed = False
+    assert session.run("CC a comment") == []
+    assert session.failed
+    from idare2.errors import ReadOnlyError
+
+    assert isinstance(session.last_error, ReadOnlyError)
+
+
+def test_cc_with_text_writes_when_writable() -> None:
+    session, remote = make_session()
+    session.seek = 0x5000
+    session.run("CC a comment")
+    assert ("set_comment", {"ea": 0x5000, "text": "a comment", "repeatable": False}) in remote.calls
+
+
+def test_ccr_marks_the_comment_repeatable() -> None:
+    session, remote = make_session()
+    session.seek = 0x5000
+    session.run("CCr note")
+    assert ("set_comment", {"ea": 0x5000, "text": "note", "repeatable": True}) in remote.calls
+
+
+def test_ccr_without_text_names_itself_in_the_error() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    assert session.run("CCr") == []
+    assert session.failed
+    assert "CCr needs comment text" in str(session.last_error)

@@ -24,7 +24,7 @@ COMMENT_DETAIL = [
     ("C", "", "list comments"),
     ("Cj", "", "list comments as JSON"),
     ("C.", "", "metadata at the current address"),
-    ("CC", " text [@addr]", "add or replace a comment"),
+    ("CC", " text [@addr]", "add or replace a comment; bare CC lists them"),
     ("CCr", " text [@addr]", "add a repeatable comment"),
     ("CC.", "", "show the comment at the current address"),
     ("CC-", "", "remove the comment at the current address"),
@@ -49,11 +49,23 @@ def metadata(session: Session, statement: Statement) -> list[str]:
     if suffix == "C.":
         return _show_comment(session)
     if suffix == "C":
-        return _add_comment(session, argument, repeatable=False, only_if_missing=False)
+        if not argument:
+            # r2's `C[Cthsdmf]` family: bare `CC` lists the comments.  Only
+            # `CC <text>` writes, so the list must not demand -w -- otherwise
+            # read-only sessions get "would modify the database" and writable
+            # ones get "needs comment text", and there is no path to the list.
+            return _list(session, "")
+        return _add_comment(
+            session, argument, token="CC", repeatable=False, only_if_missing=False
+        )
     if suffix == "Cr":
-        return _add_comment(session, argument, repeatable=True, only_if_missing=False)
+        return _add_comment(
+            session, argument, token="CCr", repeatable=True, only_if_missing=False
+        )
     if suffix == "Cu":
-        return _add_comment(session, argument, repeatable=False, only_if_missing=True)
+        return _add_comment(
+            session, argument, token="CCu", repeatable=False, only_if_missing=True
+        )
     if suffix == "C-":
         return _delete_comment(session)
     if suffix == "-":
@@ -93,13 +105,14 @@ def _add_comment(
     session: Session,
     argument: str,
     *,
+    token: str,
     repeatable: bool,
     only_if_missing: bool,
 ) -> list[str]:
-    cmd_module.require_write(session, "'CC'")
     text = _unquote(argument)
     if not text:
-        raise UsageError("CC needs comment text")
+        raise UsageError(f"{token} needs comment text")
+    cmd_module.require_write(session, f"'{token}'")
     if only_if_missing and session.remote.call("comments", ea=session.seek):
         return []
     session.remote.call(
