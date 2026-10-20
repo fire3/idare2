@@ -1,128 +1,180 @@
 # idare2
 
-> radare2 的命令行与输出体验，IDA Pro 的分析引擎。
+`idare2` brings a radare2-style command line and output model to IDA Pro.
+It drives an IDA database through [IDA Nexus](https://github.com/HexRaysSA/ida-nexus),
+so analysis, disassembly, cross-references, types, strings, and decompilation come
+directly from IDA and Hex-Rays.
 
-`idare2` 用 [IDA Nexus](https://github.com/HexRaysSA/ida-nexus) 驱动 IDA 数据库，
-提供一套与 radare2 **语法、输出、交互一致**的逆向工具。反汇编、交叉引用、类型、
-字符串全部来自 IDB 与 Hex-Rays，因此 `idare2` 可以和 IDA GUI **同时操作同一个数据库**。
+Use it interactively or from scripts. When attached to a running IDA instance,
+both clients share the same database.
 
-## 安装
+## Requirements
 
-需要 IDA 9.1+（含 idalib）、Python 3.11+。
+- IDA Pro 9.1 or newer, including idalib
+- Python 3.11 or newer
+
+## Installation
+
+Install the idalib Python bindings for your IDA installation:
 
 ```bash
-# idalib 的 Python 模块（一次性；<IDA> 指你的 IDA 安装目录）
 pip install <IDA>/idalib/python/idapro*.whl
 python <IDA>/py-activate-idalib.py -d <IDA>
+```
 
-# idare2
+Then install idare2:
+
+```bash
 uv venv --python 3.12
+source .venv/bin/activate
 uv pip install -e '.[test]'
 ```
 
-装好后 `idare2`（别名 `ir2`）就在虚拟环境的 `PATH` 里。
+The `idare2` and `ir2` commands are available after activating the virtual
+environment.
 
-## 用法
+## Usage
+
+### Interactive mode
+
+Open an executable, a raw binary, or an existing IDB:
 
 ```bash
-idare2 firmware.bin                      # 交互式，提示符 [0x00015e10]>
-idare2 -qc 's main; pd 10' firmware.bin  # 批处理
-idare2 -qc 'pd 10' firmware.bin | grep call
-idare2 -a arm -b 32 -B 0x1000 firmware.bin   # 裸二进制：处理器/位宽/加载基址
-idare2 --idb saved.i64 -qc 'afl~main'    # 直接用现成的 IDB
-idare2 --attach 12345-a1b2c3 -qc 'axt'   # 附着到已打开的 IDA GUI
-idare2 -L                                # 列出在线的数据库
+idare2 firmware.bin
+idare2 --idb saved.i64
 ```
 
-对没有 ELF/PE 头的裸二进制，`-a` 是处理器提示，`-b` 必须是 `16`/`32`/`64`，
-`-B` 是加载基址且必须非负、16 字节对齐。三者只在新建 IDB 时生效；入口点会设为
-`-B` 指定的地址（未指定时回退到首个有效地址）。
+Commands use radare2 syntax:
 
-真实输出（一个 ARM32 固件 `httpd`）：
-
-```
+```text
 [0x00015e10]> s main
 [0x00015e10]> pd 6
-┌ 2036: int __fastcall(int argc, const char **argv, const char **envp)
-│           0x00015e10      10482de9       PUSH {R4,R11,LR}
-│           0x00015e14      08b08de2       ADD R11, SP, #8
-│           0x00015e18      fcd04de2       SUB SP, SP, #0xFC
-│           0x00015e1c      f8000be5       STR R0, [R11,#-8+argc]
-│           0x00015e20      fc100be5       STR R1, [R11,#-8+argv]
-└           0x00015e24      00210be5       STR R2, [R11,#-8+envp]
-
-[0x00015e10]> px 16
-- offset -  1011 1213 1415 1617 1819 1A1B 1C1D 1E1F  0123456789ABCDEF
-0x00015e10  1048 2de9 08b0 8de2 fcd0 4de2 f800 0be5  .H-.......M.....
-
 [0x00015e10]> afl~main
-0x0000f1f0     2     12 __uClibc_main
-0x00015e10    75   2036 main
-0x0003fd6c    21   1124 old_main_init
-
-[0x00015e10]> axt
-_start 0xf3cc [DATA:r--] LDR R0, =main
-(nofunc) 0xf3e0 [DATA:r--] DCD main
+[0x00015e10]> q
 ```
 
-## 已实现
+Use `?` for command help and `q` to exit. Use `wq` to save the IDB and exit.
 
-| 族 | 命令 |
-|---|---|
-| 定位 | `s` `s+` `s-` `s++` `s--` `sf` `sF` `sb` `sn` `so` `sp` `s=`（seek 历史）`s:` `s*` |
-| 反汇编 | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc`（Hex-Rays） |
-| 内存 | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `ps` `psw` `pv` `ph` `pwd` |
-| 信息 | `i` `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE` `iM`（可用处支持 `j` 后缀） |
-| 分析 | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` |
-| 搜索 | `/` `/x` `/v` `/r` `//` `/+`（含 `j` 后缀） |
-| 写操作 | `w` `wq` `wx` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
-| 元信息 | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |
-| 类型 | `t` `tj` `t*` `ts` `tp` `tc` `tt` `t-` `td` `te` `dt` |
-| 标志 | `f` `f*` `f,` `f-` `f?`（默认写回 IDB，`e ida.flags.write=false` 可关） |
-| 会话 | `$` 别名、`S` 脚本、`Ps`/`Po`/`P-`/`Pj`/`P` 工程、`y`/`yy`/`yx`/`yt`/`yf` 剪贴板、`cc`/`c1` 块比较 |
-| 其它 | `?` `?v` `?vi` `?vx` `?X` `?x` `?b` `?o` `?u` `?f` `?h` `?l` `?s` `?r` `?e` `?=` `?$` `?P` `?p` `?V` `b` `e` `q` `L` `_` |
+### Batch commands
 
-操作符：`;`、`@ addr`、`@!n`、`@{from to}`、`@@f` `@@i` `@@b` `@@=` `@@s:`、`~`（完整 r2 语义）、
-`|`、`>`、`>>`、`!`、`.`、重复前缀 `3pd`、裸数字定位。
-
-多语句出错时**不中断**：`idare2 -qc '?e one; zzz; ?e three'` 会打印 `one`、把 `unknown command 'zzz'`
-写到 stderr、再打印 `three`（`zzz` 只是随便一个 idare2 里不存在的命令）；
-批量模式只要有一条失败，退出码就是 1。
-
-## 与 r2 的差异
-
-设计上刻意与 r2 对齐，但底层引擎不同，差异是必然的。最常见的几条：
-
-- **`aa` 通常是 no-op**：IDA 打开数据库时已经分析完了；`afl` 不需要先跑 `aa`。
-- **`asm.arch` / `asm.bits` 只读**：架构由 IDB 决定，不能中途切换；用 `-a`/`-b` 在**新建**时指定。
-  `-B` 是加载基址，不是入口点；裸二进制未指定时会用首个有效地址作为入口。
-- **默认只读**，`-w` 才允许写。
-- **`w` 单独使用 = 保存 IDB**。
-- **`f name [sz] [addr]` 会写回 IDB**（因为是共享数据库），可用 `e ida.flags.write=false` 关闭。
-  参数顺序与 r2 相同：size 在前、地址在后；`f zz 0x40000` 是「大小 0x40000、落在当前 seek」。
-- **`-j` 会让有 `j` 形式的命令默认输出 JSON**（`pd`、`afl`、`afi`、`iI`、`iz`、`C`、`t`、`b`、`/` 等）；
-  没有 `j` 形式的命令（如 `px`、`f`、`s`）不受影响。
-- **`wa`（汇编）不保证可用**：实测 IDA 9.5 的 x86-64、ARM 和通用 pc 模块都没有注册
-  汇编器（`ida_idp.ph.asm is None`），idare2 会明确报错；r2 用 keystone 覆盖了这块。
-- **`ie` / `iE` 当前输出同一套 IDA entries**：idare2 尚未按导出/入口点语义过滤。
-  `ir`、`ic`、`iee`、`iic`、`izz` 等未实现的信息命令会明确报错，不会静默回落成 `iI`。
-- **CLI 参数分三档**：21 个实现、12 个接受但忽略、7 个明确拒绝（`-d` 等会静默给出错误结果的）。
-
-## 开发
+Use `-q` to suppress the banner and `-c` to execute one or more commands:
 
 ```bash
-uv run pytest                          # 单元测试（离线，~1 秒）
-uv run pytest -m real_ida              # 真实 IDA 集成测试
-uv run pytest -m parity                # 与 radare2 的输出一致性测试
-uv run ruff check src tests
+idare2 -qc 's main; pd 10' firmware.bin
+idare2 -q -c 'iI' -c 'axt' firmware.bin
+idare2 -qc 'pd 20' firmware.bin | grep call
 ```
 
-当前自动化与合成目标矩阵覆盖 19 种机器：x86-64、i386、ARM32 LE/BE、AArch64、
-MIPS32 LE/BE、MIPS64 LE/BE、PPC32 BE、PPC64 BE/LE、RISC-V32/64、s390x、m68k、
-SPARC、SPARC64、SH4。
+Multiple commands can be separated with `;`. A non-zero exit code is returned
+if any batch command fails.
 
-集成与一致性测试会先把目标复制到临时目录——**IDA 只要打开过 `.i64`，关闭时就会重写它**，
-即使没有做任何修改。
+### JSON output
+
+Use `-j` to make JSON-capable commands return JSON by default. Command-level
+`j` suffixes are also supported:
+
+```bash
+idare2 -j -qc 'afl' firmware.bin
+idare2 -qc 'aflj' firmware.bin
+```
+
+### Raw binaries
+
+Specify the processor, bitness, and load address when importing a binary without
+an ELF or PE header:
+
+```bash
+idare2 -a arm -b 32 -B 0x1000 firmware.bin
+```
+
+- `-a` is an IDA processor hint.
+- `-b` must be `16`, `32`, or `64`.
+- `-B` is the load base and must be non-negative and 16-byte aligned.
+
+These options apply when a new IDB is created. When `-B` is set, it also becomes
+the initial entry point; otherwise idare2 uses the first valid address.
+
+### Existing databases and IDA GUI
+
+List active databases, open an IDB directly, or attach to a running session:
+
+```bash
+idare2 -L
+idare2 --idb saved.i64 -qc 'afl~main'
+idare2 --attach <session-id> -qc 'axt'
+```
+
+Session IDs are shown by `idare2 -L`.
+
+### Writing changes
+
+Sessions are read-only by default. Pass `-w` to allow writes:
+
+```bash
+idare2 -w -qc 's main; wx 9090; w' firmware.bin
+idare2 -w -qc 'e io.cache=true; wx 90 @ main; wc+' firmware.bin
+```
+
+`w` saves the IDB. With `e io.cache=true`, writes are buffered until `wc+` is
+used.
+
+### Command language
+
+Common radare2 operators are supported, including `@`, `~`, `|`, `>`, `>>`,
+`!`, `.`, repeat prefixes such as `3pd`, and bare addresses for seeking.
+
+```bash
+idare2 -qc 'pd 8 @ main' firmware.bin
+idare2 -qc 'afl~main' firmware.bin
+idare2 -qc 'axt > refs.txt' firmware.bin
+```
+
+## Command overview
+
+| Area | Commands |
+|---|---|
+| Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
+| Disassembly | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc` |
+| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `ps` `psw` `pv` `ph` `pwd` |
+| Information | `i` `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE` `iM` |
+| Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` |
+| Search | `/` `/x` `/v` `/r` `//` `/+` |
+| Writing | `w` `wq` `wx` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
+| Metadata | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |
+| Types | `t` `tj` `t*` `ts` `tp` `tc` `tt` `t-` `td` `te` `dt` |
+| Flags | `f` `f*` `f,` `f-` `f?` |
+| Sessions | `S` `Ps` `Po` `P-` `Pj` `P` `y` `yy` `yx` `yt` `yf` `cc` `c1` |
+| Other | `?` `b` `e` `q` `L` `_` |
+
+Most information commands support a `j` suffix for JSON output.
+
+## Behavior notes
+
+- IDA performs analysis when the database is opened, so `aa` is usually a no-op.
+- `asm.arch` and `asm.bits` are read-only. Set the architecture when creating a
+  database with `-a` and `-b`.
+- Sessions are read-only unless `-w` is passed.
+- `w` with no arguments saves the IDB.
+- `-j` enables JSON output; it does not start a JavaScript engine as it does in
+  radare2.
+- Flag names are written to the IDB by default. Set
+  `e ida.flags.write=false` to keep them session-local.
+- Unsupported commands fail explicitly instead of falling back to a different
+  command.
+- Assembly with `wa` depends on whether the active IDA processor module provides
+  an assembler.
+
+## Development
+
+```bash
+uv run pytest
+uv run pytest -m real_ida
+uv run pytest -m parity
+uv run ruff check .
+```
+
+The test suite covers offline unit tests, real IDB integration, radare2 output
+parity, and synthetic targets across 19 architectures.
 
 ## License
 
