@@ -237,6 +237,20 @@ def test_json_suffix(session) -> None:
     assert isinstance(payload["lines"][0]["ea"], int)
 
 
+def test_f_size_and_address_follow_r2_order(session) -> None:
+    """`f name 16 @ addr` is a 16-byte flag at addr, not a flag at 0x10.
+
+    The size/address split used to be inverted, so the documented form landed
+    the flag on the size and the IDB write failed with InvalidEAError.
+    """
+    session.run("f sized_flag 16 @ 0x10000")
+    rows = [line for line in session.run("f") if line.endswith(" sized_flag")]
+    assert rows, "sized_flag not in the flag listing"
+    address, size, _name = rows[0].split()
+    assert int(address, 16) == 0x10000
+    assert int(size) == 16
+
+
 def test_flags_degrade_to_session_local_when_readonly(session) -> None:
     """`f` is a naming convenience, so read-only mode keeps the r2 behaviour.
 

@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 
 FLAG_DETAIL = [
     ("f", "", "list flags (seeded from the database's names)"),
-    ("f", "name [sz] [@ addr]", "create a flag; writes the name into the IDB with -w"),
+    ("f", "name [sz] [addr]", "create a flag at seek or addr; size defaults to 1"),
+    ("f", "name [sz] @ addr", "same, via a temporary seek (writes into the IDB with -w)"),
     ("f-", "name", "remove a flag"),
     ("f*", "", "list flags as radare2 commands"),
     ("f,", "", "list flags as a table"),
@@ -53,17 +54,32 @@ def _list(session: Session, suffix: str) -> list[str]:
 
 
 def _create(session: Session, rest: list[str], count: int | None, suffix: str) -> list[str]:
+    """``f name [sz] [addr]`` -- r2's order is size first, address second.
+
+    ``numeric_args`` cannot do this split: it only recognises a count in the
+    *first* positional slot, and for ``f`` that slot is the flag name, so
+    ``f x 16`` used to fall through with ``count is None`` and then parse
+    ``16`` as the address -- the flag landed at 0x10 and the IDB write failed
+    with ``InvalidEAError``.  Verified against r2: ``f zz6 0x40000`` creates a
+    flag of size 0x40000 at the seek, not a flag at 0x40000.
+    """
     name = rest[0]
-    size = count if count is not None else 1
-    if len(rest) > 1:
-        address = session.resolve(rest[1])
-    elif suffix == "?":
+    if suffix == "?":
         found = session.flags.lookup(name)
         if found is None:
             return []
         return [fmt_addr(found, addr_width(session.info.get("bits")))]
-    else:
-        address = session.seek
+
+    words = rest[1:]
+    size = count if count is not None else 1
+    if words and count is None:
+        size = session.eval(words.pop(0))
+    address = session.seek
+    if words:
+        address = session.resolve(words.pop(0))
+    if words:
+        raise UsageError(f"f: unexpected argument {words[0]!r} (see f?)")
+
     session.write_flag(name, address, size)
     return []
 

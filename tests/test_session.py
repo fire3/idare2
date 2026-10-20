@@ -41,6 +41,8 @@ class FakeRemote:
             "search_ranges": lambda: [{"start": 0x1000, "end": 0x2000, "name": ".text"}],
             "patch_bytes": lambda: {"ea": arguments["ea"], "size": 2},
             "patch_many": lambda: {"patches": len(arguments["patches"])},
+            "set_name": lambda: {"ea": arguments["ea"], "name": arguments["name"]},
+            "delete_name": lambda: {"ea": arguments["ea"]},
             "disasm": lambda: {
                 "mode": "count",
                 "ea": arguments["ea"],
@@ -300,3 +302,74 @@ def test_ph_reads_at_the_seek() -> None:
     session.seek = 0x2000
     session.run("ph sha256 4")
     assert ("read_bytes", {"ea": 0x2000, "count": 4}) in remote.calls
+
+
+# ---------------------------------------------------------------------------
+# f: size comes before the address, as in r2
+# ---------------------------------------------------------------------------
+
+
+def _flag(session, name: str):
+    session._ensure_flags()
+    return session.flags._by_name.get(name)
+
+
+def test_f_bare_flag_lands_at_the_seek_with_size_one() -> None:
+    session, remote = make_session()
+    session.seek = 0x15E10
+    session.run("f zz1")
+    flag = _flag(session, "zz1")
+    assert (flag.ea, flag.size) == (0x15E10, 1)
+    assert ("set_name", {"ea": 0x15E10, "name": "zz1"}) in remote.calls
+
+
+def test_f_second_positional_is_the_size_not_the_address() -> None:
+    """Regression: `f x 16` used to create a flag at 0x10 with size 1."""
+    session, remote = make_session()
+    session.seek = 0x15E10
+    session.run("f zz2 16")
+    flag = _flag(session, "zz2")
+    assert (flag.ea, flag.size) == (0x15E10, 16)
+    assert ("set_name", {"ea": 0x15E10, "name": "zz2"}) in remote.calls
+
+
+def test_f_third_positional_is_the_address() -> None:
+    session, _remote = make_session()
+    session.seek = 0x15E10
+    session.run("f zz3 16 0x10000")
+    flag = _flag(session, "zz3")
+    assert (flag.ea, flag.size) == (0x10000, 16)
+
+
+def test_f_size_and_temporary_seek() -> None:
+    session, _remote = make_session()
+    session.seek = 0x15E10
+    session.run("f zz4 16 @ 0x20000")
+    flag = _flag(session, "zz4")
+    assert (flag.ea, flag.size) == (0x20000, 16)
+    # `@` is temporary: the real seek must be untouched.
+    assert session.seek == 0x15E10
+
+
+def test_f_temporary_seek_without_a_size() -> None:
+    session, _remote = make_session()
+    session.run("f zz5 @ 0x30000")
+    flag = _flag(session, "zz5")
+    assert (flag.ea, flag.size) == (0x30000, 1)
+
+
+def test_f_a_large_number_is_a_size_rather_than_an_address() -> None:
+    """r2: `f zz6 0x40000` -> size 0x40000 at the seek, not a flag at 0x40000."""
+    session, _remote = make_session()
+    session.seek = 0x15E10
+    session.run("f zz6 0x40000")
+    flag = _flag(session, "zz6")
+    assert (flag.ea, flag.size) == (0x15E10, 0x40000)
+
+
+def test_f_rejects_a_fourth_positional() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    assert session.run("f zz7 16 0x10000 extra") == []
+    assert session.failed
+    assert "unexpected argument" in str(session.last_error)
