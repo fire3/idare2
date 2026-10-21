@@ -367,6 +367,131 @@ def test_function_info_reports_a_zero_flag_set() -> None:
     assert envelope["result"]["flags"] == 0
 
 
+# ---------------------------------------------------------------------------
+# graph: agf / agfj / agfd
+# ---------------------------------------------------------------------------
+
+
+class GraphBlock:
+    def __init__(self, start: int, end: int, successors=None) -> None:
+        self.start_ea = start
+        self.end_ea = end
+        self._successors = list(successors or [])
+
+    def get_successors(self):
+        return iter(self._successors)
+
+
+class GraphInstruction:
+    def __init__(self, ea: int, size: int = 4) -> None:
+        self.ea = ea
+        self.size = size
+
+
+class GraphInstructions:
+    def __init__(self) -> None:
+        self.items = [
+            GraphInstruction(0x1000),
+            GraphInstruction(0x1004),
+            GraphInstruction(0x1008),
+            GraphInstruction(0x1010),
+        ]
+
+    def get_between(self, start: int, end: int):
+        return [item for item in self.items if start <= item.ea < end]
+
+    def get_disassembly(self, insn) -> str:
+        return {
+            0x1000: "nop",
+            0x1004: "beq 0x1010",
+            0x1008: "mov r0, 1",
+            0x1010: "bx lr",
+        }[insn.ea]
+
+    def is_call_instruction(self, insn) -> bool:
+        return False
+
+    def is_jump(self, insn) -> bool:
+        return insn.ea == 0x1004
+
+    def call_targets(self, insn):
+        return []
+
+    def jump_targets(self, insn):
+        return [0x1010] if insn.ea == 0x1004 else []
+
+
+class GraphBytes:
+    def get_bytes_at(self, ea: int, size: int) -> bytes:
+        return bytes(size)
+
+
+class GraphComments:
+    def get_at(self, ea: int):
+        return None
+
+
+def test_graph_op_returns_blocks_edges_and_ops() -> None:
+    second = GraphBlock(0x1008, 0x1010)
+    third = GraphBlock(0x1010, 0x1014)
+    first = GraphBlock(0x1000, 0x1008, [third, second])
+    func = SimpleNamespace(start_ea=0x1000, end_ea=0x1014)
+    functions = SimpleNamespace(
+        get_at=lambda ea: func,
+        get_flowchart=lambda item: [first, second, third],
+        get_name=lambda item: "main",
+    )
+    db = SimpleNamespace(
+        functions=functions,
+        instructions=GraphInstructions(),
+        bytes=GraphBytes(),
+        comments=GraphComments(),
+    )
+
+    envelope = dispatch.invoke(db, "graph", {"ea": 0x1000})
+    assert protocol.is_ok(envelope), envelope
+    payload = envelope["result"]
+    assert payload["name"] == "main"
+    assert payload["ninstr"] == 4
+    assert len(payload["blocks"]) == 3
+
+    block = payload["blocks"][0]
+    assert block["addr"] == 0x1000
+    assert block["size"] == 8
+    assert block["successors"] == [0x1010, 0x1008]
+    assert block["jump"] == 0x1010
+    assert block["fail"] == 0x1008
+    assert block["ops"][1]["disasm"] == "beq 0x1010"
+    assert block["ops"][1]["targets"] == [0x1010]
+    assert block["ops"][0]["bytes"] == b"\0\0\0\0"
+
+
+def test_graph_op_falls_back_to_the_fallthrough_successor() -> None:
+    """When no branch target is known, block.end identifies the fail edge."""
+    second = GraphBlock(0x1008, 0x1010)
+    first = GraphBlock(0x1000, 0x1008, [second, GraphBlock(0x1020, 0x1024)])
+    func = SimpleNamespace(start_ea=0x1000, end_ea=0x1024)
+    functions = SimpleNamespace(
+        get_at=lambda ea: func,
+        get_flowchart=lambda item: [first, second],
+        get_name=lambda item: "main",
+    )
+    instructions = GraphInstructions()
+    instructions.is_jump = lambda insn: False
+    db = SimpleNamespace(
+        functions=functions,
+        instructions=instructions,
+        bytes=GraphBytes(),
+        comments=GraphComments(),
+    )
+
+    envelope = dispatch.invoke(db, "graph", {"ea": 0x1000})
+    assert protocol.is_ok(envelope), envelope
+    block = envelope["result"]["blocks"][0]
+    assert block["jump"] == 0x1020
+    assert block["fail"] == 0x1008
+
+
 def test_item_flags_no_longer_collapses_to_zero() -> None:
     """``item_flags`` used to swallow the TypeError and report 0 for every ea."""
     import enum

@@ -138,7 +138,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
 | Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `ps` `psw` `pv` `ph` `pwd` |
 | Information | `i` `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE` `iM` |
-| Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` |
+| Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
 | Metadata | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |
@@ -168,6 +168,9 @@ Most information commands support a `j` suffix for JSON output.
   to it), which covers common ARM, AArch64, MIPS, PPC, RISC-V and m68k targets.
 - `wa*` and `waF*` print the equivalent `wx` command without modifying the
   database, so they work in read-only sessions.
+- `agf` prints a compact ASCII function graph, `agfj`/`agj` return r2-shaped
+  graph JSON, and `agfd` emits Graphviz DOT. `agg`/`aggd` are accepted aliases
+  for the current function's DOT.
 
 ## Development
 

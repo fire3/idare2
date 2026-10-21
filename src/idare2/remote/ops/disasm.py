@@ -28,7 +28,8 @@ def _targets(db: Any, insn: Any) -> list[int]:
     return out
 
 
-def _record(db: Any, insn: Any) -> dict[str, Any]:
+def instruction_record(db: Any, insn: Any) -> dict[str, Any]:
+    """One instruction as the client-facing disassembly/graph record."""
     ea = int(insn.ea)
     size = int(insn.size)
     raw = db.bytes.get_bytes_at(ea, size)
@@ -164,7 +165,7 @@ def disasm(
         source = _walk(db, ea, _limit(db), limit)
 
     records, next_offset = helpers.paginate(source, offset, cap)
-    lines = [_record(db, insn) for insn in records]
+    lines = [instruction_record(db, insn) for insn in records]
     result = {"mode": mode, "ea": ea, "func": header, "lines": lines}
     return result, helpers.page_meta(lines, next_offset)
 

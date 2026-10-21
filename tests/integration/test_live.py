@@ -359,6 +359,33 @@ def test_afb_and_afi_json_forms(session) -> None:
     assert not session.failed, session.last_error
 
 
+def test_function_graph_forms(session) -> None:
+    """The graph commands must work entirely through the live IDA backend."""
+    import json
+
+    address = 0x00016BB4
+    session.failed = False
+    graph = json.loads("\n".join(session.run(f"agfj @ 0x{address:x}")))
+    assert not session.failed, session.last_error
+    assert len(graph) == 1
+    function = graph[0]
+    assert function["addr"] <= address < function["addr"] + function["size"]
+    assert function["blocks"]
+    assert any(block["ops"] for block in function["blocks"])
+
+    ascii_lines = session.run(f"agf @ 0x{address:x}")
+    assert not session.failed, session.last_error
+    text = "\n".join(ascii_lines)
+    assert "-- " in text and "blocks " in text
+    assert session.format_addr(function["addr"]) in text
+
+    dot = session.run(f"agfd @ 0x{address:x}")
+    assert not session.failed, session.last_error
+    assert dot[0] == "digraph code {"
+    assert dot[-1] == "}"
+    assert session.format_addr(function["addr"]) in "\n".join(dot)
+
+
 def test_bare_cc_lists_comments(session) -> None:
     """`CC` used to be unreachable: it demanded -w, then demanded text."""
     session.failed = False

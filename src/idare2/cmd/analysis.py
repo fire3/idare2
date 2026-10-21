@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from idare2.cmd import command, numeric_args, with_more
 from idare2.errors import UsageError
 from idare2.fmt import disasm as fmt_disasm
+from idare2.fmt import graph as fmt_graph
 from idare2.fmt import listing as fmt_listing
 from idare2.fmt import to_json
 from idare2.fmt import xrefs as fmt_xrefs
@@ -36,6 +37,9 @@ ANALYSIS_DETAIL = [
     ("axf", "[addr]", "cross-references from an address"),
     ("axj", "[addr]", "cross-references as JSON"),
     ("ab", "", "the basic block at the current address"),
+    ("agf", "[addr]", "basic-block function graph"),
+    ("agfj", "[addr]", "basic-block function graph as JSON"),
+    ("agfd", "[addr]", "basic-block function graph as Graphviz DOT"),
 ]
 
 FUNCTION_DETAIL = [
@@ -168,3 +172,49 @@ def basic_block(session: Session, statement: Statement) -> list[str]:
         f"end:   {session.format_addr(int(payload['end']))}",
         f"size:  {payload['size']}",
     ]
+
+
+GRAPH_DETAIL = [
+    ("ag", "[addr]", "basic-block function graph"),
+    ("agf", "[addr]", "basic-block function graph"),
+    ("agfj", "[addr]", "basic-block function graph as JSON"),
+    ("agj", "[addr]", "alias for agfj"),
+    ("agfd", "[addr]", "basic-block function graph as Graphviz DOT"),
+    ("agg", "[addr]", "alias for agfd (current function DOT)"),
+    ("aggd", "[addr]", "alias for agfd"),
+]
+
+
+@command(
+    "ag",
+    usage="[addr]",
+    summary="basic-block function graph",
+    detail=GRAPH_DETAIL,
+    json_suffix=True,
+)
+@command("agf", usage="[addr]", detail=GRAPH_DETAIL, json_suffix=True)
+@command("agfj", usage="[addr]", detail=GRAPH_DETAIL)
+@command("agj", usage="[addr]", detail=GRAPH_DETAIL)
+@command("agfd", usage="[addr]", detail=GRAPH_DETAIL)
+@command("agg", usage="[addr]", detail=GRAPH_DETAIL)
+@command("aggd", usage="[addr]", detail=GRAPH_DETAIL)
+def function_graph(session: Session, statement: Statement) -> list[str]:
+    """Render the current function's basic-block graph.
+
+    ``agf`` is the compact ASCII form, ``agfj``/``agj`` the r2-shaped JSON
+    form, and ``agfd`` Graphviz DOT.  idare2 accepts ``agg``/``aggd`` as
+    convenient aliases for function DOT; radare2 reserves ``agg`` for its
+    separate custom-graph canvas.
+    """
+    token = statement.cmd
+    rest, _count, _offset = numeric_args(session, statement)
+    target = session.resolve(rest[0]) if rest else session.seek
+    payload = session.remote.call("graph", ea=target)
+
+    if token in ("agfj", "agj"):
+        return [to_json([payload])]
+    if token in ("agfd", "agg", "aggd"):
+        return fmt_graph.format_dot(payload, session)
+    if token in ("ag", "agf"):
+        return fmt_graph.format_ascii(payload, session)
+    raise UsageError(f"unsupported graph command '{token}' (see ag?)")

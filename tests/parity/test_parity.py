@@ -19,6 +19,7 @@ The target defaults to ``../vulfirm/RCE/Tenda/httpd`` relative to this checkout
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
 import subprocess
@@ -224,6 +225,39 @@ def test_function_addresses_overlap(session, r2) -> None:
     # strong majority rather than equality.
     assert len(overlap) >= 0.5 * min(len(ours), len(theirs)), (
         f"weak overlap: idare2={len(ours)} r2={len(theirs)} shared={len(overlap)}"
+    )
+
+
+def _graph_edges(payload: list[dict]) -> dict[int, set[int]]:
+    out = {}
+    for block in payload[0]["blocks"]:
+        out[int(block["addr"])] = {
+            int(target)
+            for target in (block.get("jump"), block.get("fail"))
+            if target is not None
+        }
+    return out
+
+
+def test_function_graph_blocks_and_edges_overlap(session, r2) -> None:
+    """IDA and r2 may split blocks differently, but the CFG must agree broadly."""
+    address = 0x15E10
+    ours = json.loads("\n".join(session.run(f"agfj @ 0x{address:x}")))
+    theirs = json.loads("\n".join(r2(f"agfj @ 0x{address:x}")))
+    assert ours and theirs
+    assert ours[0]["addr"] == theirs[0]["addr"] == address
+
+    ours_edges = _graph_edges(ours)
+    theirs_edges = _graph_edges(theirs)
+    shared = set(ours_edges) & set(theirs_edges)
+    assert shared
+    assert len(shared) >= 0.5 * min(len(ours_edges), len(theirs_edges)), (
+        f"weak block overlap: idare2={len(ours_edges)} r2={len(theirs_edges)} "
+        f"shared={len(shared)}"
+    )
+    agreeing = sum(ours_edges[block] == theirs_edges[block] for block in shared)
+    assert agreeing >= 0.5 * len(shared), (
+        f"weak edge agreement on shared blocks: {agreeing}/{len(shared)}"
     )
 
 

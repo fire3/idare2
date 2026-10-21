@@ -13,6 +13,7 @@ import pytest
 
 from idare2.config import Config
 from idare2.fmt import disasm as fmt_disasm
+from idare2.fmt import graph as fmt_graph
 from idare2.fmt import memory as fmt_memory
 from idare2.fmt.colors import Colors
 
@@ -179,3 +180,67 @@ def test_jsonable_bytes_become_hex() -> None:
 
     assert jsonable({"bytes": b"\x10\x48"}) == {"bytes": "1048"}
     assert jsonable([b"\xff"]) == ["ff"]
+
+
+GRAPH = {
+    "name": "main",
+    "addr": 0x1000,
+    "end": 0x1020,
+    "size": 0x20,
+    "blocks": [
+        {
+            "addr": 0x1000,
+            "size": 8,
+            "jump": 0x1010,
+            "fail": 0x1008,
+            "successors": [0x1010, 0x1008],
+            "ops": [
+                {
+                    "addr": 0x1000,
+                    "size": 4,
+                    "bytes": bytes.fromhex("0000a0e1"),
+                    "disasm": "nop",
+                    "comment": "keep going",
+                }
+            ],
+        },
+        {"addr": 0x1008, "size": 8, "successors": [], "ops": []},
+    ],
+}
+
+
+def test_graph_ascii_has_boxes_ops_and_edges(session: FakeSession) -> None:
+    lines = fmt_graph.format_ascii(GRAPH, session)
+    text = "\n".join(lines)
+    assert text.startswith("-- main @ 0x00001000 size 32 blocks 2 --")
+    assert "0x00001000  [#0]  size 8" in text
+    assert "nop ; keep going" in text
+    assert "jump 0x00001010" in text
+    assert "fail 0x00001008" in text
+    assert lines[1].startswith("┌")
+
+
+def test_graph_dot_escapes_labels_and_colours_edges(session: FakeSession) -> None:
+    graph = {
+        **GRAPH,
+        "name": 'ma"in',
+        "blocks": [
+            {
+                **GRAPH["blocks"][0],
+                "ops": [
+                    {
+                        "addr": 0x1000,
+                        "disasm": 'cmp r0, "x"',
+                        "comment": "",
+                    }
+                ],
+            }
+        ],
+    }
+    lines = fmt_graph.format_dot(graph, session)
+    text = "\n".join(lines)
+    assert text.startswith("digraph code {")
+    assert 'cmp r0, \\"x\\"' in text
+    assert 'URL="ma\\"in/0x00001000"' in text
+    assert '"0x00001000" -> "0x00001010" [color="#13a10e"]' in text
+    assert '"0x00001000" -> "0x00001008" [color="#c50f1f"]' in text

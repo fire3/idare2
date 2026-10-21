@@ -8,6 +8,7 @@ from typing import Any
 from idare2 import protocol
 from idare2.remote import helpers
 from idare2.remote.dispatch import op
+from idare2.remote.ops.disasm import instruction_record
 
 #: IDA xref types -> the token idare2 prints in ``axt``/``axf``.
 _XREF_KIND = {
@@ -249,6 +250,125 @@ def _block_successors(db: Any, block: Any) -> list[int]:
         return [int(target.start_ea) for target in block.get_successors()]
     except Exception:
         return []
+
+
+@op("graph")
+def graph(db: Any, ea: int) -> dict[str, Any]:
+    """Function graph for ``agf``/``agfj``/``agfd``.
+
+    The payload follows radare2's function-graph JSON closely enough to be
+    useful to existing scripts: ``addr``/``size``/``jump``/``fail`` on blocks
+    and ``addr``/``size``/``bytes``/``disasm`` on operations.  ``successors``
+    is retained as an explicit edge list because IDA can expose switch blocks
+    with more than two successors, which ``jump``/``fail`` cannot represent.
+    """
+    func = helpers.require_func(db, ea)
+    chart = db.functions.get_flowchart(func)
+    if chart is None:
+        helpers.fail(protocol.NOT_FUNC, f"no control flow graph for 0x{ea:x}")
+
+    out_blocks: list[dict[str, Any]] = []
+    instruction_count = 0
+    for block in chart:
+        start = int(block.start_ea)
+        end = int(block.end_ea)
+        successors = _block_successors(db, block)
+        ops = _graph_ops(db, start, end)
+        instruction_count += len(ops)
+        jump, fail = _block_edges(ops, successors, end)
+        item: dict[str, Any] = {
+            "addr": start,
+            "size": end - start,
+            "successors": successors,
+            "ops": ops,
+        }
+        if jump is not None:
+            item["jump"] = jump
+        if fail is not None:
+            item["fail"] = fail
+        out_blocks.append(item)
+
+    return {
+        "name": db.functions.get_name(func),
+        "addr": int(func.start_ea),
+        "end": int(func.end_ea),
+        "ninstr": instruction_count,
+        "nargs": 0,
+        "nlocals": 0,
+        "size": int(func.end_ea) - int(func.start_ea),
+        "stack": 0,
+        "type": "fcn",
+        "signature": _signature(db, func),
+        "blocks": out_blocks,
+    }
+
+
+def _graph_ops(db: Any, start: int, end: int) -> list[dict[str, Any]]:
+    """Disassembly records for one basic block, in address order."""
+    out: list[dict[str, Any]] = []
+    try:
+        instructions = db.instructions.get_between(start, end)
+    except Exception:
+        return out
+    for index, insn in enumerate(instructions):
+        if index >= helpers.FUNC_CAP:
+            break
+        record = instruction_record(db, insn)
+        kind = "call" if record["is_call"] else "jmp" if record["is_jump"] else "cpu"
+        out.append(
+            {
+                "addr": record["ea"],
+                "size": record["size"],
+                "bytes": record["bytes"],
+                "disasm": record["text"],
+                "opcode": record["text"],
+                "comment": record["comment"],
+                "type": kind,
+                "targets": record["targets"],
+            }
+        )
+    return out
+
+
+def _block_edges(
+    ops: list[dict[str, Any]], successors: list[int], end: int
+) -> tuple[int | None, int | None]:
+    """Split IDA's successor list into radare2-style ``jump`` and ``fail``.
+
+    A conditional block has two successors.  Prefer the last branch
+    instruction's resolved target for ``jump``; otherwise the fall-through
+    address (the block's end) is ``fail``.  This stays stable even if the
+    backend returns successors in a different order.
+    """
+    unique: list[int] = []
+    for target in successors:
+        if target not in unique:
+            unique.append(target)
+
+    branch_targets: list[int] = []
+    for record in reversed(ops):
+        if record.get("type") == "jmp":
+            branch_targets = [int(value) for value in record.get("targets") or []]
+            break
+
+    if len(unique) == 2:
+        jump = next((target for target in branch_targets if target in unique), None)
+        if jump is not None:
+            fail = next((target for target in unique if target != jump), None)
+            return jump, fail
+        if end in unique:
+            fail = end
+            jump = next((target for target in unique if target != fail), None)
+            return jump, fail
+        return unique[0], unique[1]
+
+    if len(unique) == 1:
+        only = unique[0]
+        if only == end and only not in branch_targets:
+            return None, None
+        return only, None
+
+    return None, None
 
 
 @op("reanalyze", writes=True)

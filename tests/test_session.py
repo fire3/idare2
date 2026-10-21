@@ -111,6 +111,72 @@ class FakeRemote:
                 "signature": "int main(void)",
                 "flags": 0,
             },
+            "graph": lambda: {
+                "name": "main",
+                "addr": arguments["ea"],
+                "end": arguments["ea"] + 0x18,
+                "ninstr": 6,
+                "nargs": 0,
+                "nlocals": 0,
+                "size": 0x18,
+                "stack": 0,
+                "type": "fcn",
+                "signature": "int main(void)",
+                "blocks": [
+                    {
+                        "addr": arguments["ea"],
+                        "size": 8,
+                        "jump": arguments["ea"] + 0x10,
+                        "fail": arguments["ea"] + 8,
+                        "successors": [arguments["ea"] + 0x10, arguments["ea"] + 8],
+                        "ops": [
+                            {
+                                "addr": arguments["ea"],
+                                "size": 4,
+                                "bytes": b"\x00\xb0\xa0\xe3",
+                                "disasm": "MOV R11, #0",
+                                "opcode": "MOV R11, #0",
+                                "comment": "",
+                                "type": "cpu",
+                                "targets": [],
+                            },
+                            {
+                                "addr": arguments["ea"] + 4,
+                                "size": 4,
+                                "bytes": b"\x02\x00\x00\x0a",
+                                "disasm": "BEQ 0x1010",
+                                "opcode": "BEQ 0x1010",
+                                "comment": "branch",
+                                "type": "jmp",
+                                "targets": [arguments["ea"] + 0x10],
+                            },
+                        ],
+                    },
+                    {
+                        "addr": arguments["ea"] + 8,
+                        "size": 8,
+                        "successors": [],
+                        "ops": [
+                            {
+                                "addr": arguments["ea"] + 8,
+                                "size": 4,
+                                "bytes": b"\x01\x30\xa0\xe3",
+                                "disasm": "MOV R3, #1",
+                                "opcode": "MOV R3, #1",
+                                "comment": "",
+                                "type": "cpu",
+                                "targets": [],
+                            }
+                        ],
+                    },
+                    {
+                        "addr": arguments["ea"] + 0x10,
+                        "size": 8,
+                        "successors": [],
+                        "ops": [],
+                    },
+                ],
+            },
         }
         if operation not in handlers:
             raise AssertionError(f"unexpected remote call {operation}")
@@ -619,6 +685,14 @@ def test_json_default_switches_afl_and_afi() -> None:
     assert json.loads("\n".join(session.run("afi @ 0x1000")))["name"] == "main"
 
 
+def test_json_default_switches_agf_without_touching_agfd() -> None:
+    import json
+
+    session, _remote = _json_default()
+    assert json.loads("\n".join(session.run("agf @ 0x1000")))[0]["name"] == "main"
+    assert session.run("agfd @ 0x1000")[0] == "digraph code {"
+
+
 def test_afb_and_afi_json_forms_are_reachable() -> None:
     """`afbj`/`afij` used to fall through to "unsupported function command".
 
@@ -633,6 +707,54 @@ def test_afb_and_afi_json_forms_are_reachable() -> None:
     assert blocks[0]["start"] == 0x1000
     info = json.loads("\n".join(session.run("afij @ 0x1000")))
     assert info["name"] == "main"
+
+
+def test_agfj_reports_a_radare2_shaped_function_graph() -> None:
+    import json
+
+    session, remote = make_session()
+    payload = json.loads("\n".join(session.run("agfj @ 0x1000")))
+
+    assert payload[0]["name"] == "main"
+    assert payload[0]["addr"] == 0x1000
+    first = payload[0]["blocks"][0]
+    assert (first["addr"], first["size"]) == (0x1000, 8)
+    assert first["jump"] == 0x1010
+    assert first["fail"] == 0x1008
+    assert first["successors"] == [0x1010, 0x1008]
+    # bytes go through the JSON wire encoder as hexpairs, not Python reprs.
+    assert first["ops"][0]["bytes"] == "00b0a0e3"
+    assert ("graph", {"ea": 0x1000}) in remote.calls
+
+
+def test_agf_renders_blocks_and_jump_fail_edges() -> None:
+    session, _remote = make_session()
+    text = "\n".join(session.run("agf @ 0x1000"))
+
+    assert "main @ 0x00001000" in text
+    assert "0x00001000  [#0]  size 8" in text
+    assert "MOV R11, #0" in text
+    assert "jump 0x00001010" in text
+    assert "fail 0x00001008" in text
+    assert "┌" in text and "└" in text
+
+
+def test_agfd_and_agg_emit_graphviz_dot() -> None:
+    session, _remote = make_session()
+    for token in ("agfd", "agg", "aggd"):
+        lines = session.run(f"{token} @ 0x1000")
+        assert lines[0] == "digraph code {"
+        assert lines[-1] == "}"
+        text = "\n".join(lines)
+        assert '"0x00001000" -> "0x00001010" [color="#13a10e"]' in text
+        assert '"0x00001000" -> "0x00001008" [color="#c50f1f"]' in text
+
+
+def test_agj_is_an_alias_for_agfj() -> None:
+    import json
+
+    session, _remote = make_session()
+    assert json.loads("\n".join(session.run("agj @ 0x1000")))[0]["name"] == "main"
 
 
 # ---------------------------------------------------------------------------
