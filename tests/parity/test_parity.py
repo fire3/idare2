@@ -294,3 +294,71 @@ def test_segment_table_shape(session, r2) -> None:
     assert ours_addr == theirs_addr
     # ELF section vs loader segment granularity can differ by alignment padding.
     assert abs(ours_size - theirs_size) < 0x1000
+
+
+def _import_rows(lines: list[str]) -> list[tuple[int, int | None, str, str, str]]:
+    rows = []
+    for line in lines[2:]:
+        tokens = line.split()
+        if len(tokens) < 5:
+            continue
+        vaddr = None if tokens[1].startswith("-") else int(tokens[1], 16)
+        rows.append((int(tokens[0]), vaddr, tokens[2], tokens[3], tokens[4]))
+    return rows
+
+
+def test_import_table_matches_r2(session, r2) -> None:
+    """``ii`` is dynsym order, so nth/vaddr/bind/type/name must all agree."""
+    ours = _import_rows(session.run("ii"))
+    theirs = _import_rows(r2("ii"))
+    assert ours
+    assert ours == theirs
+
+
+def _symbol_rows(lines: list[str]) -> list[tuple[int, int | None, int, str, str, int, str]]:
+    rows = []
+    for line in lines[2:]:
+        tokens = line.split()
+        if len(tokens) < 7:
+            continue
+        paddr = None if tokens[1].startswith("-") else int(tokens[1], 16)
+        vaddr = None if tokens[2].startswith("-") else int(tokens[2], 16)
+        rows.append(
+            (int(tokens[0]), paddr, vaddr, tokens[3], tokens[4], int(tokens[5]), tokens[6])
+        )
+    return rows
+
+
+def test_symbol_table_matches_r2(session, r2) -> None:
+    """``is`` needs the ELF section table IDA discards (SECT/FILE/SPCL rows)."""
+    ours = _symbol_rows(session.run("is"))
+    theirs = _symbol_rows(r2("is"))
+    assert ours
+    assert ours == theirs
+
+
+def _string_rows(lines: list[str]) -> dict[str, list[tuple[int, int, str]]]:
+    rows: dict[str, list[tuple[int, int, str]]] = {}
+    for line in lines[2:]:
+        tokens = line.split(None, 7)
+        if len(tokens) < 8 or not tokens[1].startswith("0x") or not tokens[2].startswith("0x"):
+            continue
+        rows.setdefault(tokens[7], []).append(
+            (int(tokens[1], 16), int(tokens[2], 16), tokens[5])
+        )
+    return rows
+
+
+def test_string_addresses_and_sections_match_r2(session, r2) -> None:
+    """``iz`` paddr and section come from the ELF section table, not IDA LOADs."""
+    ours = _string_rows(session.run("iz"))
+    theirs = _string_rows(r2("iz"))
+    # Duplicate literals can be reported at different instances by the two
+    # scanners; only unique texts pin down a single address and section.
+    shared = {
+        text for text in set(ours) & set(theirs)
+        if len(ours[text]) == 1 and len(theirs[text]) == 1
+    }
+    assert len(shared) >= 100
+    mismatched = [text for text in shared if ours[text] != theirs[text]]
+    assert not mismatched, mismatched[:5]

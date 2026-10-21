@@ -237,24 +237,46 @@ def test_ii(session) -> None:
     lines = session.run("ii")
     assert not session.failed, session.last_error
     assert lines
-    for line in lines[:5]:
-        ordinal, ea, _module, name = line.split(None, 3)
-        # IDA reports 0 for imports it has no explicit ordinal for.
+    assert lines[0].split() == ["nth", "vaddr", "bind", "type", "lib", "name"]
+    for line in lines[2:7]:
+        ordinal, ea, bind, kind, name = line.split(None, 4)
         assert ordinal.isdigit()
-        assert ea.startswith("0x")
+        assert ea.startswith("0x") or ea == "----------"
+        assert bind in {"GLOBAL", "LOCAL", "WEAK", "NONE"}
+        assert kind
         assert name
 
 
 def test_ii_paginates(session) -> None:
     def rows(lines: list[str]) -> list[str]:
         # `with_more` appends r2's "[+more; resume with -o N]" hint.
-        return [line for line in lines if not line.startswith("[+")]
+        return [
+            line for line in lines[2:]
+            if not line.startswith("[+") and not line.startswith("―")
+        ]
 
     first = rows(session.run("ii 2"))
     assert len(first) == 2
     rest = rows(session.run("ii -o 2"))
     assert rest
     assert rest[0] != first[0]
+
+
+def test_is_has_the_radare2_symbol_columns(session) -> None:
+    session.failed = False
+    lines = session.run("is")
+    assert not session.failed, session.last_error
+    assert lines[0].split() == [
+        "nth", "paddr", "vaddr", "bind", "type", "size", "lib", "name", "demangled",
+    ]
+    rows = [line for line in lines[2:] if not line.startswith("―")]
+    assert rows
+    for line in rows[:5]:
+        tokens = line.split()
+        assert len(tokens) >= 7
+        assert tokens[1].startswith("0x") or tokens[1] == "----------"
+        assert tokens[2].startswith("0x") or tokens[2] == "----------"
+        assert tokens[3] in {"LOCAL", "GLOBAL", "WEAK", "NUM", "UNKNOWN"}
 
 
 def test_grep_filter(session) -> None:

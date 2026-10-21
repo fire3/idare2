@@ -14,6 +14,7 @@ import pytest
 from idare2.config import Config
 from idare2.fmt import disasm as fmt_disasm
 from idare2.fmt import graph as fmt_graph
+from idare2.fmt import listing as fmt_listing
 from idare2.fmt import memory as fmt_memory
 from idare2.fmt.colors import Colors
 
@@ -111,6 +112,70 @@ def test_function_header_only_at_a_function_start(session: FakeSession) -> None:
         function_result(LINES, func=elsewhere), session
     )
     assert not mid[0].startswith("┌ 2036")
+
+
+def test_symbol_table_matches_radare2_columns(session: FakeSession) -> None:
+    rows = [
+        {
+            "ordinal": 1,
+            "paddr": 0x31614,
+            "vaddr": 0x39614,
+            "bind": "GLOBAL",
+            "type": "FUNC",
+            "size": 192,
+            "lib": "",
+            "name": "cJSON_CreateStringArray",
+            "demangled": "",
+        },
+        {
+            "ordinal": 2,
+            "paddr": None,
+            "vaddr": 0xFD77C,
+            "bind": "LOCAL",
+            "type": "OBJ",
+            "size": 4,
+            "lib": "",
+            "name": "g_object",
+            "demangled": "",
+        },
+    ]
+    lines = fmt_listing.format_symbols(rows, session)
+    assert lines[0].split() == [
+        "nth", "paddr", "vaddr", "bind", "type", "size", "lib", "name", "demangled",
+    ]
+    assert lines[2].split() == [
+        "1", "0x00031614", "0x00039614", "GLOBAL", "FUNC", "192", "cJSON_CreateStringArray",
+    ]
+    assert lines[3].split() == [
+        "2", "----------", "0x000fd77c", "LOCAL", "OBJ", "4", "g_object",
+    ]
+
+
+def test_import_table_matches_radare2_columns(session: FakeSession) -> None:
+    rows = [
+        {
+            "ordinal": 3,
+            "vaddr": 0xE740,
+            "bind": "GLOBAL",
+            "type": "FUNC",
+            "lib": "",
+            "name": "pthread_detach",
+        },
+        {
+            "ordinal": 50,
+            "vaddr": None,
+            "bind": "WEAK",
+            "type": "NOTYPE",
+            "lib": "",
+            "name": "_ITM_deregisterTMCloneTable",
+        },
+    ]
+    lines = fmt_listing.format_imports(rows, session)
+    assert lines[0].split() == ["nth", "vaddr", "bind", "type", "lib", "name"]
+    assert lines[2].split() == ["3", "0x0000e740", "GLOBAL", "FUNC", "pthread_detach"]
+    assert lines[3].split() == [
+        "50", "----------", "WEAK", "NOTYPE", "_ITM_deregisterTMCloneTable",
+    ]
 
 
 HEXDUMP = {

@@ -105,19 +105,47 @@ def format_functions(functions: list[dict[str, Any]], session: Any) -> list[str]
 
 
 def format_symbols(symbols: list[dict[str, Any]], session: Any) -> list[str]:
-    """``is``."""
+    """``is`` -- nth/paddr/vaddr/bind/type/size/lib/name/demangled."""
     width = addr_width(session.info.get("bits"))
-    return [f"{fmt_addr(int(s['ea']), width)} {s['name']}" for s in symbols]
+    headers = ("nth", "paddr", "vaddr", "bind", "type", "size", "lib", "name", "demangled")
+    rows = []
+    for symbol in symbols:
+        paddr = symbol.get("paddr")
+        vaddr = symbol.get("vaddr", symbol.get("ea", 0))
+        rows.append(
+            [
+                str(symbol.get("ordinal", symbol.get("ea", 0))),
+                fmt_addr(int(paddr), width) if paddr is not None else "----------",
+                fmt_addr(int(vaddr), width) if vaddr is not None else "----------",
+                symbol.get("bind") or "NONE",
+                symbol.get("type") or "NONE",
+                str(symbol.get("size", 0)),
+                symbol.get("lib") or "",
+                symbol["name"],
+                symbol.get("demangled") or "",
+            ]
+        )
+    return table(headers, rows)
 
 
 def format_imports(imports: list[dict[str, Any]], session: Any) -> list[str]:
-    """``ii``."""
+    """``ii`` -- nth/vaddr/bind/type/lib/name."""
     width = addr_width(session.info.get("bits"))
-    return [
-        f"{item['ordinal']:>5} {fmt_addr(int(item['ea']), width)} {item['module']:<20} "
-        f"{item['name']}"
-        for item in imports
-    ]
+    headers = ("nth", "vaddr", "bind", "type", "lib", "name")
+    rows = []
+    for item in imports:
+        vaddr = item.get("vaddr", item.get("ea", 0))
+        rows.append(
+            [
+                str(item.get("ordinal", 0)),
+                fmt_addr(int(vaddr), width) if vaddr is not None else "----------",
+                item.get("bind") or "NONE",
+                item.get("type") or "NONE",
+                item.get("lib", item.get("module", "")) or "",
+                item["name"],
+            ]
+        )
+    return table(headers, rows)
 
 
 def format_entries(entries: list[dict[str, Any]], session: Any) -> list[str]:

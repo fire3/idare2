@@ -8,6 +8,7 @@ from typing import Any
 from idare2 import protocol
 from idare2.remote import helpers
 from idare2.remote.dispatch import op
+from idare2.remote.elf import ElfFile, load_elf
 
 #: IDA's auto-generated ("dummy") name prefixes.  A database whose names are all
 #: dummy has been stripped -- which is what ``iI``'s ``stripped`` key reports.
@@ -209,17 +210,27 @@ def imports(
     them fails the dispatcher's ``signature.bind`` before it ever runs.
     """
     predicate = helpers.name_filter(pattern)
+    elf = _elf_for(db)
 
     def make() -> Iterator[dict[str, Any]]:
+        if elf is not None:
+            for row in elf.import_rows():
+                if predicate(row["name"]):
+                    yield row
+            return
         for item in db.imports.get_all_imports():
             name = item.name or ""
             if not predicate(name):
                 continue
+            address = int(item.address)
             yield {
-                "ea": int(item.address),
-                "name": name,
-                "module": item.module_name or "",
                 "ordinal": int(item.ordinal),
+                "ea": address,
+                "vaddr": address,
+                "bind": "GLOBAL",
+                "type": "FUNC",
+                "lib": item.module_name or "",
+                "name": name,
             }
 
     return helpers.paged(make, offset, count)
@@ -251,11 +262,32 @@ def symbols(
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """Symbol table (``is``)."""
     predicate = helpers.name_filter(pattern)
+    elf = _elf_for(db)
 
     def make() -> Iterator[dict[str, Any]]:
+        if elf is not None:
+            for row in elf.symbol_rows():
+                if predicate(row["name"]):
+                    yield row
+            return
+        segments = _segments_or_none(db)
         for ea, name in db.names.get_all():
-            if predicate(name):
-                yield {"ea": int(ea), "name": name}
+            if not predicate(name):
+                continue
+            address = int(ea)
+            paddr, _section = _locate(segments, address) if segments else (None, "unknown")
+            yield {
+                "ordinal": address,
+                "ea": address,
+                "paddr": paddr,
+                "vaddr": address,
+                "bind": "GLOBAL",
+                "type": "FUNC",
+                "size": 0,
+                "lib": "",
+                "name": name,
+                "demangled": "",
+            }
 
     return helpers.paged(make, offset, count)
 
@@ -269,11 +301,12 @@ def strings(
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """String table (``iz``)."""
     predicate = helpers.name_filter(pattern)
-    segments = _segment_index(db)
+    elf = _elf_for(db)
+    segments = None if elf is not None else _segment_index(db)
 
     def make() -> Iterator[dict[str, Any]]:
         for item in db.strings.get_all():
-            row = _string_row(item, segments)
+            row = _string_row(item, elf, segments)
             if row is None or not predicate(row["text"]):
                 continue
             yield row
@@ -281,14 +314,23 @@ def strings(
     return helpers.paged(make, offset, count)
 
 
-def _string_row(item: Any, segments: list[tuple[int, int, str, int | None]]) -> dict[str, Any] | None:
+def _string_row(
+    item: Any,
+    elf: ElfFile | None,
+    segments: list[tuple[int, int, str, int | None]] | None,
+) -> dict[str, Any] | None:
     """One ``iz`` row, or ``None`` when IDA cannot render the literal."""
     contents = item.contents
     if contents is None:
         return None
     text = contents.decode("utf-8", errors="replace")
     ea = int(item.address)
-    paddr, section = _locate(segments, ea)
+    if elf is not None:
+        paddr, section = elf.locate(ea)
+    elif segments is not None:
+        paddr, section = _locate(segments, ea)
+    else:
+        paddr, section = ea, "unknown"
     return {
         "ea": ea,
         "paddr": paddr,
@@ -350,6 +392,27 @@ def _segment_index(db: Any) -> list[tuple[int, int, str, int | None]]:
             )
         )
     return out
+
+
+def _segments_or_none(db: Any) -> list[tuple[int, int, str, int | None]] | None:
+    """Segment index for non-ELF inputs, or ``None`` when IDA is unavailable."""
+    try:
+        return _segment_index(db)
+    except Exception:
+        return None
+
+
+def _elf_for(db: Any) -> ElfFile | None:
+    """The input file's ELF metadata, when the database came from ELF."""
+    try:
+        import ida_nalt
+
+        path = ida_nalt.get_input_file_path()
+    except Exception:
+        return None
+    if not path:
+        return None
+    return load_elf(path)
 
 
 def _locate(

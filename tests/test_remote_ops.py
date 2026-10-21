@@ -261,10 +261,12 @@ def test_imports_filters_by_pattern() -> None:
 
 
 def test_imports_row_shape_matches_the_formatter() -> None:
-    """``format_imports`` indexes ordinal/ea/module/name -- all four must exist."""
+    """``format_imports`` needs the r2 column set on every row."""
     rows = _rows(dispatch.invoke(FakeDb(), "imports", {"pattern": None, "offset": 0}))
-    assert set(rows[0]) == {"ea", "name", "module", "ordinal"}
+    assert set(rows[0]) == {"ordinal", "ea", "vaddr", "bind", "type", "lib", "name"}
     assert isinstance(rows[0]["ordinal"], int)
+    assert rows[0]["bind"] == "GLOBAL"
+    assert rows[0]["type"] == "FUNC"
 
 
 def test_listing_ops_accept_the_client_paging_arguments() -> None:
@@ -588,7 +590,7 @@ def test_string_row_survives_a_string_ida_domain_cannot_classify() -> None:
     """Regression: this ValueError aborted `iz` for the whole database."""
     from idare2.remote.ops.info import _string_row
 
-    row = _string_row(OddString(), RODATA)
+    row = _string_row(OddString(), None, RODATA)
     assert row is not None
     assert row["text"] == "still readable"
     assert row["ea"] == 0xC8C48
@@ -600,7 +602,7 @@ def test_string_row_survives_a_string_ida_domain_cannot_classify() -> None:
 def test_string_row_keeps_the_normal_path_intact() -> None:
     from idare2.remote.ops.info import _string_row
 
-    row = _string_row(PlainString(), RODATA)
+    row = _string_row(PlainString(), None, RODATA)
     assert row == {
         "ea": 0xC8C48,
         "paddr": 0xC0C48 + (0xC8C48 - 0xC8000),
@@ -619,4 +621,4 @@ def test_string_row_skips_an_unrenderable_literal() -> None:
     class NoContents(PlainString):
         contents = None
 
-    assert _string_row(NoContents(), RODATA) is None
+    assert _string_row(NoContents(), None, RODATA) is None
