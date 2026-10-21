@@ -103,6 +103,26 @@ def save(db: Any) -> dict[str, Any]:
     return {"saved": True}
 
 
+@op("deep_analyze", writes=True)
+def deep_analyze(db: Any) -> dict[str, Any]:
+    """Run IDA's deep analysis over the whole database (``aaa``/``aaaa``).
+
+    ``wait_autoanalysis`` only drains work IDA already queued.  ``aaa`` promises
+    to look at regions the loader did not recognise, which is exactly what
+    ``ida_auto.plan_and_wait`` does for the full address range.
+    """
+    import ida_auto
+    import ida_ida
+    import ida_idaapi
+
+    start = int(ida_ida.inf_get_min_ea())
+    end = int(ida_ida.inf_get_max_ea())
+    if start == int(ida_idaapi.BADADDR) or end == int(ida_idaapi.BADADDR) or end <= start:
+        return {"analyzed": False, "start": start, "end": end}
+    ok = ida_auto.plan_and_wait(start, end)
+    return {"analyzed": bool(ok), "start": start, "end": end}
+
+
 def _compiler_name(db: Any) -> str | None:
     try:
         info = db.compiler_information

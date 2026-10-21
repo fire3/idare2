@@ -62,6 +62,11 @@ class FakeRemote:
                 "size": len(self.assembly),
                 "data": self.assembly,
             },
+            "deep_analyze": lambda: {
+                "analyzed": True,
+                "start": 0x1000,
+                "end": 0x2000,
+            },
             "set_name": lambda: {"ea": arguments["ea"], "name": arguments["name"]},
             "delete_name": lambda: {"ea": arguments["ea"]},
             "comments": lambda: (
@@ -218,6 +223,20 @@ def test_seek_is_permanent() -> None:
     session.run("s 0x2000")
     assert session.seek == 0x2000
     assert session.run("s") == ["0x00002000"]
+
+
+def test_aaa_runs_deep_analysis() -> None:
+    from types import SimpleNamespace
+
+    session, remote = make_session()
+    session.handle = SimpleNamespace(
+        instance=SimpleNamespace(backend="idalib"),
+        wait_autoanalysis=lambda _timeout: None,
+    )
+    assert session.run("aa") == ["-- analysis complete --"]
+    assert session.run("aaa") == ["-- analysis complete (deep) --"]
+    assert session.run("aaaa") == ["-- analysis complete (deep) --"]
+    assert [name for name, _ in remote.calls].count("deep_analyze") == 2
 
 
 def test_temporary_seek_is_restored() -> None:
@@ -741,6 +760,37 @@ def test_json_default_leaves_commands_without_a_j_form_alone() -> None:
     session, _remote = _json_default()
     lines = session.run("px 8 @ 0x1000")
     assert lines[0].startswith("- offset -")
+
+
+def test_pc_matches_r2_c_array_layout() -> None:
+    session, _remote = make_session()
+    assert session.run("pc 4 @ 0x1000") == [
+        "#define _BUFFER_SIZE 4",
+        "const uint8_t buffer[_BUFFER_SIZE] = {",
+        "  0xaa, 0xaa, 0xaa, 0xaa",
+        "};",
+    ]
+
+
+def test_pc_suffixes_match_r2() -> None:
+    session, _remote = make_session()
+    assert session.run("pcj 4 @ 0x1000") == ["[170,170,170,170]"]
+    assert session.run("pc* 4 @ 0x1000") == ["wx+aaaaaaaa;", "s-4"]
+    assert session.run("pcq 4 @ 0x1000") == ["  0xaa, 0xaa, 0xaa, 0xaa"]
+    assert session.run("pcp 4 @ 0x1000") == [
+        "import struct",
+        'buf = struct.pack ("4B", *[',
+        "0xaa,0xaa,0xaa,0xaa])",
+    ]
+
+
+def test_comment_star_emits_replayable_base64_commands() -> None:
+    session, _remote = make_session()
+    assert session.run("CC*") == [
+        "CCu base64:Zmlyc3Q= @ 0x00001000",
+        "CCu base64:c2Vjb25k @ 0x00002000",
+    ]
+    assert session.run("C*") == session.run("CC*")
 
 
 def test_json_default_is_off_by_default() -> None:

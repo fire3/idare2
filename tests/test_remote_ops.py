@@ -119,6 +119,32 @@ def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None
     ]
 
 
+def test_deep_analyze_plans_the_whole_range(monkeypatch) -> None:
+    import sys
+
+    calls = []
+    ida_ida = SimpleNamespace(
+        inf_get_min_ea=lambda: 0x1000,
+        inf_get_max_ea=lambda: 0x2000,
+    )
+    ida_auto = SimpleNamespace(
+        plan_and_wait=lambda start, end: calls.append((start, end)) or 1
+    )
+    ida_idaapi = SimpleNamespace(BADADDR=0xFFFFFFFFFFFFFFFF)
+    monkeypatch.setitem(sys.modules, "ida_ida", ida_ida)
+    monkeypatch.setitem(sys.modules, "ida_auto", ida_auto)
+    monkeypatch.setitem(sys.modules, "ida_idaapi", ida_idaapi)
+
+    envelope = dispatch.invoke(SimpleNamespace(), "deep_analyze", {})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {
+        "analyzed": True,
+        "start": 0x1000,
+        "end": 0x2000,
+    }
+    assert calls == [(0x1000, 0x2000)]
+
+
 def test_assemble_returns_idautils_bytes(monkeypatch) -> None:
     import sys
 

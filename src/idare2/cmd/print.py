@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from idare2 import assembler
@@ -43,6 +44,11 @@ MEMORY_DETAIL = [
     ("p8", "[n]", "hexpair list of bytes"),
     ("pr", "[n]", "raw bytes"),
     ("pc", "[n]", "C array of bytes"),
+    ("pcj", "[n]", "C array of bytes as JSON"),
+    ("pc*", "[n]", "C array of bytes as r2 `wx` commands"),
+    ("pcq", "[n]", "quiet C array of bytes"),
+    ("pcp", "[n]", "C array of bytes as a Python struct.pack"),
+    ("pcP", "[n]", "C array of bytes as a Python struct.pack"),
     ("ps", "[n]", "string at the current offset"),
     ("psw", "[n]", "wide (UTF-16) string"),
     ("pv", "[n]", "value of the given size (1, 2, 4, 8)"),
@@ -189,11 +195,67 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
         return payload.get("data", b"").decode("utf-8", errors="replace").splitlines()
     if token == "pc":
         raw = bytes(payload.get("data") or b"")
-        body = ", ".join(f"0x{byte:02x}" for byte in raw)
-        return [f"unsigned char block[{len(raw)}] = {{{body}}};"]
+        lines = _c_array(raw)
+        return lines
     if token == "px":
         return fmt_memory.format_hexdump(payload, session)
     raise UsageError(f"unsupported print modifier '{token[1:]}' (see p?)")
+
+
+@command("pc[*jqPp]", usage="[n]", summary="C array formats", detail=MEMORY_DETAIL)
+def print_c_array(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    rest, count, _offset = numeric_args(session, statement)
+    target = session.resolve(rest[0]) if rest else session.seek
+    payload = session.remote.call(
+        "read_bytes", ea=target, count=count or session.blocksize
+    )
+    raw = bytes(payload.get("data") or b"")
+    if not raw:
+        return []
+    if token == "pcj":
+        return [json.dumps(list(raw), separators=(",", ":"))]
+    if token == "pc*":
+        lines = [
+            f"wx+{raw[offset:offset + 32].hex()};"
+            for offset in range(0, len(raw), 32)
+        ]
+        lines.append(f"s-{len(raw)}")
+        return lines
+    if token == "pcq":
+        return list(_c_array(raw)[2:-1])
+    if token in ("pcp", "pcP"):
+        return _python_pack(raw)
+    raise UsageError(f"unsupported print modifier '{token[1:]}' (see p?)")
+
+
+def _c_array(raw: bytes) -> list[str]:
+    """r2's ``pc`` layout: 10 bytes per row, trailing commas inside the block."""
+    if not raw:
+        return []
+    lines = [f"#define _BUFFER_SIZE {len(raw)}", "const uint8_t buffer[_BUFFER_SIZE] = {"]
+    for offset in range(0, len(raw), 10):
+        chunk = raw[offset : offset + 10]
+        body = ", ".join(f"0x{byte:02x}" for byte in chunk)
+        if offset + 10 < len(raw):
+            body += ","
+        lines.append(f"  {body}")
+    lines.append("};")
+    return lines
+
+
+def _python_pack(raw: bytes) -> list[str]:
+    """r2's ``pcp``/``pcP`` layout: 11 bytes per row."""
+    lines = ["import struct", f'buf = struct.pack ("{len(raw)}B", *[']
+    for offset in range(0, len(raw), 11):
+        chunk = raw[offset : offset + 11]
+        body = ",".join(f"0x{byte:02x}" for byte in chunk)
+        if offset + 11 < len(raw):
+            body += ","
+        else:
+            body += "])"
+        lines.append(body)
+    return lines
 
 
 def _value_width(token: str, bits: Any) -> int:

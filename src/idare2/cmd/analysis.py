@@ -73,8 +73,12 @@ def _await_analysis(session: Session, *, deep: bool) -> list[str]:
             return ["-- analysis already complete (IDA autoanalysis) --"]
         return ["-- GUI analysis still running; not forcing it --"]
     session.handle.wait_autoanalysis(session.config.get_int("ida.timeout") * 20)
-    suffix = " (deep)" if deep else ""
-    return [f"-- analysis complete{suffix} --"]
+    if not deep:
+        return ["-- analysis complete --"]
+    payload = session.remote.call("deep_analyze")
+    if not payload.get("analyzed"):
+        return ["-- analysis complete; no additional regions to analyse --"]
+    return ["-- analysis complete (deep) --"]
 
 
 @command(

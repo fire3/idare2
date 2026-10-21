@@ -8,6 +8,7 @@ the current address's metadata, ``CC`` adds a comment, ``CC.`` shows it,
 
 from __future__ import annotations
 
+import base64
 from typing import TYPE_CHECKING
 
 from idare2 import cmd as cmd_module
@@ -23,9 +24,11 @@ if TYPE_CHECKING:
 COMMENT_DETAIL = [
     ("C", "", "list comments"),
     ("Cj", "", "list comments as JSON"),
+    ("C*", "", "list comments as radare2 commands"),
     ("C.", "", "metadata at the current address"),
     ("CC", " text [@addr]", "add or replace a comment; bare CC lists them"),
     ("CCr", " text [@addr]", "add a repeatable comment"),
+    ("CC*", "", "list all comments as radare2 commands"),
     ("CC.", "", "show the comment at the current address"),
     ("CC-", "", "remove the comment at the current address"),
     ("CCu", " text [@addr]", "add a comment only if there is none"),
@@ -42,7 +45,7 @@ def metadata(session: Session, statement: Statement) -> list[str]:
     suffix = statement.cmd[1:]
     argument = statement.args.strip()
 
-    if suffix in ("", "j", "*"):
+    if suffix in ("", "j", "*", "C*"):
         return _list(session, suffix)
     if suffix == ".":
         return _show_current(session)
@@ -79,9 +82,18 @@ def metadata(session: Session, statement: Statement) -> list[str]:
 
 
 def _list(session: Session, suffix: str) -> list[str]:
-    if suffix == "*":
-        raise UsageError("C* (comments as radare2 commands) is not implemented yet")
+    if suffix in ("*", "C*"):
+        return _radare_commands(session.remote.call("comments"))
     return _format_comments(session, session.remote.call("comments"), json=suffix == "j")
+
+
+def _radare_commands(rows: list[dict]) -> list[str]:
+    """``C*``/``CC*`` -- replayable ``CCu`` commands, base64-encoded like r2."""
+    return [
+        f"CCu base64:{base64.b64encode(row['comment'].encode()).decode()} "
+        f"@ 0x{int(row['ea']):08x}"
+        for row in rows
+    ]
 
 
 def _format_comments(session: Session, rows: list[dict], *, json: bool) -> list[str]:
