@@ -84,6 +84,28 @@ def test_duplicate_remote_operation_fails_loudly() -> None:
         dispatch.op("imports")(lambda db: None)
 
 
+def test_header_fields_returns_the_elf_header_rows(monkeypatch) -> None:
+    from idare2.remote.ops import info as info_ops
+
+    rows = [{"name": "ELF", "vaddr": 0, "paddr": 0}]
+    fake = SimpleNamespace(bits=64, header_rows=lambda: rows)
+    monkeypatch.setattr(info_ops, "_elf_for", lambda db: fake)
+
+    envelope = dispatch.invoke(FakeDb(), "header_fields", {})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {"bits": 64, "fields": rows}
+
+
+def test_header_fields_needs_the_original_elf(monkeypatch) -> None:
+    from idare2.remote.ops import info as info_ops
+
+    monkeypatch.setattr(info_ops, "_elf_for", lambda db: None)
+    envelope = dispatch.invoke(FakeDb(), "header_fields", {})
+    assert not protocol.is_ok(envelope)
+    assert envelope["error"]["code"] == protocol.NOT_FOUND
+    assert "ELF" in envelope["error"]["message"]
+
+
 def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None:
     import sys
 

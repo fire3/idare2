@@ -6,6 +6,8 @@ session's job is orchestration: parse, seek, dispatch, filter, pipe, report.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from idare2 import filter as grep
@@ -124,6 +126,29 @@ class FakeRemote:
                     "is_ifunc": False,
                 },
             ],
+            "header_fields": lambda: {
+                "bits": 32,
+                "fields": [
+                    {
+                        "name": "ELF",
+                        "vaddr": 0,
+                        "paddr": 0,
+                        "size": 4,
+                        "value": 0x464C457F,
+                        "format": "x",
+                        "pf": [{"type": "x", "offset": 0, "value": 0x464C457F}],
+                    },
+                    {
+                        "name": "Type",
+                        "vaddr": 0x10,
+                        "paddr": 0x10,
+                        "size": 2,
+                        "value": 2,
+                        "format": "w",
+                        "pf": [{"type": "w", "offset": 0x10, "value": 2}],
+                    },
+                ],
+            },
             "function_info": lambda: {
                 "ea": arguments["ea"],
                 "end": arguments["ea"] + 8,
@@ -1354,6 +1379,48 @@ def test_ir_renders_the_relocation_table() -> None:
 def test_iM_reports_main_virtual_and_physical_addresses() -> None:
     session, _remote = make_session()
     assert session.run("iM") == ["vaddr=0x00001000 paddr=0x00004000"]
+
+
+def test_ih_and_iH_render_the_elf_header() -> None:
+    session, _remote = make_session()
+    assert session.run("ih") == [
+        "0x00000000 0x00000000 0x464c457f ELF",
+        "0x00000010 0x00000010 0x00000002 Type",
+    ]
+    assert not session.failed
+    assert session.run("iH") == [
+        "0x00000000  ELF MAGIC   0x464c457f",
+        "0x00000010  Type        0x0002",
+    ]
+
+
+def test_ihj_and_iHj_keep_radare2_shapes() -> None:
+    session, _remote = make_session()
+    rows = json.loads("\n".join(session.run("ihj")))
+    assert [row["name"] for row in rows] == ["ELF", "Type"]
+    assert rows[0]["pf"] == [{"type": "x", "offset": 0, "value": 0x464C457F}]
+
+    wrapped = json.loads("\n".join(session.run("iHj")))
+    assert wrapped["header"].splitlines()[0] == "0x00000000  ELF MAGIC   0x464c457f"
+    assert wrapped["header"].endswith("\n")
+
+
+def test_ih_star_renders_bin_fields_commands() -> None:
+    session, remote = make_session()
+    lines = session.run("ih*")
+    assert lines[0] == "'fs+header"
+    assert "'f header.ELF.value 1 0x464c457f" in lines
+    assert "'pf.Type w" in lines
+    assert lines[-1] == "'fs-"
+    assert "header_fields" in remote.operations
+
+
+def test_ih_rejects_unknown_modifiers() -> None:
+    session, _remote = make_session()
+    session.run("ihx")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported information command" in str(session.last_error)
 
 
 def test_text_search_context_is_clamped_to_the_mapped_segment() -> None:

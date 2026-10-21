@@ -157,7 +157,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Disassembly | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc` |
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
 | Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `pf` `pfj` `pfs` `ps` `psw` `pv` `ph` `pwd` |
-| Information | `i` `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE` `iM` |
+| Information | `i` `iI` `ij` `iS` `ii` `is` `iz` `ir` `ih` `iH` `ie` `iE` `iM` |
 | Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |

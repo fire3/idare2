@@ -178,6 +178,108 @@ def test_import_table_matches_radare2_columns(session: FakeSession) -> None:
     ]
 
 
+HEADER_FIELDS = [
+    {
+        "name": "ELF",
+        "vaddr": 0x00,
+        "paddr": 0x00,
+        "size": 4,
+        "value": 0x464C457F,
+        "format": "x",
+        "pf": [{"type": "x", "offset": 0x00, "value": 0x464C457F}],
+    },
+    {
+        "name": "Type",
+        "vaddr": 0x10,
+        "paddr": 0x10,
+        "size": 2,
+        "value": 2,
+        "format": "w",
+        "pf": [{"type": "w", "offset": 0x10, "value": 2}],
+    },
+    {
+        "name": "EntryPoint",
+        "vaddr": 0x18,
+        "paddr": 0x18,
+        "size": 4,
+        "value": 0x400100,
+        "format": "x",
+        "pf": [{"type": "x", "offset": 0x18, "value": 0x400100}],
+    },
+    {
+        "name": "Flags",
+        "vaddr": 0x24,
+        "paddr": 0x24,
+        "size": 4,
+        "format": "x",
+        "pf": [{"type": "x", "offset": 0x24, "value": 0}],
+    },
+    {
+        "name": "EhSize",
+        "vaddr": 0x28,
+        "paddr": 0x28,
+        "size": 2,
+        "value": 52,
+        "format": "w",
+        "pf": [{"type": "w", "offset": 0x28, "value": 52}],
+    },
+]
+
+
+def test_header_table_matches_radare2_headers32(session: FakeSession) -> None:
+    """``iH``: 4-digit hex for Type/Machine, decimal for the sizes, ELF MAGIC."""
+    assert fmt_listing.format_header(HEADER_FIELDS, 32) == [
+        "0x00000000  ELF MAGIC   0x464c457f",
+        "0x00000010  Type        0x0002",
+        "0x00000018  Entrypoint  0x00400100",
+        "0x00000024  Flags       0x00000000",
+        "0x00000028  EhSize      52",
+    ]
+
+
+def test_header_table_matches_radare2_headers64(session: FakeSession) -> None:
+    """The same rows under the 64-bit plugin only change the magic label."""
+    lines = fmt_listing.format_header(HEADER_FIELDS, 64)
+    assert lines[0] == "0x00000000  ELF64       0x464c457f"
+    assert lines[1] == "0x00000010  Type        0x0002"
+
+
+def test_header_field_rows_match_radare2_ih(session: FakeSession) -> None:
+    assert fmt_listing.format_header_fields(HEADER_FIELDS) == [
+        "0x00000000 0x00000000 0x464c457f ELF",
+        "0x00000010 0x00000010 0x00000002 Type",
+        "0x00000018 0x00000018 0x00400100 EntryPoint",
+        "0x00000024 0x00000024 0x00000000 Flags",
+        "0x00000028 0x00000028 0x00000034 EhSize",
+    ]
+    assert fmt_listing.format_header_quiet(HEADER_FIELDS)[3] == "0x00000024 0x00000000 Flags"
+
+
+def test_header_commands_match_bin_fields(session: FakeSession) -> None:
+    """``ih*`` sets one flag per field plus a sized data definition."""
+    assert fmt_listing.format_header_radare(HEADER_FIELDS) == [
+        "'fs+header",
+        "'f header.ELF 1 0x00000000",
+        "'f header.ELF.value 1 0x464c457f",
+        "'@0x0'Cd4",
+        "'pf.ELF x",
+        "'f header.Type 1 0x00000010",
+        "'f header.Type.value 1 0x00000002",
+        "'pf.Type w",
+        "'f header.EntryPoint 1 0x00000018",
+        "'f header.EntryPoint.value 1 0x00400100",
+        "'@0x18'Cd4",
+        "'pf.EntryPoint x",
+        "'f header.Flags 1 0x00000024",
+        "'@0x24'Cd4",
+        "'pf.Flags x",
+        "'f header.EhSize 1 0x00000028",
+        "'f header.EhSize.value 1 0x00000034",
+        "'pf.EhSize w",
+        "'fs-",
+    ]
+
+
 HEXDUMP = {
     "ea": 0x00008D10,
     "count": 32,

@@ -88,6 +88,67 @@ _TYPE = {
 
 
 @dataclass(frozen=True)
+class ElfHeader:
+    """The ELF file header (``Elf_Ehdr``), as read from the input file."""
+
+    ident: bytes
+    type: int
+    machine: int
+    version: int
+    entry: int
+    phoff: int
+    shoff: int
+    flags: int
+    ehsize: int
+    phentsize: int
+    phnum: int
+    shentsize: int
+    shnum: int
+    shstrndx: int
+
+
+#: radare2's ``bin_elf`` ``fields`` table: ``(name, offset, size, pf format)``.
+#: The field order, offsets and formats are what ``ih``/``iH`` print, and the
+#: ``pf`` rows embedded in ``ihj`` come from the same formats.
+HEADER_FIELDS_32 = (
+    ("ELF", 0x00, 4, "x"),
+    ("Type", 0x10, 2, "w"),
+    ("Machine", 0x12, 2, "w"),
+    ("Version", 0x14, 4, "x"),
+    ("EntryPoint", 0x18, 4, "x"),
+    ("PhOff", 0x1C, 4, "x"),
+    ("ShOff", 0x20, 4, "x"),
+    ("Flags", 0x24, 4, "x"),
+    ("EhSize", 0x28, 2, "w"),
+    ("PhentSize", 0x2A, 2, "w"),
+    ("PhNum", 0x2C, 2, "w"),
+    ("ShentSize", 0x2E, 2, "w"),
+    ("ShNum", 0x30, 2, "w"),
+    ("ShrStrndx", 0x32, 2, "w"),
+)
+
+HEADER_FIELDS_64 = (
+    ("ELF", 0x00, 4, "x"),
+    ("Type", 0x10, 2, "w"),
+    ("Machine", 0x12, 2, "w"),
+    ("Version", 0x14, 4, "x"),
+    ("EntryPoint", 0x18, 8, "q"),
+    ("PhOff", 0x20, 8, "q"),
+    ("ShOff", 0x28, 8, "q"),
+    ("Flags", 0x30, 4, "x"),
+    ("EhSize", 0x34, 2, "w"),
+    ("PhentSize", 0x36, 2, "w"),
+    ("PhNum", 0x38, 2, "w"),
+    ("ShentSize", 0x3A, 2, "w"),
+    ("ShNum", 0x3C, 2, "w"),
+    ("ShrStrndx", 0x3E, 2, "w"),
+)
+
+#: ``UT64_MAX``, which r2 treats as "no value" for a field.
+_NO_VALUE = 0xFFFFFFFFFFFFFFFF
+
+
+@dataclass(frozen=True)
 class Section:
     index: int
     name: str
@@ -145,7 +206,7 @@ class ElfFile:
         path: str,
         bits: int,
         endian: str,
-        machine: int,
+        header: ElfHeader,
         file_size: int,
         sections: list[Section],
         programs: list[Program],
@@ -155,7 +216,8 @@ class ElfFile:
         self.path = path
         self.bits = bits
         self.endian = endian
-        self.machine = machine
+        self.header = header
+        self.machine = header.machine
         self.file_size = file_size
         self.sections = sections
         self.programs = programs
@@ -193,14 +255,14 @@ class ElfFile:
                 sym_format = endian + "IIIBBH"
 
             (
-                _e_type,
+                e_type,
                 machine,
-                _version,
-                _entry,
+                version,
+                entry,
                 phoff,
                 shoff,
-                _flags,
-                _ehsize,
+                flags,
+                ehsize,
                 phentsize,
                 phnum,
                 shentsize,
@@ -219,7 +281,22 @@ class ElfFile:
                 path=str(path),
                 bits=bits,
                 endian=endian,
-                machine=machine,
+                header=ElfHeader(
+                    ident=ident,
+                    type=e_type,
+                    machine=machine,
+                    version=version,
+                    entry=entry,
+                    phoff=phoff,
+                    shoff=shoff,
+                    flags=flags,
+                    ehsize=ehsize,
+                    phentsize=phentsize,
+                    phnum=phnum,
+                    shentsize=shentsize,
+                    shnum=shnum,
+                    shstrndx=shstrndx,
+                ),
                 file_size=file_size,
                 sections=sections,
                 programs=programs,
@@ -480,6 +557,47 @@ class ElfFile:
         return (paddr if paddr is not None else vaddr), name
 
     # -- listing rows ------------------------------------------------------
+
+    def header_rows(self) -> list[dict[str, Any]]:
+        """Rows in ``ih`` order: radare2's ``fields`` table.
+
+        The values are the file header's own, but the layout (offsets, sizes
+        and ``pf`` formats) is the plugin's, so each row looks like a field
+        found at that file offset.  ``value`` is omitted for zero fields,
+        exactly like ``bin_fields``' JSON printer.
+        """
+        layout = HEADER_FIELDS_64 if self.bits == 64 else HEADER_FIELDS_32
+        values = {
+            "ELF": int.from_bytes(self.header.ident[:4], "little"),
+            "Type": self.header.type,
+            "Machine": self.header.machine,
+            "Version": self.header.version,
+            "EntryPoint": self.header.entry,
+            "PhOff": self.header.phoff,
+            "ShOff": self.header.shoff,
+            "Flags": self.header.flags,
+            "EhSize": self.header.ehsize,
+            "PhentSize": self.header.phentsize,
+            "PhNum": self.header.phnum,
+            "ShentSize": self.header.shentsize,
+            "ShNum": self.header.shnum,
+            "ShrStrndx": self.header.shstrndx,
+        }
+        rows: list[dict[str, Any]] = []
+        for name, offset, size, fmt in layout:
+            value = values[name]
+            row: dict[str, Any] = {
+                "name": name,
+                "vaddr": offset,
+                "paddr": offset,
+                "size": size,
+            }
+            if value and value != _NO_VALUE:
+                row["value"] = value
+            row["format"] = fmt
+            row["pf"] = [{"type": fmt, "offset": offset, "value": value}]
+            rows.append(row)
+        return rows
 
     def _symbol_row(self, symbol: Symbol, *, name: str | None = None, size: int | None = None) -> dict[str, Any]:
         vaddr = symbol.value

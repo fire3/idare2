@@ -206,6 +206,80 @@ def format_strings(strings: list[dict[str, Any]], session: Any) -> list[str]:
     return table(headers, rows)
 
 
+#: ``iH``'s value renderings.  ``Type``/``Machine`` print as 4-digit hex and
+#: the sizes/counts as decimal, although the ``ih`` field table calls them all
+#: ``w``; the two plugins (``headersNN`` vs ``fields``) disagree on purpose.
+_HEADER_DECIMAL = frozenset(
+    {"EhSize", "PhentSize", "PhNum", "ShentSize", "ShNum", "ShrStrndx"}
+)
+_HEADER_HALF_HEX = frozenset({"Type", "Machine"})
+_HEADER_NAMES = {"ELF": None, "EntryPoint": "Entrypoint"}
+
+
+def format_header(fields: list[dict[str, Any]], bits: int) -> list[str]:
+    """``iH`` -- radare2's ``headersNN``: offset, field name, raw value.
+
+    32-bit files label the magic row ``ELF MAGIC``; 64-bit files ``ELF64``.
+    """
+    label = "ELF64" if int(bits) == 64 else "ELF MAGIC"
+    lines = []
+    for field in fields:
+        name = _HEADER_NAMES.get(field["name"], field["name"])
+        name = label if name is None else name
+        value = int(field.get("value") or 0)
+        if name in _HEADER_DECIMAL:
+            rendered = str(value)
+        elif name in _HEADER_HALF_HEX:
+            rendered = f"0x{value:04x}"
+        else:
+            rendered = f"0x{value:08x}"
+        lines.append(f"0x{int(field['vaddr']):08x}  {name:<12}{rendered}")
+    return lines
+
+
+def format_header_fields(fields: list[dict[str, Any]]) -> list[str]:
+    """``ih`` -- vaddr, paddr, value, field name (all values as hex)."""
+    return [
+        f"0x{int(field['vaddr']):08x} 0x{int(field['paddr']):08x} "
+        f"0x{int(field.get('value') or 0):08x} {field['name']}"
+        for field in fields
+    ]
+
+
+def format_header_quiet(fields: list[dict[str, Any]]) -> list[str]:
+    """``ihq`` -- vaddr, value, field name."""
+    return [
+        f"0x{int(field['vaddr']):08x} 0x{int(field.get('value') or 0):08x} {field['name']}"
+        for field in fields
+    ]
+
+
+def format_header_radare(fields: list[dict[str, Any]]) -> list[str]:
+    """``ih*`` / ``iH*`` -- the flags radare2's ``bin_fields`` emits.
+
+    One flag per field (``header.<name>``), plus ``header.<name>.value`` when
+    the field is non-zero and a ``Cd4``/``Cd8`` data definition sized like it.
+    """
+    lines = ["'fs+header"]
+    for field in fields:
+        name = field["name"]
+        vaddr = int(field["vaddr"])
+        value = int(field.get("value") or 0)
+        lines.append(f"'f header.{name} 1 0x{vaddr:08x}")
+        if value and value != 0xFFFFFFFFFFFFFFFF:
+            lines.append(f"'f header.{name}.value 1 0x{value:08x}")
+        size = int(field.get("size") or 0)
+        if size == 8:
+            lines.append(f"'@0x{vaddr:x}'Cd8")
+        elif size == 4:
+            lines.append(f"'@0x{vaddr:x}'Cd4")
+        fmt = field.get("format") or ""
+        if fmt:
+            lines.append(f"'pf.{name} {fmt}")
+    lines.append("'fs-")
+    return lines
+
+
 def format_saved(_payload: Any, _session: Any) -> list[str]:
     return []
 

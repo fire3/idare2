@@ -22,9 +22,16 @@ INFO_DETAIL = [
     ("is", "[pat]", "symbols"),
     ("iz", "[pat]", "strings"),
     ("ir", "", "relocations"),
+    ("ih", "", "header fields"),
+    ("iH", "", "file header"),
     ("ie", "", "entry points"),
     ("iE", "", "exports"),
     ("iM", "", "main address"),
+]
+
+HEADER_DETAIL = [
+    ("ih", "[*jq]", "header fields (ELF)"),
+    ("iH", "[*j]", "file header (ELF)"),
 ]
 
 FILE_TOKENS = frozenset({"i", "iI", "ij"})
@@ -110,6 +117,48 @@ def listing(session: Session, statement: Statement) -> list[str]:
         "iE": fmt_listing.format_entries,
     }[base]
     return with_more(formatter(rows, session), meta)
+
+
+@command(
+    "i[hH]",
+    usage="[*jq]",
+    summary="ELF file header",
+    detail=HEADER_DETAIL,
+    json_suffix=True,
+)
+def header(session: Session, statement: Statement) -> list[str]:
+    """``ih``/``iH`` -- the ELF file header, read from the original input.
+
+    radare2 splits this in two: ``ih`` lists the header fields as
+    ``vaddr paddr value name`` rows (with an embedded ``pf`` decode in JSON),
+    while ``iH`` prints the plugin's fixed ``headers32``/``headers64`` table.
+    Both come from the same field list, so one remote operation feeds all
+    forms.
+    """
+    token = statement.cmd
+    base, suffix = token[:2], token[2:]
+    if suffix not in ("", "j", "q", "*"):
+        raise UsageError(f"unsupported information command '{token}' (see ih?)")
+
+    payload = session.remote.call("header_fields")
+    bits = int(payload.get("bits") or session.info.get("bits") or 0)
+    fields = payload.get("fields") or []
+
+    if suffix == "j":
+        if base == "iH":
+            # r2 wraps a plugin-provided header string (trailing newline and
+            # all) in an object instead of emitting an array.
+            text = "\n".join(fmt_listing.format_header(fields, bits)) + "\n"
+            return [to_json({"header": text})]
+        return [to_json(fields)]
+    if suffix == "*":
+        # `iH*` falls back to the fields form in r2 as well.
+        return fmt_listing.format_header_radare(fields)
+    if base == "iH":
+        return fmt_listing.format_header(fields, bits)
+    if suffix == "q":
+        return fmt_listing.format_header_quiet(fields)
+    return fmt_listing.format_header_fields(fields)
 
 
 def _main_address(session: Session) -> list[str]:

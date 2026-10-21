@@ -145,6 +145,25 @@ def _count(iterator: Any) -> int:
     return total
 
 
+@op("header_fields")
+def header_fields(db: Any) -> dict[str, Any]:
+    """ELF file header rows (``ih``/``iH``).
+
+    IDA keeps the parsed header in its loader structures, but the field layout
+    radare2 prints (offset, size, ``pf`` format per field) belongs to the bin
+    plugin.  The original input file is therefore read with :mod:`elf`, the
+    same way ``is``/``ir`` recover information IDA discards.
+    """
+    elf = _elf_for(db)
+    if elf is None:
+        helpers.fail(
+            protocol.NOT_FOUND,
+            "the header listings need the original ELF input file, which is "
+            "missing or not an ELF",
+        )
+    return {"bits": elf.bits, "fields": elf.header_rows()}
+
+
 @op("segments")
 def segments(db: Any) -> list[dict[str, Any]]:
     """Segment table (``iS``)."""

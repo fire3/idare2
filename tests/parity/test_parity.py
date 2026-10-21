@@ -360,6 +360,62 @@ def test_relocation_table_matches_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def _header_field_rows(lines: list[str]) -> list[tuple[int, int, int, str]]:
+    rows = []
+    for line in lines:
+        tokens = line.split()
+        if len(tokens) < 4 or not tokens[0].startswith("0x"):
+            continue
+        rows.append((int(tokens[0], 16), int(tokens[1], 16), int(tokens[2], 16), tokens[3]))
+    return rows
+
+
+def test_header_field_rows_match_r2(session, r2) -> None:
+    """``ih``: every field's vaddr, paddr, value and name must agree."""
+    ours = _header_field_rows(session.run("ih"))
+    theirs = _header_field_rows(r2("ih"))
+    assert ours
+    assert ours == theirs
+
+
+def test_header_text_matches_r2(session, r2) -> None:
+    """``iH`` prints the same fixed ``headers32`` table as the ELF plugin."""
+    ours = session.run("iH")
+    theirs = [line for line in r2("iH") if line.startswith("0x")]
+    assert ours
+    assert ours == theirs
+
+
+def test_header_json_matches_r2(session, r2) -> None:
+    """``ihj`` rows (minus the embedded pf decode) are identical."""
+    ours = json.loads("\n".join(session.run("ihj")))
+    theirs = json.loads("\n".join(r2("ihj")))
+    # r2 evaluates the embedded `pf` at the field's vaddr through its IO map;
+    # the header offsets (0..0x3e) sit below this firmware's first LOAD
+    # (0x8000), so r2 reads 0xffff for every value.  idare2 decodes the field
+    # bytes themselves, which is what the format describes, so compare rows.
+    for row in ours + theirs:
+        row.pop("pf", None)
+    assert ours
+    assert ours == theirs
+
+
+def test_header_string_json_matches_r2(session, r2) -> None:
+    """``iHj`` wraps the same header text, trailing newline included."""
+    ours = json.loads("\n".join(session.run("iHj")))
+    theirs = json.loads("\n".join(r2("iHj")))
+    assert ours == theirs
+
+
+def test_header_commands_match_r2(session, r2) -> None:
+    """``ih*``/``iH*`` emit one flag per header field, byte for byte."""
+    ours = session.run("ih*")
+    theirs = [line for line in r2("ih*") if line.startswith("'")]
+    assert ours
+    assert ours == theirs
+    assert session.run("iH*") == ours
+
+
 def _string_rows(lines: list[str]) -> dict[str, list[tuple[int, int, str]]]:
     rows: dict[str, list[tuple[int, int, str]]] = {}
     for line in lines[2:]:
