@@ -294,6 +294,13 @@ class Session:
             self.warn_once(
                 f"filter-{modifier}", f"~{modifier} is not implemented by idare2 and was ignored"
             )
+        if parsed.pager is not None:
+            message = (
+                "Internal less requires scr.interactive=true"
+                if parsed.pager == "less"
+                else "Hud mode requires scr.interactive=true"
+            )
+            self.warn_once(f"filter-pager-{parsed.pager}", message)
         return parsed.apply(lines)
 
     # -- temporaries -------------------------------------------------------

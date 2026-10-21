@@ -169,8 +169,122 @@ def test_json_modifier_reports_bad_input() -> None:
     assert out and out[0].startswith("~ ERROR")
 
 
-def test_zoom() -> None:
-    assert run("<4", ["abcdefgh"]) == ["abcd"]
+def test_zoom_scales_instead_of_truncating() -> None:
+    # r2: `?e abcdefgh~<2` -> "aceg" followed by the blank trailing buffer line.
+    assert run("<2", ["abcdefgh"]) == ["aceg", "    "]
+    assert run("<4", ["abcdefgh"]) == ["abcdefgh", "        "]
+
+
+def test_zoom_samples_rows() -> None:
+    # Four content lines plus the trailing newline => five source rows; a
+    # two-row zoom samples rows 0 and 2, exactly like r2.
+    assert run("<2", ["aaaa", "bbbb", "cccc", "dddd"]) == ["aaaa", "cccc"]
+
+
+def test_seven_segment() -> None:
+    assert run("?ea", ["abc"]) == [
+        " __         ",
+        "|__||__  __ ",
+        "|  ||__||__ ",
+        "",
+        "",
+        "",
+        "",
+        "",
+    ]
+
+
+def test_c_code_indent() -> None:
+    source = [
+        "int main(int argc, char **argv) {",
+        "if (argc > 1) {",
+        'printf("hi %s\\n", argv[1]);',
+        "}",
+        "return 0;",
+        "}",
+    ]
+    assert run(":}", source) == [
+        "int main(int argc, char **argv) {",
+        "  if (argc > 1) {",
+        '    printf("hi %s\\n", argv[1]);',
+        "  }",
+        "  return 0;",
+        "}",
+    ]
+
+
+def test_c_code_indent_ignores_braces_in_strings_and_comments() -> None:
+    source = ['char *s = "{"; // }', "if (x) {", "y();", "}"]
+    assert run(":}", source) == [
+        'char *s = "{"; // }',
+        "if (x) {",
+        "  y();",
+        "}",
+    ]
+
+
+def test_xml_indent() -> None:
+    source = ['<root><a x="1">text</a><b><c/></b></root>']
+    assert run("<>", source) == [
+        "",
+        "<root>",
+        "",
+        '  <a x="1">',
+        "  text",
+        "  </a>",
+        "",
+        "  <b>",
+        "  ",
+        "    <c/>",
+        "    ",
+        "    </b>",
+        "  ",
+        "  </root>",
+        "",
+    ]
+
+
+def test_json_human() -> None:
+    import json
+
+    assert run("{:", [json.dumps({"a": 1, "b": [1, 2]})]) == [
+        "a: 1",
+        "b: ",
+        "  1",
+        "  2",
+    ]
+
+
+def test_c_highlight_uses_r2_palette() -> None:
+    out = run(":))", ["if (x) { return 1; }"])
+    assert out == [
+        "\x1b[38;2;136;23;152mif\x1b[0m (x) { "
+        "\x1b[38;2;136;23;152mreturn\x1b[0m "
+        "\x1b[38;2;19;161;14m1\x1b[0m; }"
+    ]
+
+
+def test_c_parse_is_reported_as_unimplemented() -> None:
+    out = run(":)", ["int main() {}"])
+    assert out and out[0].startswith("~ ERROR") and "not implemented" in out[0]
+
+
+@pytest.mark.parametrize(
+    ("spec", "pager"),
+    [("..", "less"), ("...", "hud"), ("....", "hud-one-line"),
+     ("{}..", "less"), ("{}...", "hud"), ("{a}..", "less"), ("{:..", "less")],
+)
+def test_pager_modifiers_are_parsed(spec: str, pager: str) -> None:
+    parsed = grep.parse(spec)
+    assert parsed.pager == pager
+    assert spec not in parsed.unimplemented
+
+
+def test_json_pager_still_reformats() -> None:
+    import json
+
+    parsed = grep.parse("{}..")
+    assert parsed.apply([json.dumps({"a": 1})]) == ["{", '  "a": 1', "}"]
 
 
 def test_grep_help_raises() -> None:

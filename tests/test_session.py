@@ -458,6 +458,23 @@ def test_grep_and_pipe_apply_per_statement() -> None:
     assert grep.apply_spec(["x"], "x") == ["x"]
 
 
+def test_pager_filter_warns_once_and_keeps_output(capsys) -> None:
+    session, _ = make_session()
+    assert session.run("?e hello~..") == ["hello"]
+    err = capsys.readouterr().err
+    assert "Internal less requires scr.interactive=true" in err
+    assert "not implemented" not in err
+    # A second use is silent: warn_once keys on the pager kind.
+    assert session.run("?e again~..") == ["again"]
+    assert capsys.readouterr().err == ""
+
+
+def test_hud_filter_warns_and_keeps_output(capsys) -> None:
+    session, _ = make_session()
+    assert session.run("?e hello~...") == ["hello"]
+    assert "Hud mode requires scr.interactive=true" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # ph (hash of a block)
 # ---------------------------------------------------------------------------

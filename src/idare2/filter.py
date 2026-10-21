@@ -31,6 +31,17 @@ from idare2.errors import UsageError
 #: Modifier characters that may open a spec.
 _MODIFIER_CHARS = "&$+!?^,"
 
+# `~:))` is an explicit request for C-like syntax highlighting, so it always
+# emits colour (r2 does the same even with `scr.color=0`).  The palette is the
+# radare2 6.2.5 default for the keys used by `r_cons_codecolors()`.
+_ANSI_RESET = "\x1b[0m"
+_ANSI_STRING = "\x1b[38;2;193;156;0m"  # pal.ai.ascii
+_ANSI_CPP = "\x1b[38;2;58;150;221m"  # pal.label
+_ANSI_COMMENT = "\x1b[38;2;197;15;31m"  # pal.comment
+_ANSI_NUMBER = "\x1b[38;2;19;161;14m"  # pal.num
+_ANSI_KEYWORD = "\x1b[38;2;136;23;152m"  # pal.push
+_ANSI_TYPES = _ANSI_COMMENT
+
 
 @dataclass
 class Column:
@@ -73,6 +84,20 @@ class Filter:
     indent: str | None = None
     json_path: str | None = None
     zoom: int | None = None
+    #: ``~:}`` -- indent C-like code honouring braces.
+    code_indent: bool = False
+    #: ``~<>`` -- XML indentation.
+    xml: bool = False
+    #: ``~{:`` -- human-friendly JSON indentation.
+    human: bool = False
+    #: ``~?ea`` -- seven-segment ASCII art.
+    seven_segment: bool = False
+    #: ``~:)`` -- tokenise C-like decompiler output.
+    c_parse: bool = False
+    #: ``~:))`` -- C-like syntax highlighting.
+    c_highlight: bool = False
+    #: ``less`` | ``hud`` | ``hud-one-line``; non-interactive fallback.
+    pager: str | None = None
     #: Modifiers we recognised but do not implement, for a one-line warning.
     unimplemented: list[str] = field(default_factory=list)
 
@@ -88,6 +113,13 @@ class Filter:
                 self.indent,
                 self.json_path,
                 self.zoom is not None,
+                self.code_indent,
+                self.xml,
+                self.human,
+                self.seven_segment,
+                self.c_parse,
+                self.c_highlight,
+                self.pager,
             )
         )
 
@@ -95,12 +127,30 @@ class Filter:
 
     def apply(self, lines: list[str]) -> list[str]:
         """Run the full filter pipeline over ``lines``."""
+        # These modifiers consume the buffer and return immediately in r2's
+        # `r_cons_grepbuf`, before the plain grep/sort/column stages.
+        if self.code_indent:
+            return _code_indent(lines)
+        if self.c_highlight:
+            return _code_highlight(lines)
+        if self.c_parse:
+            return _c_parse(lines)
+        if self.seven_segment:
+            return _seven_segment(lines)
         if self.zoom is not None:
-            lines = [line[: self.zoom] for line in lines]
+            return _scale(lines, self.zoom)
+        if self.xml:
+            return _xml_indent(lines)
+        if self.human:
+            return _json_human(lines)
         if self.indent is not None or self.json_path is not None:
             lines = self._reformat(lines)
             if lines and lines[0].startswith("~ ERROR"):
                 return lines
+        if self.pager is not None:
+            # idare2 has no interactive pager; keep the (possibly reformatted)
+            # output and let the session print a one-line warning.
+            return lines
         if self.words:
             lines = self._grep(lines)
         if self.lines is not None:
@@ -231,6 +281,419 @@ def _gron(data: object, prefix: str = "") -> list[str]:
 
 
 # --------------------------------------------------------------------------
+# buffer-shaped modifiers
+# --------------------------------------------------------------------------
+
+def _buffer(lines: list[str]) -> str:
+    """Reconstruct the newline-terminated buffer r2 would have seen."""
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def _scale(lines: list[str], zoom: int) -> list[str]:
+    """Port of ``r_str_scale`` used by ``~<N``.
+
+    r2 calls ``r_str_scale(buffer, N * 2, N)``: the output is ``N`` rows and
+    each row is ``2 * N`` columns.  This is a real nearest-neighbour zoom, not
+    a truncation (``?e aaa~<2`` prints ``aaaa``).
+    """
+    if zoom <= 0:
+        return lines
+    text = _buffer(lines)
+    rows = text.split("\n")
+    width = zoom * 2
+    out: list[str] = []
+    current = -1
+    for i in range(zoom):
+        source = int(i * (len(rows) / zoom))
+        row = rows[source] if 0 <= source < len(rows) else ""
+        if row:
+            line = "".join(row[int(j * (len(row) / width))] for j in range(width))
+        else:
+            line = " " * width
+        if current != source:
+            out.append(line)
+            current = source
+    return out
+
+
+_SEVEN_SEGMENTS: dict[str, tuple[str, str, str]] = {
+    "0": (" __ ", "|  |", "|__|"),
+    "1": ("    ", "  | ", "  | "),
+    "2": (" __ ", " __|", "|__ "),
+    "3": (" __ ", " __|", " __|"),
+    "4": ("    ", "|__|", "   |"),
+    "5": (" __ ", "|__ ", " __|"),
+    "6": (" __ ", "|__ ", "|__|"),
+    "7": (" __ ", "   |", "   |"),
+    "8": (" __ ", "|__|", "|__|"),
+    "9": (" __ ", "|__|", " __|"),
+    "$": (" __ ", "||_ ", " _||"),
+    "_": ("    ", "    ", " __ "),
+    ".": ("    ", "    ", "  _ "),
+    ",": ("    ", "    ", " _  "),
+    "/": ("    ", "  / ", " /  "),
+    "%": ("    ", " O/ ", " /O "),
+    "=": ("    ", " __ ", " __ "),
+    '"': (" __ ", "    ", "    "),
+    "?": (" __ ", "  _|", " _\\ "),
+    "+": ("    ", " _|_", "  | "),
+    "-": ("    ", " __ ", "    "),
+    "*": ("    ", "_\\/_", " /\\ "),
+    "(": (" _  ", "|   ", "|_  "),
+    ")": ("  _ ", "   |", "  _|"),
+    "[": (" _  ", "|   ", "|_  "),
+    "]": ("  _ ", "   |", "  _|"),
+    ">": ("    ", "  \\ ", "  / "),
+    " ": ("    ", "    ", "    "),
+    "a": (" __ ", "|__|", "|  |"),
+    "b": ("    ", "|__ ", "|__|"),
+    "c": ("    ", " __ ", "|__ "),
+    "d": ("    ", " __|", "|__|"),
+    "e": (" __ ", "|_  ", "|__ "),
+    "f": (" __ ", "|_  ", "|   "),
+    "g": (" __ ", "| _ ", "|__|"),
+    "h": ("    ", "|__|", "|  |"),
+    "i": (" ___", "  | ", " _|_"),
+    "j": (" __ ", "  | ", "|_| "),
+    "k": ("    ", "|_/ ", "| \\ "),
+    "l": ("    ", "|   ", "|__ "),
+    "m": ("    ", "|\\/|", "|  |"),
+    "n": ("    ", "|\\ |", "| \\|"),
+    "o": (" __ ", "|  |", "|__|"),
+    "p": (" __ ", "|__|", "|   "),
+    "q": (" __ ", "|__|", "  \\ "),
+    "r": (" __ ", "|__|", "| \\ "),
+    "s": (" __ ", "|__ ", " __\\"),
+    "t": ("    ", "_|_ ", " |_ "),
+    "u": ("    ", "    ", "|__|"),
+    "v": ("    ", "|  |", " \\/ "),
+    "w": ("    ", "|  |", "|/\\|"),
+    "x": ("    ", " \\/ ", " /\\ "),
+    "y": ("    ", "|__|", " __|"),
+    "z": (" __ ", "  / ", " /_ "),
+    "&": ("    ", "    ", " &  "),
+    "@": ("    ", "    ", " @  "),
+}
+
+
+def _seven_segment(lines: list[str]) -> list[str]:
+    """Port of ``r_str_ss(buffer, NULL, 0)`` used by ``~?ea``."""
+    out: list[str] = []
+    for line in _buffer(lines).split("\n"):
+        for row in range(3):
+            out.append("".join(_SEVEN_SEGMENTS.get(ch, ("", "", ""))[row] for ch in line.lower()))
+        out.append("")
+    return out
+
+
+def _xml_indent(lines: list[str]) -> list[str]:
+    """Port of ``r_xml_indent`` used by ``~<>``."""
+    text = _buffer(lines)
+    out: list[str] = []
+    level = -1
+    open_tag = False
+    closing = False
+    finish = False
+    start = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        if open_tag:
+            if text[i] == ">":
+                open_tag = False
+                finish = True
+                level += 1
+        elif text[i] == "<":
+            if i + 1 < n and text[i + 1] == "/":
+                closing = True
+                level -= 1
+            open_tag = True
+            out.append(text[start:i])
+            out.append("\n")
+            start = i
+        i += 1
+        while i < n and text[i] in " \t\r\n":
+            i += 1
+        if finish:
+            out.append("  " * max(level, 0))
+            out.append(text[start:i])
+            out.append("\n")
+            if closing:
+                closing = False
+                level -= 1
+            out.append("  " * max(level, 0))
+            start = i
+            finish = False
+    return "".join(out).splitlines()
+
+
+def _json_human(lines: list[str]) -> list[str]:
+    """Port of ``r_print_json_human`` used by ``~{:``.
+
+    The C implementation intentionally drops braces, brackets and quotes while
+    re-flowing the document; keeping that quirk is what makes the output match
+    r2 byte for byte.
+    """
+    text = _buffer(lines)
+    out: list[str] = []
+    indent = 0
+    in_string = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if in_string:
+            if ch == '"':
+                in_string = False
+            elif ch == "\\" and i + 1 < n and text[i + 1] == '"':
+                out.append(ch)
+                i += 1
+                ch = text[i]
+            if ch != '"':
+                out.append(ch)
+            i += 1
+            continue
+        if indent <= 0 and ch not in "{[":
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+        if ch in "\n\r\t ":
+            i += 1
+            continue
+        if ch == ":":
+            out.append(": ")
+        elif ch == ",":
+            out.append("\n")
+            out.append("  " * max(indent - 1, 0))
+        elif ch in "{[":
+            if indent > 0:
+                out.append("\n")
+            indent += 1
+            out.append("  " * max(indent - 1, 0))
+        elif ch in "}]":
+            indent -= 1
+            out.append("  " * max(indent - 1, 0))
+        elif not in_string:
+            out.append(ch)
+        i += 1
+    return "".join(out).splitlines()
+
+
+def _code_indent(lines: list[str]) -> list[str]:
+    """Port of ``r_print_code_indent`` used by ``~:}``."""
+    text = _buffer(lines)
+    out: list[str] = []
+    indent = 0
+    in_string = False
+    in_char = False
+    in_comment = False
+    p = 0
+    n = len(text)
+    while p < n:
+        nl = text.find("\n", p)
+        if nl < 0:
+            nl = n
+        line = text[p:nl]
+        trimmed = line.lstrip(" \t")
+        opens = 0
+        closes = 0
+        line_comment = False
+        j = 0
+        while j < len(trimmed):
+            ch = trimmed[j]
+            nxt = trimmed[j + 1] if j + 1 < len(trimmed) else ""
+            if line_comment:
+                break
+            if in_comment:
+                if ch == "*" and nxt == "/":
+                    in_comment = False
+                    j += 1
+                j += 1
+                continue
+            if in_string:
+                if ch == "\\":
+                    j += 1
+                elif ch == '"':
+                    in_string = False
+                j += 1
+                continue
+            if in_char:
+                if ch == "\\":
+                    j += 1
+                elif ch == "'":
+                    in_char = False
+                j += 1
+                continue
+            if ch == "/" and nxt == "/":
+                line_comment = True
+                break
+            if ch == "/" and nxt == "*":
+                in_comment = True
+                j += 2
+                continue
+            if ch == '"':
+                in_string = True
+            elif ch == "'":
+                in_char = True
+            elif ch == "{":
+                opens += 1
+            elif ch == "}":
+                if opens > 0:
+                    opens -= 1
+                else:
+                    closes += 1
+            j += 1
+        indent = max(indent - closes, 0)
+        out.append("  " * indent + trimmed)
+        indent += opens
+        if nl >= n:
+            break
+        p = nl + 1
+    return out
+
+
+_C_KEYWORDS = frozenset(
+    [
+        "if", "else", "while", "for", "switch", "case", "break", "continue",
+        "return", "goto", "do", "sizeof", "typedef", "struct", "union", "enum",
+        "volatile", "static", "inline", "extern", "NULL", "null", "true",
+        "false", "class", "public", "private", "protected", "new", "delete",
+        "try", "catch", "throw", "finally", "import", "from", "export",
+        "function", "let", "var", "async", "await", "def", "elif", "in", "is",
+        "not", "and", "or", "None", "True", "False", "lambda", "fn", "pub",
+        "impl", "trait", "match", "mut", "use", "mod", "func", "package",
+        "defer", "go", "range", "select", "chan",
+    ]
+)
+
+_C_TYPES = frozenset(
+    [
+        "const", "int", "char", "short", "long", "void", "float", "double",
+        "bool", "boolean", "string", "signed", "unsigned", "ut8", "uint8_t",
+        "ut64", "uint64_t",
+    ]
+)
+
+_C_PREPROCESSOR = frozenset({"R_API"})
+
+
+def _is_identifier_char(ch: str) -> bool:
+    return ch == "_" or ch.isalnum() or ord(ch) >= 0x80
+
+
+def _code_highlight(lines: list[str]) -> list[str]:
+    """Port of ``r_print_code_tocolor`` used by ``~:))``."""
+    text = _buffer(lines)
+    out: list[str] = []
+    p = 0
+    n = len(text)
+    in_string = False
+    in_char = False
+    in_comment = False
+    in_line_comment = False
+    in_preproc = False
+    while p < n:
+        ch = text[p]
+        nxt = text[p + 1] if p + 1 < n else ""
+        if (in_string or in_char) and ch == "\\" and p + 1 < n:
+            out.append(text[p : p + 2])
+            p += 2
+            continue
+        if not in_string and not in_char and not in_comment and ch == "#" and (p == 0 or text[p - 1] == "\n"):
+            in_preproc = True
+            out.append(_ANSI_CPP + ch)
+            p += 1
+            continue
+        if in_preproc:
+            if ch == "\n":
+                in_preproc = False
+                out.append(_ANSI_RESET)
+            out.append(ch)
+            p += 1
+            continue
+        if not in_string and not in_char and not in_line_comment and not in_comment and ch == "/" and nxt == "/":
+            in_line_comment = True
+            out.append(_ANSI_COMMENT + "//")
+            p += 2
+            continue
+        if in_line_comment:
+            if ch == "\n":
+                in_line_comment = False
+                out.append(_ANSI_RESET)
+            out.append(ch)
+            p += 1
+            continue
+        if not in_string and not in_char and not in_comment and ch == "/" and nxt == "*":
+            in_comment = True
+            out.append(_ANSI_COMMENT + "/*")
+            p += 2
+            continue
+        if in_comment:
+            out.append(ch)
+            if ch == "*" and nxt == "/":
+                out.append("/")
+                p += 2
+                in_comment = False
+                out.append(_ANSI_RESET)
+            else:
+                p += 1
+            continue
+        if not in_char and ch == '"':
+            in_string = not in_string
+            out.append(_ANSI_STRING + ch)
+            p += 1
+            if not in_string:
+                out.append(_ANSI_RESET)
+            continue
+        if not in_string and ch == "'":
+            in_char = not in_char
+            out.append(_ANSI_STRING + ch)
+            p += 1
+            if not in_char:
+                out.append(_ANSI_RESET)
+            continue
+        if in_string or in_char:
+            out.append(ch)
+            p += 1
+            continue
+        if ch.isdigit():
+            out.append(_ANSI_NUMBER)
+            while p < n and (text[p].isdigit() or text[p] == "x" or text[p] in "abcdefABCDEF"):
+                out.append(text[p])
+                p += 1
+            out.append(_ANSI_RESET)
+            continue
+        if _is_identifier_char(ch):
+            start = p
+            while p < n and _is_identifier_char(text[p]):
+                p += 1
+            word = text[start:p]
+            if word in _C_KEYWORDS:
+                out.append(_ANSI_KEYWORD + word + _ANSI_RESET)
+            elif word in _C_PREPROCESSOR:
+                out.append(_ANSI_CPP + word + _ANSI_RESET)
+            elif word in _C_TYPES:
+                out.append(_ANSI_TYPES + word + _ANSI_RESET)
+            else:
+                out.append(word)
+            continue
+        out.append(ch)
+        p += 1
+    return "".join(out).splitlines()
+
+
+def _c_parse(lines: list[str]) -> list[str]:
+    return [
+        "~ ERROR: ~:) (C tokenizer) is not implemented by idare2; "
+        "use ~:)) for syntax highlighting"
+    ]
+
+
+# --------------------------------------------------------------------------
 # parsing
 # --------------------------------------------------------------------------
 
@@ -246,9 +709,12 @@ _WHOLE_SPECS = {
     ":))": "c-highlight",
     ":}": "c-indent",
     "<>": "xml",
-    "{:": "brace",
-    "{:..": "brace-less",
-    "{:...": "brace-hud",
+    "{:": "human",
+    "{:..": "human-less",
+    "{:...": "human-hud",
+    "{}": "json",
+    "{}..": "json-less",
+    "{}...": "json-hud",
 }
 
 
@@ -267,7 +733,25 @@ def parse(spec: str) -> Filter:
             return result
         if kind == "help":
             raise _GrepHelp()
-        result.unimplemented.append(text)
+        if kind == "seven-segment":
+            result.seven_segment = True
+        elif kind == "c-parse":
+            result.c_parse = True
+        elif kind == "c-highlight":
+            result.c_highlight = True
+        elif kind == "c-indent":
+            result.code_indent = True
+        elif kind == "xml":
+            result.xml = True
+        elif kind.startswith("json"):
+            result.indent = "json"
+            result.pager = {"json-less": "less", "json-hud": "hud"}.get(kind)
+        elif kind.startswith("human"):
+            result.indent = "json"
+            result.human = True
+            result.pager = {"human-less": "less", "human-hud": "hud"}.get(kind)
+        else:
+            result.pager = kind if kind in ("less", "hud", "hud-one-line") else None
         return result
 
     # -- leading modifiers -------------------------------------------------
@@ -312,8 +796,10 @@ def parse(spec: str) -> Filter:
             raise UsageError("unterminated {..} in ~ spec")
         inner = text[1:end]
         tail = text[end + 1 :]
-        if tail in ("..", "..."):
-            result.unimplemented.append(tail)
+        if tail == "..":
+            result.pager = "less"
+        elif tail == "...":
+            result.pager = "hud"
         if inner == "":
             result.indent = "json"
         elif inner == "=":
@@ -441,9 +927,22 @@ modifier:
 |  ?            count number of matching lines
 |  ?.           count number chars
 |  ??           show this help message
+|  ?ea          convert text into seven segment style ascii art
 |  :s..e        show lines s-e
+|  ..           internal 'less' (warning when not interactive)
+|  ...          internal 'hud' (warning when not interactive)
+|  ....         internal 'hud' in one line (warning when not interactive)
+|  :)           parse C-like output from decompiler (not implemented)
+|  :))          code syntax highlight
+|  :}           indent C code honoring braces
 |  <50          perform zoom to the given text width on the buffer
+|  <>           xml indentation
+|  {:           human friendly indentation (yes, it's a smiley)
+|  {:..         less the output of {:
+|  {:...        hud the output of {:
 |  {}           json indentation
+|  {}..         less json indentation
+|  {}...        hud json indentation
 |  {=}          gron-like output (key=value)
 |  {path}       json path grep
 endmodifier:
