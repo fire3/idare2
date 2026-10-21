@@ -352,12 +352,91 @@ class Session:
     # -- iterators ---------------------------------------------------------
 
     def _iterate(self, statement: Statement) -> list[str]:
-        spec = statement.iterator or statement.iterator_size or ""
         inner = replace(statement, iterator=None, iterator_size=None, tmpseek=None)
+        if statement.iterator_size is not None:
+            items = self._sized_iterator_items(statement.iterator_size)
+        else:
+            spec = statement.iterator or ""
+            items = [(ea, None) for ea in self._iterator_addresses(spec)]
+
         lines: list[str] = []
-        for ea in self._iterator_addresses(spec):
-            lines.extend(self.run_statement(replace(inner, tmpseek=f"0x{ea:x}")))
+        for ea, size in items:
+            with self._iteration_scope(ea, size):
+                lines.extend(self.run_statement(inner))
         return lines
+
+    @contextmanager
+    def _iteration_scope(self, ea: int, size: int | None) -> Iterator[None]:
+        """Seek and resize one ``@@``/``@@@`` iteration, then restore both."""
+        saved_seek = self.seek
+        saved_blocksize = self.blocksize
+        try:
+            self.seek = int(ea)
+            if size:
+                self.blocksize = int(size)
+            yield
+        finally:
+            self.seek = saved_seek
+            self.blocksize = saved_blocksize
+
+    def _sized_iterator_items(self, spec: str) -> list[tuple[int, int | None]]:
+        """Return ``(address, size)`` pairs for the ``@@@`` iterator family."""
+        spec = spec.strip()
+        if spec.startswith("="):
+            body = spec[1:].lstrip("=").strip()
+            words = body.split()
+            out: list[tuple[int, int | None]] = []
+            # r2 ignores a trailing address that has no size pair.
+            for index in range(0, len(words) - 1, 2):
+                ea = self.eval(words[index])
+                size = self.eval(words[index + 1])
+                if size < 0:
+                    raise UsageError("@@@=: size must not be negative")
+                out.append((ea, size))
+            return out
+
+        if spec == "b":
+            payload = self.remote.call("blocks", ea=self.seek)
+            return [(int(block["start"]), int(block["size"])) for block in payload]
+
+        if spec == "f" or spec.startswith("f:"):
+            pattern = spec[2:] if spec.startswith("f:") else None
+            self._ensure_flags()
+            return [
+                (flag.ea, flag.size)
+                for flag in self.flags.all()
+                if pattern is None or _glob(pattern, flag.name)
+            ]
+
+        if spec == "F" or spec.startswith("F:"):
+            pattern = spec[2:] if spec.startswith("F:") else None
+            payload, _ = self.remote.call_with_meta(
+                "functions", pattern=pattern, offset=0, count=-1
+            )
+            return [(int(item["ea"]), int(item["size"])) for item in payload]
+
+        if spec == "i":
+            payload, _ = self.remote.call_with_meta(
+                "disasm", ea=self.seek, count=-1, mode="function"
+            )
+            return [
+                (int(line["ea"]), int(line["size"]))
+                for line in payload.get("lines", [])
+            ]
+
+        if spec == "z" or spec.startswith("z:"):
+            pattern = spec[2:] if spec.startswith("z:") else None
+            payload, _ = self.remote.call_with_meta(
+                "strings", pattern=pattern, offset=0, count=-1
+            )
+            return [(int(item["ea"]), int(item["size"])) for item in payload]
+
+        if spec in ("S", "SS", "G"):
+            return [(int(item["vaddr"]), int(item["vsize"])) for item in self.remote.call("segments")]
+
+        raise UsageError(
+            f"unsupported @@@ iterator '{spec}'; supported: = b f F i z S SS"
+        )
 
     def _iterator_addresses(self, spec: str) -> list[int]:
         spec = spec.strip()

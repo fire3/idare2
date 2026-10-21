@@ -122,6 +122,8 @@ used.
 
 Common radare2 operators are supported, including `@`, `~`, `|`, `>`, `>>`,
 `!`, `.`, repeat prefixes such as `3pd`, and bare addresses for seeking.
+`@@` iterates a command over addresses; `@@@` also sets the block size for each
+item, including explicit `@@@= addr size ...` pairs.
 
 ```bash
 idare2 -qc 'pd 8 @ main' firmware.bin

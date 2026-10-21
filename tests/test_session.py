@@ -95,8 +95,18 @@ class FakeRemote:
                     }
                 ],
             },
-            "functions": lambda: [{"ea": 0x1000, "nbbs": 2, "size": 8, "name": "main"}],
-            "blocks": lambda: [{"start": 0x1000, "end": 0x1008, "size": 8, "index": 0}],
+            "functions": lambda: [
+                {"ea": 0x1000, "nbbs": 2, "size": 8, "name": "main"},
+                {"ea": 0x2000, "nbbs": 1, "size": 16, "name": "helper"},
+            ],
+            "blocks": lambda: [
+                {"start": 0x1000, "end": 0x1008, "size": 8, "index": 0},
+                {"start": 0x1008, "end": 0x1018, "size": 16, "index": 1},
+            ],
+            "strings": lambda: [
+                {"ea": 0x4000, "size": 6, "text": "first"},
+                {"ea": 0x4100, "size": 12, "text": "second"},
+            ],
             "function_info": lambda: {
                 "ea": arguments["ea"],
                 "end": arguments["ea"] + 8,
@@ -335,6 +345,64 @@ def test_blocksize() -> None:
     assert session.blocksize == 80
     session.run("b-")
     assert session.blocksize == 79
+
+
+def test_sized_iterator_pairs_set_seek_and_blocksize_then_restore() -> None:
+    session, _remote = make_session()
+    session.seek = 0x3000
+    session.blocksize = 64
+
+    assert session.run("s @@@= 0x1000 8 0x2000 16") == [
+        "0x00001000",
+        "0x00002000",
+    ]
+    assert session.run("b @@@= 0x1000 8 0x2000 16") == ["8", "16"]
+    assert session.seek == 0x3000
+    assert session.blocksize == 64
+
+
+def test_sized_iterator_ignores_a_trailing_unpaired_value() -> None:
+    """r2 only runs explicitly paired addresses, then stops."""
+    session, _remote = make_session()
+    assert session.run("b @@@= 0x1000 8 0x2000") == ["8"]
+
+
+def test_sized_iterator_rejects_a_negative_size() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    assert session.run("b @@@= 0x1000 -1") == []
+    assert session.failed
+    assert "size must not be negative" in str(session.last_error)
+
+
+def test_sized_iterators_for_blocks_and_functions() -> None:
+    session, _remote = make_session()
+    session.seek = 0x1000
+    session.blocksize = 64
+
+    assert session.run("b @@@b") == ["8", "16"]
+    assert session.run("b @@@F") == ["8", "16"]
+    assert session.blocksize == 64
+
+
+def test_sized_iterators_for_instructions_flags_and_strings() -> None:
+    session, _remote = make_session()
+    session.run("f zz 32 @ 0x3000")
+
+    assert session.run("b @@@i") == ["4"]
+    assert session.run("b @@@f:zz") == ["32"]
+    assert session.run("b @@@z") == ["6", "12"]
+
+
+def test_sized_iterator_segments_and_unknown_selector() -> None:
+    session, _remote = make_session()
+    assert session.run("b @@@S") == ["4096"]
+    assert session.run("b @@@SS") == ["4096"]
+
+    session.failed = False
+    assert session.run("b @@@q") == []
+    assert session.failed
+    assert "unsupported @@@ iterator" in str(session.last_error)
 
 
 def test_config_is_readonly_for_derived_keys() -> None:

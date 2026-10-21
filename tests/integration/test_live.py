@@ -386,6 +386,25 @@ def test_function_graph_forms(session) -> None:
     assert session.format_addr(function["addr"]) in "\n".join(dot)
 
 
+def test_sized_iterator_sets_and_restores_blocksize(session) -> None:
+    session.failed = False
+    session.blocksize = 64
+    assert session.run("b @@@= 0x00016bb4 8 0x00016bb8 16") == ["8", "16"]
+    assert not session.failed, session.last_error
+    assert session.blocksize == 64
+
+    saved_seek = session.seek
+    try:
+        session.run("s 0x00016bb4")
+        block_sizes = session.run("b @@@b")
+    finally:
+        session.run(f"s 0x{saved_seek:x}")
+    assert not session.failed, session.last_error
+    assert block_sizes
+    assert all(size.isdigit() and int(size) > 0 for size in block_sizes)
+    assert session.blocksize == 64
+
+
 def test_bare_cc_lists_comments(session) -> None:
     """`CC` used to be unreachable: it demanded -w, then demanded text."""
     session.failed = False
