@@ -243,6 +243,10 @@ class Session:
 
     def dispatch(self, statement: Statement) -> list[str]:
         if statement.dot:
+            from idare2.cmd.ida import IDA_COMMANDS, dispatch_ida
+
+            if statement.cmd in IDA_COMMANDS:
+                return dispatch_ida(self, statement)
             return self._dot_source(statement)
         if statement.iterator is not None or statement.iterator_size is not None:
             return self._iterate(statement)

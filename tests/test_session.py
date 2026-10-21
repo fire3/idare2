@@ -67,6 +67,8 @@ class FakeRemote:
                 "start": 0x1000,
                 "end": 0x2000,
             },
+            "file_info": lambda: {"filesize": 0x3000, "architecture": "ARM"},
+            "save": lambda: {"saved": True},
             "set_name": lambda: {"ea": arguments["ea"], "name": arguments["name"]},
             "delete_name": lambda: {"ea": arguments["ea"]},
             "comments": lambda: (
@@ -237,6 +239,123 @@ def test_aaa_runs_deep_analysis() -> None:
     assert session.run("aaa") == ["-- analysis complete (deep) --"]
     assert session.run("aaaa") == ["-- analysis complete (deep) --"]
     assert [name for name, _ in remote.calls].count("deep_analyze") == 2
+
+
+def test_dot_ida_reports_the_backend() -> None:
+    from types import SimpleNamespace
+
+    session, _remote = make_session()
+    session.handle = SimpleNamespace(
+        instance=SimpleNamespace(
+            backend="idalib",
+            record_id="42-abcdef",
+            pid=42,
+            port=12345,
+            idb_path="/tmp/target.i64",
+        ),
+        connected=True,
+        keepalive=30.0,
+    )
+    assert session.run(".ida") == [
+        "backend    idalib",
+        "record-id  42-abcdef",
+        "pid        42",
+        "port       12345",
+        "path       /tmp/target.i64",
+        "keepalive  30s",
+        "lease      attached",
+    ]
+
+
+def test_dot_idaexec_prints_stdout_and_result() -> None:
+    from types import SimpleNamespace
+
+    session, _remote = make_session()
+    session.handle = SimpleNamespace(
+        execute_python=lambda code: {
+            "stdout": "hello\n",
+            "stderr": "",
+            "result": {"code": code},
+        }
+    )
+    assert session.run(".idaexec 1+1") == ["hello", "{'code': '1+1'}"]
+
+
+def test_dot_idawatch_prints_a_bounded_number_of_events() -> None:
+    from types import SimpleNamespace
+
+    class Subscription:
+        def __init__(self) -> None:
+            self.events = iter([{"type": "rename", "ea": 1}, {"type": "comment", "ea": 2}])
+            self.closed = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            return next(self.events)
+
+        def close(self) -> None:
+            self.closed = True
+
+    subscription = Subscription()
+    session, _remote = make_session()
+    session.handle = SimpleNamespace(subscribe_idb_events=lambda: subscription)
+    assert session.run(".idawatch 2") == [
+        '{"ea": 1, "type": "rename"}',
+        '{"ea": 2, "type": "comment"}',
+    ]
+    assert subscription.closed
+
+
+def test_dot_idasave_requires_write_access() -> None:
+    session, remote = make_session()
+    session.run(".idasave")
+    assert "save" in remote.operations
+
+    readonly, readonly_remote = make_session()
+    readonly.readonly = True
+    readonly.run(".idasave")
+    assert readonly.failed
+    assert "save" not in readonly_remote.operations
+
+
+def test_dot_idasync_refreshes_metadata_and_caches() -> None:
+    session, _remote = make_session()
+    session.flags.seed([(0x1000, "main")])
+    assert session.flags.seeded
+    assert session.run(".idasync") == []
+    assert session.info["filesize"] == 0x3000
+    assert session.info["architecture"] == "ARM"
+    assert not session.flags.seeded
+
+
+def test_dot_idaclose_honours_no_save() -> None:
+    from types import SimpleNamespace
+
+    calls = []
+    session, _remote = make_session()
+    session.handle = SimpleNamespace(
+        instance=SimpleNamespace(record_id="42-abcdef"),
+        shutdown_database=lambda *, save: calls.append(save),
+    )
+    assert session.run(".idaclose --no-save") == [
+        "-- closed 42-abcdef (discarded unsaved changes) --"
+    ]
+    assert calls == [False]
+
+
+def test_dot_idahelp_lists_extensions() -> None:
+    session, _remote = make_session()
+    lines = session.run(".idahelp")
+    assert any(line.startswith(".ida ") for line in lines)
+    assert any(line.startswith(".idaexec ") for line in lines)
+
+
+def test_dot_prefix_still_executes_output_as_commands() -> None:
+    """Only the fixed ``.ida*`` names are intercepted."""
+    session, _remote = make_session()
+    assert session.run(". ?e ?e hi") == ["hi"]
 
 
 def test_temporary_seek_is_restored() -> None:
