@@ -54,6 +54,8 @@ Commands use radare2 syntax:
 ```
 
 Use `?` for command help and `q` to exit. Use `wq` to save the IDB and exit.
+Tab completion covers command names, `e` configuration keys, flags, function
+names, and `$` variables/aliases; remote names are cached per editing cycle.
 
 ### Batch commands
 

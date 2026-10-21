@@ -13,7 +13,6 @@ Data goes to stdout, diagnostics to stderr, which is what makes
 
 from __future__ import annotations
 
-import contextlib
 import os
 import sys
 from pathlib import Path
@@ -331,10 +330,7 @@ def _load_project(session: Session, name: str) -> None:
 
 
 def _repl(session: Session, options: argv_parser.Options) -> int:
-    # Importing readline is what enables line editing in input(); it is
-    # optional, and absent on minimal builds.
-    with contextlib.suppress(ImportError):
-        import readline  # noqa: F401
+    completer = _install_completion(session)
 
     if session.config.get_bool("scr.prompt"):
         _banner(session)
@@ -356,6 +352,25 @@ def _repl(session: Session, options: argv_parser.Options) -> int:
             return exc.code
         except Idare2Error as exc:
             _error(str(exc), session)
+        finally:
+            if completer is not None:
+                completer.invalidate()
+
+
+def _install_completion(session: Session):
+    """Wire the cached completer into readline, when readline is available."""
+    try:
+        import readline
+    except ImportError:
+        return None
+    from idare2.complete import Completer
+
+    completer = Completer(session)
+    readline.set_completer(completer.complete)
+    # Keep @ and $ in the word so `@ma<TAB>` and `$al<TAB>` can be completed.
+    readline.set_completer_delims(" \t\n;|")
+    readline.parse_and_bind("tab: complete")
+    return completer
 
 
 def _error(message: str, session: Session) -> None:

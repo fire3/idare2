@@ -405,6 +405,17 @@ def test_sized_iterator_sets_and_restores_blocksize(session) -> None:
     assert session.blocksize == 64
 
 
+def test_completion_uses_live_function_names(session) -> None:
+    from idare2.complete import Completer
+
+    name = session.run("afl")[0].split()[-1]
+    prefix = name[: min(3, len(name))]
+    completer = Completer(session)
+    line = f"s {prefix}"
+    assert name in completer.candidates(line, 2, len(line))
+    assert "scr.color" in completer.candidates("e scr.co", 2, 8)
+
+
 def test_bare_cc_lists_comments(session) -> None:
     """`CC` used to be unreachable: it demanded -w, then demanded text."""
     session.failed = False
