@@ -113,6 +113,15 @@ class Program:
 
 
 @dataclass(frozen=True)
+class Relocation:
+    offset: int
+    type: int
+    symbol_index: int
+    addend: int
+    section: str
+
+
+@dataclass(frozen=True)
 class Symbol:
     index: int
     name: str
@@ -152,8 +161,11 @@ class ElfFile:
         self.programs = programs
         self.dynsyms = dynsyms
         self.symtabs = symtabs
+        self.dynsyms_by_index = {symbol.index: symbol for symbol in dynsyms}
+        self.symtabs_by_index = {symbol.index: symbol for symbol in symtabs}
         loads = [program.vaddr & ~0xFFF for program in programs if program.type == PT_LOAD]
         self.baddr = min(loads) if loads else 0
+        self.relocs: list[Relocation] = []
         self.import_plt: dict[int, int] = {}
 
     # -- construction ------------------------------------------------------
@@ -199,6 +211,7 @@ class ElfFile:
             programs = cls._read_programs(handle, phoff, phnum, phentsize, ph_format)
             sections = cls._read_sections(handle, shoff, shnum, shentsize, sh_format, shstrndx)
             dynsyms, symtabs = cls._read_symbols(handle, sections, bits, sym_format, machine)
+            relocs = cls._read_relocations(handle, sections, bits, endian)
             handle.seek(0, 2)
             file_size = handle.tell()
 
@@ -213,7 +226,8 @@ class ElfFile:
                 dynsyms=dynsyms,
                 symtabs=symtabs,
             )
-            result.import_plt = cls._read_import_plt(handle, result, endian)
+            result.relocs = relocs
+            result.import_plt = cls._compute_import_plt(handle, result, endian, relocs)
         return result
 
     @staticmethod
@@ -350,7 +364,40 @@ class ElfFile:
         return dynsyms, symtabs
 
     @staticmethod
-    def _read_import_plt(handle: Any, elf: ElfFile, endian: str) -> dict[int, int]:
+    def _read_relocations(
+        handle: Any, sections: list[Section], bits: int, endian: str
+    ) -> list[Relocation]:
+        out: list[Relocation] = []
+        for section in sections:
+            if section.type not in (SHT_REL, SHT_RELA):
+                continue
+            raw = _read_section(handle, section)
+            rela = section.type == SHT_RELA
+            if bits == 64:
+                fmt = endian + ("QQq" if rela else "QQ")
+            else:
+                fmt = endian + ("IIi" if rela else "II")
+            size = struct.calcsize(fmt)
+            entsize = section.entsize or size
+            for offset in range(0, len(raw) - size + 1, entsize):
+                values = struct.unpack(fmt, raw[offset : offset + size])
+                rel_offset, info = values[0], values[1]
+                addend = values[2] if rela else 0
+                if bits == 64:
+                    symbol_index = info >> 32
+                    rel_type = info & 0xFFFFFFFF
+                else:
+                    symbol_index = info >> 8
+                    rel_type = info & 0xFF
+                out.append(
+                    Relocation(rel_offset, rel_type, symbol_index, addend, section.name)
+                )
+        return out
+
+    @staticmethod
+    def _compute_import_plt(
+        handle: Any, elf: ElfFile, endian: str, relocs: list[Relocation]
+    ) -> dict[int, int]:
         """PLT stubs for ARM imports whose ``st_value`` is zero.
 
         radare2's ELF plugin derives an import address from the relocation and
@@ -364,35 +411,21 @@ class ElfFile:
         if pltgot is None:
             return {}
         out: dict[int, int] = {}
-        for section in elf.sections:
-            if section.type not in (SHT_REL, SHT_RELA):
+        for reloc in relocs:
+            if reloc.type != R_ARM_JUMP_SLOT:
                 continue
-            raw = _read_section(handle, section)
-            size = 12 if elf.bits == 64 else 8
-            entsize = section.entsize or size
-            for offset in range(0, len(raw) - size + 1, entsize):
-                if elf.bits == 64:
-                    rel_offset, info = struct.unpack(endian + "QQ", raw[offset : offset + 16])
-                    symbol_index = info >> 32
-                    rel_type = info & 0xFFFFFFFF
-                else:
-                    rel_offset, info = struct.unpack(endian + "II", raw[offset : offset + 8])
-                    symbol_index = info >> 8
-                    rel_type = info & 0xFF
-                if rel_type != R_ARM_JUMP_SLOT:
-                    continue
-                got_file_offset = elf.vaddr_to_paddr(rel_offset)
-                if got_file_offset is None:
-                    continue
-                handle.seek(got_file_offset)
-                stub = handle.read(4)
-                if len(stub) != 4:
-                    continue
-                plt_header = struct.unpack(endian + "I", stub)[0]
-                position = (rel_offset - pltgot - 12) // 4
-                if position < 0:
-                    continue
-                out[symbol_index] = plt_header + position * 12 + 20
+            got_file_offset = elf.vaddr_to_paddr(reloc.offset)
+            if got_file_offset is None:
+                continue
+            handle.seek(got_file_offset)
+            stub = handle.read(4)
+            if len(stub) != 4:
+                continue
+            plt_header = struct.unpack(endian + "I", stub)[0]
+            position = (reloc.offset - pltgot - 12) // 4
+            if position < 0:
+                continue
+            out[reloc.symbol_index] = plt_header + position * 12 + 20
         return out
 
     # -- address mapping ---------------------------------------------------
@@ -522,6 +555,26 @@ class ElfFile:
                 "type": symbol.type,
                 "lib": "",
                 "name": symbol.name,
+            }
+
+    def reloc_rows(self) -> Iterator[dict[str, Any]]:
+        """Rows in ``ir`` order: relocation sections sorted by address."""
+        for reloc in sorted(self.relocs, key=lambda item: item.offset):
+            symbol = self.dynsyms_by_index.get(reloc.symbol_index)
+            if symbol is None:
+                symbol = self.symtabs_by_index.get(reloc.symbol_index)
+            name = symbol.name if symbol is not None else ""
+            if reloc.addend < 0:
+                name += f" - 0x{-reloc.addend:08x}"
+            elif reloc.addend:
+                name += (" +" if name else "") + f" 0x{reloc.addend:08x}"
+            yield {
+                "name": name,
+                "type": "SET_32" if self.bits == 32 else "SET_64",
+                "ntype": reloc.type,
+                "vaddr": reloc.offset,
+                "paddr": self.vaddr_to_paddr(reloc.offset),
+                "is_ifunc": False,
             }
 
 

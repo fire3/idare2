@@ -21,6 +21,7 @@ INFO_DETAIL = [
     ("ii", "[pat]", "imports"),
     ("is", "[pat]", "symbols"),
     ("iz", "[pat]", "strings"),
+    ("ir", "", "relocations"),
     ("ie", "", "entry points"),
     ("iE", "", "exports"),
     ("iM", "", "main address"),
@@ -33,6 +34,7 @@ LISTING_DETAIL = {
     "ii": [("ii", "[pat]", "imports"), ("iij", "[pat]", "imports as JSON")],
     "is": [("is", "[pat]", "symbols"), ("isj", "[pat]", "symbols as JSON")],
     "iz": [("iz", "[pat]", "strings"), ("izj", "[pat]", "strings as JSON")],
+    "ir": [("ir", "", "relocations"), ("irj", "", "relocations as JSON")],
     "ie": [("ie", "", "entry points"), ("iej", "", "entry points as JSON")],
     "iE": [("iE", "", "exports"), ("iEj", "", "exports as JSON")],
     "iM": [("iM", "", "main address")],
@@ -55,7 +57,7 @@ def file_info(session: Session, statement: Statement) -> list[str]:
 
 
 @command(
-    "i[SsEeizM]",
+    "i[SsEeizMr]",
     usage="[pat]",
     summary="list segments, symbols, imports, strings",
     json_suffix=True,
@@ -88,6 +90,8 @@ def listing(session: Session, statement: Statement) -> list[str]:
         rows, meta = session.remote.call_with_meta(
             "strings", pattern=pattern, offset=offset, count=count
         )
+    elif base == "ir":
+        rows = session.remote.call("relocations")
     elif base in ("ie", "iE"):
         rows = session.remote.call("entries", pattern=pattern)
     else:
@@ -101,6 +105,7 @@ def listing(session: Session, statement: Statement) -> list[str]:
         "ii": fmt_listing.format_imports,
         "is": fmt_listing.format_symbols,
         "iz": fmt_listing.format_strings,
+        "ir": fmt_listing.format_relocations,
         "ie": fmt_listing.format_entries,
         "iE": fmt_listing.format_entries,
     }[base]

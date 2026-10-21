@@ -160,6 +160,25 @@ def format_entries(entries: list[dict[str, Any]], session: Any) -> list[str]:
     return out
 
 
+def format_relocations(relocations: list[dict[str, Any]], session: Any) -> list[str]:
+    """``ir`` -- vaddr/paddr/type/ntype/name."""
+    width = addr_width(session.info.get("bits"))
+    headers = ("vaddr", "paddr", "type", "ntype", "name")
+    rows = []
+    for reloc in relocations:
+        paddr = reloc.get("paddr")
+        rows.append(
+            [
+                fmt_addr(int(reloc["vaddr"]), width),
+                fmt_addr(int(paddr), width) if paddr is not None else "----------",
+                reloc.get("type") or "UNKNOWN",
+                str(reloc.get("ntype", 0)),
+                reloc.get("name") or "",
+            ]
+        )
+    return table(headers, rows)
+
+
 def format_strings(strings: list[dict[str, Any]], session: Any) -> list[str]:
     """``iz`` -- r2's nth/paddr/vaddr/len/size/section/type/string table.
 

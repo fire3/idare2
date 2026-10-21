@@ -114,6 +114,16 @@ class FakeRemote:
                 {"ea": 0x4000, "size": 6, "text": "first"},
                 {"ea": 0x4100, "size": 12, "text": "second"},
             ],
+            "relocations": lambda: [
+                {
+                    "vaddr": 0xF9128,
+                    "paddr": 0xE9128,
+                    "type": "SET_32",
+                    "ntype": 22,
+                    "name": "pthread_detach",
+                    "is_ifunc": False,
+                },
+            ],
             "function_info": lambda: {
                 "ea": arguments["ea"],
                 "end": arguments["ea"] + 8,
@@ -1322,13 +1332,23 @@ def test_invalid_base64_write_is_a_usage_error(command: str) -> None:
     assert "patch_bytes" not in remote.operations
 
 
-@pytest.mark.parametrize("command", ["ir", "ic", "iee", "iic", "izz"])
+@pytest.mark.parametrize("command", ["ic", "iee", "iic", "izz"])
 def test_unimplemented_info_commands_do_not_fall_through(command: str) -> None:
     session, _remote = make_session()
     assert session.run(command) == []
     assert session.failed
     assert isinstance(session.last_error, UsageError)
     assert "unsupported information command" in str(session.last_error)
+
+
+def test_ir_renders_the_relocation_table() -> None:
+    session, _remote = make_session()
+    lines = session.run("ir")
+    assert not session.failed, session.last_error
+    assert lines[0].split() == ["vaddr", "paddr", "type", "ntype", "name"]
+    assert lines[2].split() == [
+        "0x000f9128", "0x000e9128", "SET_32", "22", "pthread_detach",
+    ]
 
 
 def test_iM_reports_main_virtual_and_physical_addresses() -> None:

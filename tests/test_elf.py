@@ -12,11 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from idare2.remote.elf import SHT_DYNSYM, SHT_NOBITS, SHT_STRTAB, SHT_SYMTAB, load_elf
+from idare2.remote.elf import (
+    SHT_DYNSYM,
+    SHT_NOBITS,
+    SHT_REL,
+    SHT_STRTAB,
+    SHT_SYMTAB,
+    load_elf,
+)
 
 
 def _names() -> tuple[bytes, dict[str, int]]:
-    names = [b"", b".text", b".dynsym", b".dynstr", b".symtab", b".strtab", b".bss", b".shstrtab"]
+    names = [
+        b"", b".text", b".dynsym", b".dynstr", b".symtab", b".strtab", b".bss",
+        b".rel.dyn", b".shstrtab",
+    ]
     data = b""
     offsets: dict[str, int] = {}
     for name in names:
@@ -34,7 +44,7 @@ def _build(bits: int) -> bytes:
 
     shstr_off = 0x260
     shoff = 0x300
-    shnum = 8
+    shnum = 9
     shentsize = 64 if bits == 64 else 40
     phoff = 0x40 if bits == 64 else 0x34
     phentsize = 56 if bits == 64 else 32
@@ -65,6 +75,10 @@ def _build(bits: int) -> bytes:
         _pack_symbol(bits, entry) for entry in symtab
     )
     buf[0x240:0x240 + len(strtab)] = strtab
+    if bits == 64:
+        struct.pack_into("<QQ", buf, 0x2A0, 0x400104, (2 << 32) | 22)
+    else:
+        struct.pack_into("<II", buf, 0x2A0, 0x400104, (2 << 8) | 22)
     buf[shstr_off:shstr_off + len(shstrtab)] = shstrtab
 
     # -- ELF header --------------------------------------------------------
@@ -75,7 +89,7 @@ def _build(bits: int) -> bytes:
             endian + "HHIQQQIHHHHHH",
             buf,
             16,
-            2, 40, 1, 0x400100, phoff, shoff, 0, 64, phentsize, 1, shentsize, shnum, 7,
+            2, 40, 1, 0x400100, phoff, shoff, 0, 64, phentsize, 1, shentsize, shnum, 8,
         )
         struct.pack_into(
             endian + "IIQQQQQQ",
@@ -88,7 +102,7 @@ def _build(bits: int) -> bytes:
             endian + "HHIIIIIHHHHHH",
             buf,
             16,
-            2, 40, 1, 0x400100, phoff, shoff, 0, 52, phentsize, 1, shentsize, shnum, 7,
+            2, 40, 1, 0x400100, phoff, shoff, 0, 52, phentsize, 1, shentsize, shnum, 8,
         )
         struct.pack_into(
             endian + "IIIIIIII",
@@ -106,6 +120,10 @@ def _build(bits: int) -> bytes:
         (shname[".symtab"], SHT_SYMTAB, 0x0, 0, 0x1B0, 6 * (24 if bits == 64 else 16), 5, 1, 4, 24 if bits == 64 else 16),
         (shname[".strtab"], SHT_STRTAB, 0x0, 0, 0x240, len(strtab), 0, 0, 1, 0),
         (shname[".bss"], SHT_NOBITS, 0x3, 0x400200, 0x260, 0x40, 0, 0, 4, 0),
+        (
+            shname[".rel.dyn"], SHT_REL, 0x0, 0, 0x2A0,
+            16 if bits == 64 else 8, 2, 0, 4, 16 if bits == 64 else 8,
+        ),
         (shname[".shstrtab"], SHT_STRTAB, 0x0, 0, shstr_off, len(shstrtab), 0, 0, 1, 0),
     ]
     sh_fmt = endian + ("IIQQQQIIQQ" if bits == 64 else "IIIIIIIIII")
@@ -183,6 +201,19 @@ def test_import_rows_use_dynsym_ordinals(elf) -> None:
 
 def test_string_location_uses_section_names(elf) -> None:
     assert elf.locate(0x400100) == (0x100, ".text")
+
+
+def test_relocation_rows_match_radare2_table_fields(elf) -> None:
+    assert list(elf.reloc_rows()) == [
+        {
+            "name": "puts",
+            "type": "SET_32" if elf.bits == 32 else "SET_64",
+            "ntype": 22,
+            "vaddr": 0x400104,
+            "paddr": 0x104,
+            "is_ifunc": False,
+        }
+    ]
 
 
 def test_non_elf_and_missing_files_return_none(tmp_path: Path) -> None:

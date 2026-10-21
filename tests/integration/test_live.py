@@ -262,6 +262,23 @@ def test_ii_paginates(session) -> None:
     assert rest[0] != first[0]
 
 
+def test_ir_has_the_radare2_relocation_columns(session) -> None:
+    session.failed = False
+    lines = session.run("ir")
+    assert not session.failed, session.last_error
+    assert lines[0].split() == ["vaddr", "paddr", "type", "ntype", "name"]
+    rows = [line for line in lines[2:] if not line.startswith("―")]
+    if not rows:
+        pytest.skip("the target has no relocations")
+    for line in rows[:5]:
+        vaddr, paddr, kind, ntype, name = line.split(None, 4)
+        assert vaddr.startswith("0x")
+        assert paddr.startswith("0x") or paddr == "----------"
+        assert kind in {"SET_32", "SET_64", "ADD_32", "ADD_64"}
+        assert ntype.isdigit()
+        assert name
+
+
 def test_is_has_the_radare2_symbol_columns(session) -> None:
     session.failed = False
     lines = session.run("is")

@@ -256,6 +256,13 @@ def entries(db: Any, pattern: str | None = None) -> list[dict[str, Any]]:
     return out
 
 
+@op("relocations")
+def relocations(db: Any) -> list[dict[str, Any]]:
+    """Relocation table (``ir``)."""
+    elf = _elf_for(db)
+    return list(elf.reloc_rows()) if elf is not None else []
+
+
 @op("symbols")
 def symbols(
     db: Any, pattern: str | None = None, offset: int = 0, count: int | None = None

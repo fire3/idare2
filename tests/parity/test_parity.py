@@ -337,6 +337,29 @@ def test_symbol_table_matches_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def _relocation_rows(
+    lines: list[str],
+) -> list[tuple[int, int | None, str, int, str]]:
+    rows = []
+    for line in lines[2:]:
+        tokens = line.split(None, 4)
+        if len(tokens) < 5 or not tokens[0].startswith("0x"):
+            continue
+        paddr = None if tokens[1].startswith("-") else int(tokens[1], 16)
+        rows.append(
+            (int(tokens[0], 16), paddr, tokens[2], int(tokens[3]), tokens[4])
+        )
+    return rows
+
+
+def test_relocation_table_matches_r2(session, r2) -> None:
+    """``ir`` uses the raw ELF relocation sections, which IDA does not expose."""
+    ours = _relocation_rows(session.run("ir"))
+    theirs = _relocation_rows(r2("ir"))
+    assert ours
+    assert ours == theirs
+
+
 def _string_rows(lines: list[str]) -> dict[str, list[tuple[int, int, str]]]:
     rows: dict[str, list[tuple[int, int, str]]] = {}
     for line in lines[2:]:
