@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from idare2 import assembler
 from idare2.cmd import _NUMERIC, command, numeric_args, with_more
 from idare2.errors import UsageError
 from idare2.fmt import disasm as fmt_disasm
@@ -26,6 +27,10 @@ DISASM_DETAIL = [
     ("pdl", "[n]", "instruction sizes"),
     ("pdc", "[n]", "pseudo-C decompilation (Hex-Rays)"),
     ("pdq", "[n]", "disassemble N instructions, address and text only"),
+]
+
+ASSEMBLY_DETAIL = [
+    ("pa", "[asm]", "assemble an instruction and print its hexpairs"),
 ]
 
 MEMORY_DETAIL = [
@@ -100,6 +105,19 @@ def _decompile(session: Session, target: int, count: int | None, offset: int) ->
         "decompile", ea=target, count=count, offset=offset
     )
     return with_more(list(payload.get("lines") or []), meta)
+
+
+@command(
+    "pa",
+    usage="[asm]",
+    summary="assemble an instruction",
+    detail=ASSEMBLY_DETAIL,
+)
+def print_assembly(session: Session, statement: Statement) -> list[str]:
+    """``pa`` -- the reverse of ``pd``, matching r2's hexpair output."""
+    if statement.cmd != "pa":
+        raise UsageError(f"unsupported print modifier '{statement.cmd[1:]}' (see p?)")
+    return [assembler.assemble(session, statement.args).hex()]
 
 
 @command("p[x8hruvscw]", usage="[n]", summary="print memory and values", detail=MEMORY_DETAIL)

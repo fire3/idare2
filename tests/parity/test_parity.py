@@ -195,6 +195,17 @@ def test_disasm_bytes_agree_on_unrelocated_code(session, r2) -> None:
     assert ours == theirs
 
 
+def test_assembly_matches_r2(session, r2) -> None:
+    """`pa` should produce the same instruction encoding as r2's assembler."""
+    if session.info.get("architecture") != "ARM" or session.info.get("bitness") != 32:
+        pytest.skip("the parity target and its fixed NOP encoding are ARM32-specific")
+    address = 0x15E10
+    ours = session.run(f"pa nop @ 0x{address:x}")
+    theirs = r2(f"pa nop @ 0x{address:x}")
+    assert ours == ["0000a0e1"]
+    assert ours == theirs
+
+
 def test_function_addresses_overlap(session, r2) -> None:
     """Both engines must find the same real functions, whatever they name them."""
     ours = {

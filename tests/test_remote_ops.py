@@ -119,6 +119,78 @@ def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None
     ]
 
 
+def test_assemble_returns_idautils_bytes(monkeypatch) -> None:
+    import sys
+
+    calls = []
+
+    def assemble(ea: int, text: str):
+        calls.append((ea, text))
+        return True, b"\x90"
+
+    monkeypatch.setitem(sys.modules, "idautils", SimpleNamespace(Assemble=assemble))
+    envelope = dispatch.invoke(
+        SimpleNamespace(), "assemble", {"ea": 0x1000, "text": "nop"}
+    )
+
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {"ea": 0x1000, "size": 1, "data": b"\x90"}
+    assert calls == [(0x1000, "nop")]
+
+
+def test_assemble_splits_instructions_and_concatenates_the_result(monkeypatch) -> None:
+    import sys
+
+    calls = []
+
+    def assemble(ea: int, lines: list[str]):
+        calls.append((ea, lines))
+        return True, [b"\x90", b"\x90"]
+
+    monkeypatch.setitem(sys.modules, "idautils", SimpleNamespace(Assemble=assemble))
+    envelope = dispatch.invoke(
+        SimpleNamespace(), "assemble", {"ea": 0x1000, "text": "nop; nop"}
+    )
+
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {"ea": 0x1000, "size": 2, "data": b"\x90\x90"}
+    assert calls == [(0x1000, ["nop", "nop"])]
+
+
+def test_assemble_reports_processor_without_assembler(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(
+        sys.modules,
+        "idautils",
+        SimpleNamespace(Assemble=lambda ea, text: (False, "Assembler failed: nop")),
+    )
+    envelope = dispatch.invoke(
+        SimpleNamespace(), "assemble", {"ea": 0x1000, "text": "nop"}
+    )
+
+    assert not protocol.is_ok(envelope)
+    assert envelope["error"]["code"] == protocol.IDA_ERROR
+    assert "processor module may not provide an assembler" in envelope["error"]["message"]
+    assert "Assembler failed: nop" in envelope["error"]["message"]
+
+
+def test_assemble_rejects_blank_input(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(
+        sys.modules,
+        "idautils",
+        SimpleNamespace(Assemble=lambda ea, text: pytest.fail("must not run")),
+    )
+    envelope = dispatch.invoke(
+        SimpleNamespace(), "assemble", {"ea": 0x1000, "text": " ; \n"}
+    )
+
+    assert not protocol.is_ok(envelope)
+    assert envelope["error"]["code"] == protocol.BAD_ARGS
+
+
 def test_function_info_skips_hexrays_when_unavailable(monkeypatch) -> None:
     import sys
 

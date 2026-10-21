@@ -21,6 +21,7 @@ def registered() -> None:
         ("pdj", "p[dDiI]"),
         ("pi", "p[dDiI]"),
         ("px", "p[x8hruvscw]"),
+        ("pa", "pa"),
         ("p8", "p[x8hruvscw]"),
         ("pwd", "p[x8hruvscw]"),
         # `ph` was documented in `p?` and in the README but never registered.
@@ -81,6 +82,13 @@ def test_duplicate_patterns_are_not_registered_twice() -> None:
     patterns = [command.pattern for command in cmd.all_commands()]
     # `pwd` is handled by the p-family, not a second command.
     assert patterns.count("pwd") == 0
+
+
+def test_assembly_preview_is_read_only_but_wa_is_not() -> None:
+    wa = cmd.lookup("wa")
+    preview = cmd.lookup("wa*")
+    assert wa is not None and wa[0].writes is True
+    assert preview is not None and preview[0].writes is False
 
 
 def test_registered_patterns_are_unique() -> None:

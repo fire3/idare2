@@ -135,11 +135,12 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 |---|---|
 | Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
 | Disassembly | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc` |
+| Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
 | Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `ps` `psw` `pv` `ph` `pwd` |
 | Information | `i` `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE` `iM` |
 | Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` |
 | Search | `/` `/x` `/v` `/r` `//` `/+` |
-| Writing | `w` `wq` `wx` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
+| Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
 | Metadata | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |
 | Types | `t` `tj` `t*` `ts` `tp` `tc` `tt` `t-` `td` `te` `dt` |
 | Flags | `f` `f*` `f,` `f-` `f?` |
@@ -161,8 +162,12 @@ Most information commands support a `j` suffix for JSON output.
   `e ida.flags.write=false` to keep them session-local.
 - Unsupported commands fail explicitly instead of falling back to a different
   command.
-- Assembly with `wa` depends on whether the active IDA processor module provides
-  an assembler.
+- `pa` assembles an instruction to hexpairs; `wa` assembles and writes it. IDA's
+  assembler is used first. When the processor module has no assembler, idare2
+  falls back to radare2's `rasm2` if it is on `PATH` (or `IDARE2_RASM2` points
+  to it), which covers common ARM, AArch64, MIPS, PPC, RISC-V and m68k targets.
+- `wa*` and `waF*` print the equivalent `wx` command without modifying the
+  database, so they work in read-only sessions.
 
 ## Development
 

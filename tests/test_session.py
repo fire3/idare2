@@ -23,6 +23,7 @@ class FakeRemote:
         self.fail: set[str] = set()
         self.search_hits = [0x1000, 0x1010]
         self.read_floor: int | None = None
+        self.assembly = b"\x90"
 
     def _read_bytes(self, arguments: dict):
         ea = arguments["ea"]
@@ -56,6 +57,11 @@ class FakeRemote:
             ],
             "patch_bytes": lambda: {"ea": arguments["ea"], "size": 2},
             "patch_many": lambda: {"patches": len(arguments["patches"])},
+            "assemble": lambda: {
+                "ea": arguments["ea"],
+                "size": len(self.assembly),
+                "data": self.assembly,
+            },
             "set_name": lambda: {"ea": arguments["ea"], "name": arguments["name"]},
             "delete_name": lambda: {"ea": arguments["ea"]},
             "comments": lambda: (
@@ -811,6 +817,104 @@ def test_bare_write_increment_is_a_noop() -> None:
     session, remote = make_session()
     assert session.run("wi1") == []
     assert not session.failed
+    assert "patch_bytes" not in remote.operations
+
+
+def test_pa_prints_hexpairs_without_writing() -> None:
+    session, remote = make_session()
+    session.seek = 0x2000
+
+    assert session.run("pa nop") == ["90"]
+    assert ("assemble", {"ea": 0x2000, "text": "nop"}) in remote.calls
+    assert "patch_bytes" not in remote.operations
+
+
+def test_pa_honours_temporary_seek_and_quoted_instructions() -> None:
+    session, remote = make_session()
+    remote.assembly = b"\x90\x90"
+
+    assert session.run('pa "nop;nop" @ 0x2000') == ["9090"]
+    assert ("assemble", {"ea": 0x2000, "text": "nop;nop"}) in remote.calls
+    assert session.seek == 0x1000
+
+
+def test_pa_is_read_only() -> None:
+    session, _remote = make_session()
+    session.readonly = True
+    assert session.run("pa nop") == ["90"]
+    assert not session.failed, session.last_error
+
+
+def test_pa_needs_an_instruction() -> None:
+    session, remote = make_session()
+    assert session.run("pa") == []
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "assemble" not in remote.operations
+
+
+def test_pa_help_is_generated_from_the_registry() -> None:
+    session, remote = make_session()
+    lines = session.run("pa?")
+    assert lines[0] == "Usage: pa [asm]"
+    assert any(line.startswith("| pa ") for line in lines)
+    assert "assemble" not in remote.operations
+
+
+def test_wa_star_previews_without_patching() -> None:
+    session, remote = make_session()
+    assert session.run("wa* nop") == ["wx 90"]
+    assert "assemble" in remote.operations
+    assert "patch_bytes" not in remote.operations
+
+
+def test_wa_star_works_in_read_only_mode() -> None:
+    session, remote = make_session()
+    session.readonly = True
+    assert session.run("wa* nop") == ["wx 90"]
+    assert not session.failed, session.last_error
+    assert "patch_bytes" not in remote.operations
+
+
+def test_wa_plus_writes_and_seeks_past_the_instruction() -> None:
+    session, remote = make_session()
+    remote.assembly = b"\x90\x90"
+    session.seek = 0x2000
+
+    assert session.run("wa+ nop") == ["-- wrote 2 bytes of nop at 0x00002000 --"]
+    patches = [arguments for name, arguments in remote.calls if name == "patch_bytes"]
+    assert patches == [{"ea": 0x2000, "data": "9090"}]
+    assert session.seek == 0x2002
+
+
+def test_waf_assembles_a_file_and_waF_prints_the_wx_command(tmp_path) -> None:
+    source = tmp_path / "snippet.asm"
+    source.write_text("nop\nnop\n", encoding="utf-8")
+    session, remote = make_session()
+    remote.assembly = b"\x90\x90"
+
+    assert session.run(f"waF {source}") == ["wx 9090"]
+    calls = [arguments for name, arguments in remote.calls if name == "assemble"]
+    assert calls == [{"ea": 0x1000, "text": "nop\nnop"}]
+    patches = [arguments for name, arguments in remote.calls if name == "patch_bytes"]
+    assert patches == [{"ea": 0x1000, "data": "9090"}]
+
+
+def test_waf_and_waF_star_forms(tmp_path) -> None:
+    source = tmp_path / "snippet.asm"
+    source.write_text("nop\n", encoding="utf-8")
+    session, remote = make_session()
+
+    assert session.run(f"waf {source}") == [
+        "-- wrote 1 bytes of nop at 0x00001000 --"
+    ]
+    assert [args for name, args in remote.calls if name == "patch_bytes"] == [
+        {"ea": 0x1000, "data": "90"}
+    ]
+
+    remote.calls.clear()
+    session.readonly = True
+    assert session.run(f"waF* {source}") == ["wx 90"]
     assert "patch_bytes" not in remote.operations
 
 

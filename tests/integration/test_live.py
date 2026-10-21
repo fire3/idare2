@@ -107,6 +107,43 @@ def test_pd_renders(session) -> None:
     assert any("MOV" in line or "mov" in line for line in lines)
 
 
+def test_pa_assembles_without_writing(session) -> None:
+    """`pa` is the reverse of `pd`; it must work in a read-only session."""
+    arch = str(session.info.get("architecture") or "")
+    bits = session.info.get("bitness") or session.info.get("bits")
+    if arch == "metapc":
+        expected = "90"
+    elif arch in ("ARM", "ARM64", "AARCH64") and bits == 64:
+        expected = "1f2003d5"
+    elif arch == "ARM" and bits == 32:
+        expected = "0000a0e1"
+    else:
+        expected = None
+    if expected is None:
+        pytest.skip("no stable NOP encoding for this architecture")
+    session.failed = False
+    assert session.run("pa nop @ 0x00016bb4") == [expected]
+    assert not session.failed, session.last_error
+
+
+def test_wa_star_previews_without_write_permission(session) -> None:
+    arch = str(session.info.get("architecture") or "")
+    bits = session.info.get("bitness") or session.info.get("bits")
+    if arch == "metapc":
+        expected = "90"
+    elif arch in ("ARM", "ARM64", "AARCH64") and bits == 64:
+        expected = "1f2003d5"
+    elif arch == "ARM" and bits == 32:
+        expected = "0000a0e1"
+    else:
+        expected = None
+    if expected is None:
+        pytest.skip("no stable NOP encoding for this architecture")
+    session.failed = False
+    assert session.run("wa* nop @ 0x00016bb4") == [f"wx {expected}"]
+    assert not session.failed, session.last_error
+
+
 def test_px_renders(session) -> None:
     lines = session.run("px 16 @ 0x10000")
     assert lines[0].startswith("- offset -")

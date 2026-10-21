@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from idare2 import assembler
 from idare2 import cmd as cmd_module
 from idare2.cmd import command
 from idare2.errors import UsageError
@@ -25,6 +26,10 @@ WRITE_DETAIL = [
     ("w", " text", "write a string at the current offset"),
     ("wx", " hexpairs", "write bytes"),
     ("wa", " asm", "assemble an instruction and write it"),
+    ("wa*", " asm", "print the `wx` command for an assembled instruction"),
+    ("wa+", " asm", "assemble, write and seek past the instruction"),
+    ("waf", " file", "assemble a source file and write it"),
+    ("waF", " file", "assemble a source file, write it and print `wx`"),
     ("w0", " [len]", "write zero bytes"),
     ("wd", " off len", "copy len bytes from off to the current offset"),
     ("wf", " file", "write the contents of a file"),
@@ -66,8 +71,8 @@ def write(session: Session, statement: Statement) -> list[str]:
         length = session.eval(argument) if argument else session.blocksize
         return _patch(session, b"\x00" * max(int(length), 0))
 
-    if suffix == "a":
-        return _assemble(session, argument)
+    if suffix.startswith("a"):
+        return _assemble(session, argument, modifier=suffix[1:])
 
     if suffix == "d":
         return _copy(session, argument)
@@ -82,6 +87,28 @@ def write(session: Session, statement: Statement) -> list[str]:
         return _base64(session, suffix[1:], argument)
 
     raise UsageError(f"unsupported write modifier '{suffix}' (see w?)")
+
+
+@command(
+    "wa[*]",
+    usage=" asm",
+    summary="print the wx command for an assembled instruction",
+    detail=[("wa*", " asm", "print `wx <hexpairs>` without writing")],
+)
+def assembly_preview(session: Session, statement: Statement) -> list[str]:
+    """``wa*`` -- read-only preview of the bytes ``wa`` would write."""
+    return _assemble(session, statement.args, modifier="*")
+
+
+@command(
+    "waF*",
+    usage=" file",
+    summary="print the wx command for an assembled file",
+    detail=[("waF*", " file", "assemble a file and print `wx <hexpairs>` without writing")],
+)
+def assembly_file_preview(session: Session, statement: Statement) -> list[str]:
+    """``waF*`` -- read-only file form of ``wa*``."""
+    return _assemble(session, statement.args, modifier="F*")
 
 
 def _save(session: Session, *, quit_after: bool) -> list[str]:
@@ -137,19 +164,46 @@ def _cache(session: Session, suffix: str) -> list[str]:
     return [f"-- committed {count} buffered write(s) --"]
 
 
-def _assemble(session: Session, argument: str) -> list[str]:
-    """``wa``: assemble, then patch (or buffer) -- the op itself never writes."""
-    text = _unquote(argument)
-    if not text:
+def _assemble(session: Session, argument: str, *, modifier: str = "") -> list[str]:
+    """``wa``: assemble, then patch (or buffer) -- the op itself never writes.
+
+    The modifiers mirror r2's useful subset: ``*`` prints the equivalent ``wx``
+    command, ``+`` seeks past the written instruction, and the file forms read
+    the assembly from disk.
+    """
+    allowed = {"", "*", "+", "f", "F", "F*"}
+    if modifier not in allowed:
+        raise UsageError(f"unsupported wa modifier '{modifier}' (see w?)")
+
+    from_file = modifier.startswith("f") or modifier.startswith("F")
+    if from_file:
+        if not argument:
+            raise UsageError("wa" + modifier + " needs a file name")
+        path = Path(_unquote(argument)).expanduser()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise UsageError(f"cannot read {path}: {exc}") from exc
+    else:
+        text = _unquote(argument)
+    if not text.strip():
         raise UsageError("wa needs an instruction")
-    payload = session.remote.call("assemble", ea=session.seek, text=text)
-    raw = bytes(payload.get("data") or b"")
-    if not raw:
-        raise UsageError(f"assembler produced nothing for {text!r}")
+
+    start = session.seek
+    raw = assembler.assemble(session, text, ea=start)
+    emit_only = modifier in ("*", "F*")
+    emit_hex = modifier in ("F", "F*")
+    if emit_only:
+        return [f"wx {raw.hex()}"]
+
     _patch(session, raw)
+    if modifier == "+":
+        session.seek_to(start + len(raw))
+    if emit_hex:
+        return [f"wx {raw.hex()}"]
     if session.config.get_bool("io.cache"):
         return []
-    return [f"-- wrote {len(raw)} bytes of {text} at {session.format_addr(session.seek)} --"]
+    return [f"-- wrote {len(raw)} bytes of {text.strip()} at {session.format_addr(start)} --"]
 
 
 def _unquote(text: str) -> str:
