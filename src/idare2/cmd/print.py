@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from idare2 import assembler
+from idare2 import pf as pf_format
 from idare2.cmd import _NUMERIC, command, numeric_args, with_more
-from idare2.errors import UsageError
+from idare2.errors import Idare2Error, UsageError
 from idare2.fmt import disasm as fmt_disasm
 from idare2.fmt import memory as fmt_memory
 from idare2.fmt import to_json
@@ -46,6 +47,14 @@ MEMORY_DETAIL = [
     ("psw", "[n]", "wide (UTF-16) string"),
     ("pv", "[n]", "value of the given size (1, 2, 4, 8)"),
     ("ph", "[algo] [n]", "hash of a block; bare `ph` lists the algorithms"),
+]
+
+PF_DETAIL = [
+    ("pf", "<fmt> [name ...]", "print formatted data (pf.<name> applies a saved format)"),
+    ("pfj", "<fmt> [name ...]", "print formatted data as JSON"),
+    ("pfs", "<fmt>", "size in bytes consumed by a pf format"),
+    ("pf.", "[name]", "list or apply named pf formats"),
+    ("pf.<name>", "[fmt [name ...]]", "define or apply a named pf format"),
 ]
 
 
@@ -251,3 +260,147 @@ def _hash(
     )
     digest.update(bytes(payload.get("data") or b""))
     return [digest.hexdigest()]
+
+
+@command(
+    "pf",
+    usage="<fmt> [name ...]",
+    summary="print formatted data",
+    detail=PF_DETAIL,
+    query_suffix=True,
+)
+def print_format(session: Session, statement: Statement) -> list[str]:
+    """``pf`` -- decode fields according to an r2 format string.
+
+    Definitions live in the session, like r2's: ``pf.foo xxd a b`` defines a
+    format.  ``pf.foo``, ``pfj.foo`` and ``pfs.foo`` then use it.
+    """
+    token = statement.cmd
+    mode, dotted, named = _pf_mode(token)
+    if mode is None:
+        raise UsageError(f"unsupported print modifier '{token[2:]}' (see pf?)")
+
+    if statement.help:
+        words = statement.argv
+        if not words:
+            raise UsageError("pf? needs a format name")
+        return _pf_show(session, words[0])
+
+    words = statement.argv
+    if dotted:
+        if named is None:
+            if not words:
+                return _pf_list(session)
+            named, words = words[0], words[1:]
+        if words:
+            return _pf_define(session, named, words)
+        definition = session.pf_formats.get(named)
+        if definition is None:
+            raise UsageError(f"pf: no named format {named!r}")
+        text, names = definition
+        fmt = pf_format.parse_format(
+            text,
+            pointer_size=_pointer_size(session),
+            names=names,
+            repeat=statement.repeat,
+            union=statement.repeat == 0,
+        )
+    else:
+        if not words:
+            return []
+        fmt = pf_format.parse_format(
+            words[0],
+            pointer_size=_pointer_size(session),
+            names=words[1:],
+            repeat=statement.repeat,
+            union=statement.repeat == 0,
+        )
+
+    if mode == "s":
+        return [str(pf_format.format_size(fmt, include_repeat=False))]
+    return _pf_render(session, statement, fmt, json_mode=mode == "j")
+
+
+def _pf_mode(token: str) -> tuple[str | None, bool, str | None]:
+    """Return ``(mode, dotted, inline_name)`` for the pf token variants."""
+    if token == "pf":
+        return "", False, None
+    if token == "pfj":
+        return "j", False, None
+    if token == "pfs":
+        return "s", False, None
+    if token.startswith("pf."):
+        rest = token[3:]
+        return "", True, rest or None
+    if token.startswith("pfj."):
+        return "j", True, token[4:] or None
+    if token.startswith("pfs."):
+        return "s", True, token[4:] or None
+    return None, False, None
+
+
+def _pf_define(session: Session, name: str, words: list[str]) -> list[str]:
+    if not words:
+        raise UsageError(f"pf.{name} needs a format string")
+    text, names = words[0], tuple(words[1:])
+    pf_format.parse_format(
+        text, pointer_size=_pointer_size(session), names=names
+    )
+    session.pf_formats[name] = (text, names)
+    return []
+
+
+def _pf_list(session: Session) -> list[str]:
+    lines = []
+    for name in sorted(session.pf_formats):
+        text, names = session.pf_formats[name]
+        suffix = (" " + " ".join(names)) if names else ""
+        lines.append(f"pf.{name} {text}{suffix}")
+    return lines
+
+
+def _pf_show(session: Session, name: str) -> list[str]:
+    definition = session.pf_formats.get(name)
+    if definition is None:
+        raise UsageError(f"pf: no named format {name!r}")
+    text, names = definition
+    suffix = (" " + " ".join(names)) if names else ""
+    return [f"pf.{name} {text}{suffix}"]
+
+
+def _pf_render(
+    session: Session,
+    statement: Statement,
+    fmt: pf_format.Format,
+    *,
+    json_mode: bool,
+) -> list[str]:
+    count = max(pf_format.format_size(fmt) + 64, session.blocksize)
+    payload = session.remote.call("read_bytes", ea=session.seek, count=count)
+    data = bytes(payload.get("data") or b"")
+
+    def read_string(address: int, size: int) -> str | None:
+        try:
+            result = session.remote.call(
+                "read_string", ea=address, max_length=size, encoding="auto"
+            )
+        except Idare2Error:
+            return None
+        return result.get("text")
+
+    rendered = pf_format.render(
+        data,
+        session.seek,
+        fmt,
+        endian=str(session.info.get("endian") or "little"),
+        format_addr=session.format_addr,
+        read_string=read_string,
+    )
+    if json_mode:
+        return [to_json(rendered.rows)]
+    return rendered.lines
+
+
+def _pointer_size(session: Session) -> int:
+    bits = int(session.info.get("bits") or session.info.get("bitness") or 32)
+    return 8 if bits == 64 else 4

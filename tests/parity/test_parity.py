@@ -207,6 +207,15 @@ def test_assembly_matches_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def test_pf_scalars_match_r2(session, r2) -> None:
+    """``pf`` is byte formatting over the same data, so the rows are identical."""
+    address = 0x15E30
+    ours = session.run(f"pf xix @ 0x{address:x}")
+    theirs = r2(f"pf xix @ 0x{address:x}")
+    assert ours
+    assert ours == theirs
+
+
 def test_function_addresses_overlap(session, r2) -> None:
     """Both engines must find the same real functions, whatever they name them."""
     ours = {

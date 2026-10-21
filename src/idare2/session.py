@@ -73,6 +73,8 @@ class Session:
         self.flags = FlagStore()
         self.vars: dict[str, int] = {}
         self.aliases: dict[str, str] = {}
+        #: `pf.<name>` format definitions (format string, field labels).
+        self.pf_formats: dict[str, tuple[str, tuple[str, ...]]] = {}
         self.seek_history: list[int] = []
         self.seek_future: list[int] = []
         self.last_output: list[str] = []

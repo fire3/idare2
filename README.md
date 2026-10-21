@@ -156,7 +156,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
 | Disassembly | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc` |
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
-| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `ps` `psw` `pv` `ph` `pwd` |
+| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `pf` `pfj` `pfs` `ps` `psw` `pv` `ph` `pwd` |
 | Information | `i` `iI` `ij` `iS` `ii` `is` `iz` `ie` `iE` `iM` |
 | Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `afb` `afc` `afC` `ab` `axt` `axf` `axj` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `//` `/+` |
@@ -186,6 +186,8 @@ Most information commands support a `j` suffix for JSON output.
   assembler is used first. When the processor module has no assembler, idare2
   falls back to radare2's `rasm2` if it is on `PATH` (or `IDARE2_RASM2` points
   to it), which covers common ARM, AArch64, MIPS, PPC, RISC-V and m68k targets.
+- `pf` supports r2's scalar formats, inline `[n]` arrays, offset controls and
+  session-local named formats; unsupported format characters fail explicitly.
 - `wa*` and `waF*` print the equivalent `wx` command without modifying the
   database, so they work in read-only sessions.
 - `agf` prints a compact ASCII function graph, `agfj`/`agj` return r2-shaped

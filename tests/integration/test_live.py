@@ -416,6 +416,32 @@ def test_completion_uses_live_function_names(session) -> None:
     assert "scr.color" in completer.candidates("e scr.co", 2, 8)
 
 
+def test_pf_decodes_live_memory_and_named_formats(session) -> None:
+    import json
+
+    address = 0x00015E30
+    payload = session.remote.call("read_bytes", ea=address, count=12)
+    raw = bytes(payload.get("data") or b"")
+    endian = str(session.info.get("endian") or "little")
+    first = int.from_bytes(raw[0:4], endian)
+    middle = int.from_bytes(raw[4:8], endian, signed=True)
+    last = int.from_bytes(raw[8:12], endian)
+
+    session.failed = False
+    assert session.run(f"pf xix @ 0x{address:x}") == [
+        f"{session.format_addr(address)} = 0x{first:08x}",
+        f"{session.format_addr(address + 4)} = {middle}",
+        f"{session.format_addr(address + 8)} = 0x{last:08x}",
+    ]
+    assert not session.failed, session.last_error
+
+    assert session.run("pf.obj xix first second third") == []
+    assert session.run(f"pf.obj @ 0x{address:x}")[0].startswith(" first : ")
+    assert session.run("pfs.obj") == ["12"]
+    rows = json.loads(session.run("pfj.obj @ 0x00015E30")[0])
+    assert [row["value"] for row in rows] == [first, middle, last]
+
+
 def test_bare_cc_lists_comments(session) -> None:
     """`CC` used to be unreachable: it demanded -w, then demanded text."""
     session.failed = False
