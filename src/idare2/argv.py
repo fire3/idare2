@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from idare2.errors import UsageError
 
 #: Short flags that take a value.
-VALUE_FLAGS = frozenset("abcBeikmpst")
+VALUE_FLAGS = frozenset("abcBeIikmpst")
 #: Short flags that take no value.
 BOOLEAN_FLAGS = frozenset("0A1E2fhjLnNqQSTuvVw")
 #: Doubled letters with their own meaning, checked before single letters.

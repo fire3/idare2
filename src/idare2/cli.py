@@ -13,6 +13,7 @@ Data goes to stdout, diagnostics to stderr, which is what makes
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -31,6 +32,8 @@ from idare2.errors import (
 from idare2.nexus import Target
 from idare2.rpc import DEFAULT_TIMEOUT, Remote
 from idare2.session import Session
+
+HISTORY_SIZE = 1000
 
 USAGE = """\
 Usage: idare2 [file] [options] [-c cmd]...
@@ -57,7 +60,8 @@ Behaviour
   -w                      enable writes (the default is read-only)
   -e <key=value>          set a configuration variable (repeatable)
   -c <cmd>                run a command before the prompt (repeatable)
-  -i <file>, -I <file>    run a command script after / before loading
+  -i <file>               run a command script after the database is open
+  -I <file>               run a command script before the -i and -c scripts
   -j                      JSON output where a command supports it
   -q, -qq                 quiet: no prompt; exit after -c/-i
   -v, -V                  version / detailed version
@@ -259,17 +263,17 @@ def _parse_bits(text: str) -> int:
 def _run_scripts(session: Session, options: argv_parser.Options) -> int | None:
     for script in options.pre_scripts:
         _run_file(session, script)
-    for command in options.commands:
-        session.run(command, emit=_emit)
     for script in options.post_scripts:
         _run_file(session, script)
+    for command in options.commands:
+        session.run(command, emit=_emit)
     return None
 
 
 def _run_file(session: Session, path: str) -> None:
     try:
         text = Path(path).expanduser().read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         raise UsageError(f"cannot read script {path}: {exc}") from exc
     for line in text.splitlines():
         stripped = line.strip()
@@ -288,6 +292,13 @@ def _emit(lines: list[str]) -> None:
 def _load_rc(session: Session, options: argv_parser.Options) -> None:
     if options.skip_rc:
         return
+    configured = os.environ.get("IDARE2_RCFILE")
+    if configured:
+        explicit = Path(configured).expanduser()
+        if not explicit.is_file():
+            reason = "not a regular file" if explicit.exists() else "no such file"
+            print(f"WARN: cannot read rc file {explicit}: {reason}", file=sys.stderr)
+            return
     for path in _rc_paths():
         if path.is_file():
             try:
@@ -300,11 +311,86 @@ def _rc_paths() -> list[Path]:
     configured = os.environ.get("IDARE2_RCFILE")
     if configured:
         return [Path(configured).expanduser()]
+
     home = Path.home()
-    return [
-        home / ".idare2rc",
-        home / ".config" / "idare2" / "rc",
-    ]
+    config_home = _xdg_home("XDG_CONFIG_HOME", home / ".config")
+    paths = [home / ".idare2rc", config_home / "idare2" / "rc"]
+
+    rc_dir = config_home / "idare2" / "rc.d"
+    if rc_dir.is_dir():
+        try:
+            entries = list(rc_dir.iterdir())
+        except OSError:
+            entries = []
+        paths.extend(sorted(path for path in entries if path.is_file()))
+
+    project = _find_project_rc()
+    if project is not None:
+        paths.append(project)
+
+    return _unique_paths(paths)
+
+
+def _xdg_home(variable: str, fallback: Path) -> Path:
+    """Return an XDG base directory, ignoring relative values per the spec."""
+    configured = os.environ.get(variable)
+    if configured:
+        candidate = Path(configured).expanduser()
+        if candidate.is_absolute():
+            return candidate
+    return fallback
+
+
+def _find_project_rc(start: Path | None = None) -> Path | None:
+    try:
+        current = (start or Path.cwd()).resolve()
+    except OSError:
+        return None
+    if current.is_file():
+        current = current.parent
+    for directory in (current, *current.parents):
+        candidate = directory / ".idare2rc"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    seen: set[Path] = set()
+    result: list[Path] = []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            result.append(path)
+    return result
+
+
+def _history_path() -> Path:
+    state_home = _xdg_home("XDG_STATE_HOME", Path.home() / ".local" / "state")
+    return state_home / "idare2" / "history"
+
+
+def _load_history(readline) -> None:
+    path = _history_path()
+    try:
+        readline.set_history_length(HISTORY_SIZE)
+        readline.read_history_file(str(path))
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        print(f"WARN: cannot read history {path}: {exc}", file=sys.stderr)
+
+
+def _save_history(readline) -> None:
+    path = _history_path()
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        readline.write_history_file(str(path))
+    except OSError as exc:
+        print(f"WARN: cannot save history {path}: {exc}", file=sys.stderr)
+        return
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)
 
 
 def _load_project(session: Session, name: str) -> None:
@@ -330,38 +416,53 @@ def _load_project(session: Session, name: str) -> None:
 
 
 def _repl(session: Session, options: argv_parser.Options) -> int:
-    completer = _install_completion(session)
+    readline = _import_readline()
+    completer = _install_completion(session, readline)
+    if readline is not None:
+        _load_history(readline)
 
     if session.config.get_bool("scr.prompt"):
         _banner(session)
 
-    while True:
-        try:
-            line = input(session.prompt() if session.config.get_bool("scr.prompt") else "")
-        except EOFError:
-            print()
-            return EXIT_OK
-        except KeyboardInterrupt:
-            print()
-            continue
-        if not line.strip():
-            continue
-        try:
-            session.run(line, emit=_emit)
-        except QuitRequested as exc:
-            return exc.code
-        except Idare2Error as exc:
-            _error(str(exc), session)
-        finally:
-            if completer is not None:
-                completer.invalidate()
+    try:
+        while True:
+            try:
+                line = input(session.prompt() if session.config.get_bool("scr.prompt") else "")
+            except EOFError:
+                print()
+                return EXIT_OK
+            except KeyboardInterrupt:
+                print()
+                continue
+            if not line.strip():
+                continue
+            try:
+                session.run(line, emit=_emit)
+            except QuitRequested as exc:
+                return exc.code
+            except Idare2Error as exc:
+                _error(str(exc), session)
+            finally:
+                if completer is not None:
+                    completer.invalidate()
+    finally:
+        if readline is not None:
+            _save_history(readline)
 
 
-def _install_completion(session: Session):
-    """Wire the cached completer into readline, when readline is available."""
+def _import_readline():
     try:
         import readline
     except ImportError:
+        return None
+    return readline
+
+
+def _install_completion(session: Session, readline=None):
+    """Wire the cached completer into readline, when readline is available."""
+    if readline is None:
+        readline = _import_readline()
+    if readline is None:
         return None
     from idare2.complete import Completer
 

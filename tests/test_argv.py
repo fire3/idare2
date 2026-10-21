@@ -45,6 +45,12 @@ def test_eval_flag() -> None:
     assert options.evals == [("scr.color", "0"), ("ida.timeout", "5")]
 
 
+def test_script_flags() -> None:
+    options = argv.parse(["-I", "pre.r2", "-i", "post.r2"])
+    assert options.pre_scripts == ["pre.r2"]
+    assert options.post_scripts == ["post.r2"]
+
+
 def test_eval_requires_a_value() -> None:
     with pytest.raises(UsageError, match="key=value"):
         argv.parse(["-e", "scr.color"])

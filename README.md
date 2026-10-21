@@ -56,6 +56,19 @@ Commands use radare2 syntax:
 Use `?` for command help and `q` to exit. Use `wq` to save the IDB and exit.
 Tab completion covers command names, `e` configuration keys, flags, function
 names, and `$` variables/aliases; remote names are cached per editing cycle.
+Command history is kept in `${XDG_STATE_HOME:-~/.local/state}/idare2/history`.
+
+### Startup files
+
+At startup idare2 reads, in order:
+
+1. `~/.idare2rc`
+2. `${XDG_CONFIG_HOME:-~/.config}/idare2/rc`
+3. `${XDG_CONFIG_HOME:-~/.config}/idare2/rc.d/*` (sorted)
+4. the nearest `.idare2rc` in the current directory or an ancestor
+
+Set `IDARE2_RCFILE` to use a single alternate file instead. Pass `-N` (or
+`-NN`) to skip rc loading entirely.
 
 ### Batch commands
 
@@ -69,6 +82,9 @@ idare2 -qc 'pd 20' firmware.bin | grep call
 
 Multiple commands can be separated with `;`. A non-zero exit code is returned
 if any batch command fails.
+
+Scripts passed with `-I` run before `-i` scripts and `-c` commands; `-i`
+scripts run after the database is open and before `-c` commands.
 
 ### JSON output
 
