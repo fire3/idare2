@@ -157,6 +157,16 @@ def test_afl_lists_functions(session) -> None:
     assert all(line.startswith("0x") for line in lines)
 
 
+def test_aflq_lists_the_same_addresses(session) -> None:
+    session.failed = False
+    listed = [
+        int(line.split()[0], 16) for line in session.run("afl") if line.startswith("0x")
+    ]
+    quiet = [int(line, 16) for line in session.run("aflq") if line.startswith("0x")]
+    assert quiet
+    assert quiet == listed
+
+
 def test_afi_reports_function_info(session) -> None:
     """Regression: ``int(FunctionFlags)`` raised TypeError and killed ``afi``."""
     start = int(session.run("afl")[0].split()[0], 16)

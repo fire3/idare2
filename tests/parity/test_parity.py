@@ -237,6 +237,23 @@ def test_function_addresses_overlap(session, r2) -> None:
     )
 
 
+def test_aflq_is_the_address_only_form(session, r2) -> None:
+    """``aflq`` prints one address per line, with no size/name columns."""
+    ours = {
+        int(line.split()[0], 16)
+        for line in session.run("aflq")
+        if line.startswith("0x")
+    }
+    theirs = {
+        int(line.split()[0], 16)
+        for line in r2("aflq")
+        if line.startswith("0x")
+    }
+    assert ours and theirs
+    overlap = ours & theirs
+    assert len(overlap) >= 0.5 * min(len(ours), len(theirs))
+
+
 def _graph_edges(payload: list[dict]) -> dict[int, set[int]]:
     out = {}
     for block in payload[0]["blocks"]:

@@ -30,6 +30,7 @@ ANALYSIS_DETAIL = [
     ("afi", "", "function details"),
     ("afl", "[pat]", "list functions"),
     ("aflj", "[pat]", "list functions as JSON"),
+    ("aflq", "[pat]", "list function addresses only"),
     ("afb", "", "list the basic blocks of the current function"),
     ("afc", "", "callers of the current function"),
     ("afC", "", "callees of the current function"),
@@ -48,6 +49,8 @@ FUNCTION_DETAIL = [
     ("afi", "", "function details"),
     ("afij", "", "function details as JSON"),
     ("afl", "[pat]", "list functions"),
+    ("aflj", "[pat]", "list functions as JSON"),
+    ("aflq", "[pat]", "list function addresses only"),
     ("afb", "", "list the basic blocks of the current function"),
     ("afbj", "", "the basic blocks as JSON"),
     ("afc", "", "callers of the current function"),
@@ -105,14 +108,23 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
     if token in ("afn", "afN"):
         return _rename(session, rest)
 
-    if token.startswith("afl"):
+    if token in ("afl", "aflj", "aflq"):
         pattern = rest[0] if rest else None
         payload, meta = session.remote.call_with_meta(
             "functions", pattern=pattern, offset=offset, count=count
         )
-        if token.endswith("j"):
+        if token == "aflj":
             return [to_json(payload)]
+        if token == "aflq":
+            # r2's quiet form is the address alone, one per line.
+            return [f"0x{int(item['ea']):08x}" for item in payload]
         return with_more(fmt_listing.format_functions(payload, session), meta)
+
+    # Other `afl` modifiers (afl*, aflm, afll, afln, afls, ...) are not
+    # implemented.  They used to fall into the branch above and print the
+    # ordinary listing, silently claiming to support whatever was asked.
+    if token.startswith("afl"):
+        raise UsageError(f"unsupported function command '{token}' (see af?)")
 
     # `afbj`/`afij` have to be named explicitly: the JSON branch inside used to
     # be unreachable because the guard above it compared the whole token, so

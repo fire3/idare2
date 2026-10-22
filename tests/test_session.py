@@ -1118,6 +1118,26 @@ def test_afb_and_afi_json_forms_are_reachable() -> None:
     assert info["name"] == "main"
 
 
+def test_aflq_lists_addresses_only() -> None:
+    session, _remote = make_session()
+    assert session.run("aflq") == ["0x00001000", "0x00002000"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["afl*", "aflm", "afll", "afln", "afls", "aflt", "afl,", "aflc", "aflp", "afl+", "afl="],
+)
+def test_unimplemented_afl_modifiers_fail_loudly(command: str) -> None:
+    """Regression: these used to print the ordinary `afl` table."""
+    session, remote = make_session()
+    session.failed = False
+    session.run(command)
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported function command" in str(session.last_error)
+    assert "functions" not in remote.operations
+
+
 def test_agfj_reports_a_radare2_shaped_function_graph() -> None:
     import json
 
