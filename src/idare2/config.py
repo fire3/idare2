@@ -75,6 +75,8 @@ KEYS: tuple[Key, ...] = (
     #: r2's default is the string "10M"; hashes are only computed for inputs
     #: smaller than this.
     Key("bin.hashlimit", 10 * 1024 * 1024, INT, "hash only inputs up to this size", suffixes=True),
+    #: Default language for `iD sym` when only one argument is given.
+    Key("bin.lang", "c", STR, "default demangler language for `iD sym`"),
     Key("cfg.bigendian", False, BOOL, "big-endian mode (reflects the database)", readonly=True),
     Key("cfg.debug", False, BOOL, "debugger mode (idare2 has none)", readonly=True),
     Key("cfg.editor", "", STR, "editor for `-` and `CC!` (defaults to $EDITOR)"),

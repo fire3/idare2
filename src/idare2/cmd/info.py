@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from idare2.cmd import command, numeric_args, with_more
 from idare2.errors import UsageError
@@ -19,6 +19,7 @@ INFO_DETAIL = [
     ("ij", "", "the same information as JSON"),
     ("it", "", "file hashes"),
     ("itj", "", "file hashes as JSON"),
+    ("iD", "[lang] sym", "demangle a symbol"),
     ("iS", "", "segments with permissions"),
     ("ii", "[pat]", "imports"),
     ("is", "[pat]", "symbols"),
@@ -35,6 +36,27 @@ HEADER_DETAIL = [
     ("ih", "[*jq]", "header fields (ELF)"),
     ("iH", "[*j]", "file header (ELF)"),
 ]
+
+#: Languages radare2 6.2.5 accepts for ``iD`` (``r_bin_demangle_type``).  IDA's
+#: demangler auto-detects the scheme; the language only labels the answer.
+DEMANGLE_LANGUAGES = (
+    "c++",
+    "dlang",
+    "ibmxl",
+    "java",
+    "msvc",
+    "objc",
+    "pascal",
+    "rust",
+    "swift",
+)
+
+_DEMANGLE_ALIASES = {
+    "cxx": "c++",
+    "xlc": "ibmxl",
+    "xlc++": "ibmxl",
+    "freepascal": "pascal",
+}
 
 FILE_TOKENS = frozenset({"i", "iI", "ij", "it", "itj"})
 
@@ -181,6 +203,53 @@ def header(session: Session, statement: Statement) -> list[str]:
     if suffix == "q":
         return fmt_listing.format_header_quiet(fields)
     return fmt_listing.format_header_fields(fields)
+
+
+@command(
+    "iD",
+    usage="[lang] sym",
+    summary="demangle a symbol",
+    detail=[("iD", "[lang] sym", "demangle a symbol (default language from bin.lang)")],
+    json_suffix=True,
+)
+def demangle_symbol(session: Session, statement: Statement) -> list[str]:
+    """``iD [lang] sym`` -- demangle one symbol.
+
+    With one argument the language comes from ``e bin.lang`` (r2's default is
+    ``c``, which r2 does not demangle with).  The JSON form always carries
+    ``lang``/``mangled`` and either ``demangled`` or r2's ``error`` string.
+    """
+    words = statement.argv
+    as_json = statement.cmd == "iDj"
+    if not words:
+        raise UsageError("iD needs a symbol (see i?)")
+
+    if len(words) == 1:
+        lang = session.config.get_str("bin.lang") or "c"
+        symbol = words[0]
+    else:
+        lang = words[0]
+        symbol = " ".join(words[1:])
+
+    lang = _DEMANGLE_ALIASES.get(lang, lang)
+    # r2's default language is "c" (the file's own language); it is not a
+    # demangler plugin but is accepted, so `iD _Z3foov` still works.
+    if lang != "c" and lang not in DEMANGLE_LANGUAGES:
+        supported = ", ".join(DEMANGLE_LANGUAGES)
+        raise UsageError(f"iD: unsupported language {lang!r}; supported: {supported}")
+
+    payload = session.remote.call("demangle", symbol=symbol)
+    demangled = payload.get("demangled")
+    if as_json:
+        row: dict[str, Any] = {"lang": lang, "mangled": symbol}
+        if demangled:
+            row["demangled"] = demangled
+        else:
+            row["error"] = "Cannot demangle string"
+        return [to_json(row)]
+    if not demangled:
+        raise UsageError("Cannot demangle string")
+    return [demangled]
 
 
 def _main_address(session: Session) -> list[str]:

@@ -110,6 +110,20 @@ def test_it_hashes_the_input_file(session) -> None:
     assert not session.failed
 
 
+def test_iD_demangles_a_live_symbol(session) -> None:
+    session.failed = False
+    payload = json.loads("\n".join(session.run("iDj c++ _Z3foov")))
+    assert payload["lang"] == "c++"
+    assert payload["demangled"] == "foo(void)"
+    failed = json.loads("\n".join(session.run("iDj c++ not_a_symbol")))
+    assert failed == {
+        "lang": "c++",
+        "mangled": "not_a_symbol",
+        "error": "Cannot demangle string",
+    }
+    assert not session.failed
+
+
 def test_seek_sticks(session) -> None:
     # Regression: a temporary-seek scope used to restore the seek even for `s`,
     # which made `s main; s` print the old address.

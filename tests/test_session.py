@@ -134,6 +134,9 @@ class FakeRemote:
             "demangled_names": lambda: [
                 {"ea": 0x1000, "realname": "main_real"},
             ],
+            "demangle": lambda: {
+                "demangled": "foo()" if arguments["symbol"] == "_Z3foov" else None
+            },
             "header_fields": lambda: {
                 "bits": 32,
                 "fields": [
@@ -1602,6 +1605,57 @@ def test_bin_hashlimit_rejects_bad_sizes() -> None:
     session.run("e bin.hashlimit=10X")
     assert session.failed
     assert isinstance(session.last_error, UsageError)
+
+
+def test_iD_demangles_with_an_explicit_language() -> None:
+    session, _remote = make_session()
+    assert session.run("iD c++ _Z3foov") == ["foo()"]
+
+
+def test_iD_uses_bin_lang_for_a_single_argument() -> None:
+    session, _remote = make_session()
+    assert session.run("e bin.lang=c++") == []
+    assert session.run("iD _Z3foov") == ["foo()"]
+
+
+def test_iD_uses_the_default_c_language() -> None:
+    """r2's bin.lang defaults to c, and `iD sym` still demangles with it."""
+    session, _remote = make_session()
+    assert session.run("iD _Z3foov") == ["foo()"]
+    assert json.loads("\n".join(session.run("iDj _Z3foov"))) == {
+        "lang": "c",
+        "mangled": "_Z3foov",
+        "demangled": "foo()",
+    }
+
+
+def test_iD_json_reports_success_and_failure_like_r2() -> None:
+    session, _remote = make_session()
+    assert json.loads("\n".join(session.run("iDj c++ _Z3foov"))) == {
+        "lang": "c++",
+        "mangled": "_Z3foov",
+        "demangled": "foo()",
+    }
+    assert json.loads("\n".join(session.run("iDj c++ nope"))) == {
+        "lang": "c++",
+        "mangled": "nope",
+        "error": "Cannot demangle string",
+    }
+
+
+def test_iD_rejects_an_unknown_language() -> None:
+    session, remote = make_session()
+    session.failed = False
+    session.run("iD notalang foo")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "supported" in str(session.last_error)
+    assert "demangle" not in remote.operations
+
+
+def test_iD_accepts_radare2_language_aliases() -> None:
+    session, _remote = make_session()
+    assert session.run("iD cxx _Z3foov") == ["foo()"]
 
 
 def test_ir_renders_the_relocation_table() -> None:

@@ -390,6 +390,23 @@ def test_file_hashes_match_r2(session, r2) -> None:
         assert ours.get(name) == theirs.get(name), name
 
 
+def test_demangle_matches_r2(session, r2) -> None:
+    """``iD`` demangles with a different implementation but the same result.
+
+    IDA spells an empty C++ argument list ``(void)`` where r2's Itanium
+    demangler says ``()``; normalise that one difference and compare the rest.
+    """
+    ours = session.run("iD c++ _Z3foov")
+    theirs = r2("iD c++ _Z3foov")
+    assert [text.replace("(void)", "()") for text in ours] == theirs
+    assert json.loads("\n".join(session.run("iDj rust _ZN4core3fmt9Formatter3pad17h1234567890abcdefE"))) == json.loads(
+        "\n".join(r2("iDj rust _ZN4core3fmt9Formatter3pad17h1234567890abcdefE"))
+    )
+    assert json.loads("\n".join(session.run("iDj c++ notmangled"))) == json.loads(
+        "\n".join(r2("iDj c++ notmangled"))
+    )
+
+
 def _header_field_rows(lines: list[str]) -> list[tuple[int, int, int, str]]:
     rows = []
     for line in lines:

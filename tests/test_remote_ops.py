@@ -126,6 +126,20 @@ def test_demangled_names_survives_a_failing_demangler() -> None:
     assert envelope["result"] == []
 
 
+def test_demangle_uses_the_ida_demangler() -> None:
+    names = SimpleNamespace(
+        demangle_name=lambda name: "foo()" if name == "_Z3foov" else None
+    )
+    envelope = dispatch.invoke(
+        SimpleNamespace(names=names), "demangle", {"symbol": "_Z3foov"}
+    )
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {"demangled": "foo()"}
+
+    envelope = dispatch.invoke(SimpleNamespace(names=names), "demangle", {"symbol": "x"})
+    assert envelope["result"] == {"demangled": None}
+
+
 def test_file_hashes_hashes_the_input_file(tmp_path, monkeypatch) -> None:
     import hashlib
     import sys

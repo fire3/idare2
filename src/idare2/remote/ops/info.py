@@ -452,6 +452,21 @@ def _locate(
     return ea, "unknown"
 
 
+@op("demangle")
+def demangle(db: Any, symbol: str) -> dict[str, Any]:
+    """Demangle one symbol (``iD``).
+
+    IDA exposes a single demangler that recognises the C++ Itanium/MSVC/D and
+    Rust forms; ``lang`` is validated on the client because the language only
+    changes how the answer is labelled, not how IDA decodes it.
+    """
+    try:
+        result = db.names.demangle_name(symbol)
+    except Exception:
+        result = None
+    return {"demangled": result or None}
+
+
 @op("demangled_names")
 def demangled_names(db: Any) -> list[dict[str, Any]]:
     """Names whose demangled form differs from the IDA name (``fn``/``fN``).
