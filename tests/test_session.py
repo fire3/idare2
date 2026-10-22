@@ -491,6 +491,58 @@ def test_yank_and_paste() -> None:
     assert patches[-1]["ea"] == 0x1000
 
 
+@pytest.mark.parametrize(
+    "command", ["y8", "yj", "y*", "yp", "y-", "y!", "yg", "yz"]
+)
+def test_unknown_yank_suffixes_fail_loudly(command: str) -> None:
+    """Regression: these used to fall through and yank from memory instead."""
+    session, remote = make_session()
+    session.failed = False
+    session.run(command)
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported yank command" in str(session.last_error)
+    assert "read_bytes" not in remote.operations
+    assert session.yank == b""
+
+
+def test_compare_accepts_the_implemented_forms() -> None:
+    session, _remote = make_session()
+    for command in (
+        "c 0x1000 0x1010 4",
+        "cc 0x1000 0x1010 4",
+        "c1 0x1000 0x1010 4",
+    ):
+        session.failed = False
+        assert session.run(command) == ["-- blocks are identical --"]
+        assert not session.failed
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "c2 0x1000 0x2000 4",
+        "c4 0x1000 0x2000 4",
+        "c8 0x1000 0x2000 4",
+        "cf /etc/hostname",
+        "cat /etc/hostname",
+        "cd /tmp",
+        "cj foo",
+        "c* foo",
+        "cu 0x1000",
+    ],
+)
+def test_unknown_compare_suffixes_fail_loudly(command: str) -> None:
+    """Regression: c2/c4/c8/cf/... silently ran the c comparison."""
+    session, remote = make_session()
+    session.failed = False
+    session.run(command)
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported compare command" in str(session.last_error)
+    assert "read_bytes" not in remote.operations
+
+
 def test_search_creates_session_flags() -> None:
     session, _ = make_session()
     session.config.set("search.from", 0x1000)

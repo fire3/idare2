@@ -271,6 +271,11 @@ def yank(session: Session, statement: Statement) -> list[str]:
             raise UsageError(f"cannot read {argument}: {exc}") from exc
         return []
 
+    # Every suffix must be explicit: unknown ones used to fall through and yank
+    # from memory, silently ignoring what was asked for (e.g. `y8`, `yj`).
+    if suffix:
+        raise UsageError(f"unsupported yank command '{token}' (see y?)")
+
     length = session.eval(argument) if argument else session.blocksize
     if length <= 0:
         raise UsageError("y needs a positive length")
@@ -297,6 +302,12 @@ def _paste(session: Session) -> list[str]:
 
 @command("c", usage="[c1]", summary="compare blocks", detail=COMPARE_DETAIL)
 def compare(session: Session, statement: Statement) -> list[str]:
+    # Only the implemented suffixes are accepted.  `c2`/`c4`/`c8`/`cf`/... used
+    # to fall into the same two-address comparison, so the requested operation
+    # was silently ignored.
+    if statement.cmd not in ("c", "cc", "c1"):
+        raise UsageError(f"unsupported compare command '{statement.cmd}' (see c?)")
+
     words = statement.argv
     if len(words) < 3:
         raise UsageError(f"{statement.cmd} needs two addresses and a length")
