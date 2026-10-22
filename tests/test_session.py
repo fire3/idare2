@@ -70,6 +70,11 @@ class FakeRemote:
                 "end": 0x2000,
             },
             "file_info": lambda: {"filesize": 0x3000, "architecture": "ARM"},
+            "file_hashes": lambda: {
+                "md5": "0" * 32,
+                "sha1": "1" * 40,
+                "sha256": "2" * 64,
+            },
             "save": lambda: {"saved": True},
             "set_name": lambda: {"ea": arguments["ea"], "name": arguments["name"]},
             "delete_name": lambda: {"ea": arguments["ea"]},
@@ -1556,6 +1561,47 @@ def test_unimplemented_info_commands_do_not_fall_through(command: str) -> None:
     assert session.failed
     assert isinstance(session.last_error, UsageError)
     assert "unsupported information command" in str(session.last_error)
+
+
+def test_it_lists_the_file_hashes() -> None:
+    session, _remote = make_session()
+    assert session.run("it") == [
+        f"md5 {'0' * 32}",
+        f"sha1 {'1' * 40}",
+        f"sha256 {'2' * 64}",
+    ]
+
+
+def test_itj_is_a_hash_object() -> None:
+    session, _remote = make_session()
+    payload = json.loads("\n".join(session.run("itj")))
+    assert payload == {"md5": "0" * 32, "sha1": "1" * 40, "sha256": "2" * 64}
+
+
+def test_it_respects_bin_hashlimit() -> None:
+    """r2 hashes only inputs up to bin.hashlimit; `10M` is a size, not an int."""
+    session, remote = make_session()
+    assert session.run("e bin.hashlimit=10M") == []
+    assert session.config.get_int("bin.hashlimit") == 10 * 1024 * 1024
+    session.run("e bin.hashlimit=1024")
+    assert session.run("it") == []
+    assert json.loads("\n".join(session.run("itj"))) == {}
+    assert "file_hashes" not in remote.operations
+
+
+def test_it_with_a_zero_limit_disables_hashing() -> None:
+    session, remote = make_session()
+    session.run("e bin.hashlimit=0")
+    assert session.run("it") == []
+    assert "file_hashes" not in remote.operations
+
+
+def test_bin_hashlimit_rejects_bad_sizes() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    session.run("e bin.hashlimit=10X")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
 
 
 def test_ir_renders_the_relocation_table() -> None:

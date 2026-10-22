@@ -91,6 +91,52 @@ def _hexrays_available(ida_hexrays: Any) -> bool:
         return False
 
 
+@op("file_hashes")
+def file_hashes(db: Any) -> dict[str, Any]:
+    """Whole-file hashes (``it``).
+
+    radare2 hashes the opened file from byte zero, so this reads the original
+    input rather than trusting whatever the loader recorded.  When the input
+    is unavailable (e.g. the database outlived the binary) fall back to the
+    loader's md5/sha256; sha1 has no IDA equivalent.  The IDB path is never
+    hashed -- that would silently describe the database instead of the input.
+    """
+    import hashlib
+
+    path = ""
+    try:
+        import ida_nalt
+
+        path = ida_nalt.get_input_file_path() or ""
+    except Exception:
+        path = ""
+
+    if path:
+        digests = {name: hashlib.new(name) for name in ("md5", "sha1", "sha256")}
+        try:
+            with open(path, "rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    for digest in digests.values():
+                        digest.update(chunk)
+        except OSError:
+            digests.clear()
+        if digests:
+            return {name: digest.hexdigest() for name, digest in digests.items()}
+
+    def _hex(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            return value.hex()
+        return str(value)
+
+    return {
+        "md5": _hex(getattr(db, "md5", None)),
+        "sha1": None,
+        "sha256": _hex(getattr(db, "sha256", None)),
+    }
+
+
 @op("save")
 def save(db: Any) -> dict[str, Any]:
     """Flush the database to disk (``w``).

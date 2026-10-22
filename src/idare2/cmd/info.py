@@ -17,6 +17,8 @@ INFO_DETAIL = [
     ("i", "", "show information about the current file"),
     ("iI", "", "binary info (key: value)"),
     ("ij", "", "the same information as JSON"),
+    ("it", "", "file hashes"),
+    ("itj", "", "file hashes as JSON"),
     ("iS", "", "segments with permissions"),
     ("ii", "[pat]", "imports"),
     ("is", "[pat]", "symbols"),
@@ -34,7 +36,7 @@ HEADER_DETAIL = [
     ("iH", "[*j]", "file header (ELF)"),
 ]
 
-FILE_TOKENS = frozenset({"i", "iI", "ij"})
+FILE_TOKENS = frozenset({"i", "iI", "ij", "it", "itj"})
 
 LISTING_DETAIL = {
     "iS": [("iS", "", "segments with permissions"), ("iSj", "", "segments as JSON")],
@@ -56,11 +58,31 @@ LISTING_TOKENS = frozenset(
 def file_info(session: Session, statement: Statement) -> list[str]:
     if statement.cmd not in FILE_TOKENS:
         raise UsageError(f"unsupported information command '{statement.cmd}' (see i?)")
+    if statement.cmd.startswith("it"):
+        return _file_hashes(session, as_json=statement.cmd == "itj")
     payload = session.remote.call("file_info")
     session.info.update({k: v for k, v in payload.items() if v is not None})
     if statement.cmd.endswith("j") or statement.cmd == "ij":
         return [to_json(payload)]
     return fmt_listing.format_info(payload, session)
+
+
+def _file_hashes(session: Session, *, as_json: bool) -> list[str]:
+    """``it`` -- md5/sha1/sha256 over the input file.
+
+    ``bin.hashlimit`` mirrors r2: inputs above the limit produce no hashes (r2
+    prints nothing for text and ``{}`` for JSON).  A limit of zero disables
+    hashing entirely, as in r2.
+    """
+    limit = session.config.get_int("bin.hashlimit")
+    size = int(session.info.get("filesize") or 0)
+    payload: dict[str, str] = {}
+    if limit > 0 and (size <= limit or not size):
+        raw = session.remote.call("file_hashes") or {}
+        payload = {name: value for name, value in raw.items() if value}
+    if as_json:
+        return [to_json(payload)]
+    return [f"{name} {value}" for name, value in payload.items()]
 
 
 @command(

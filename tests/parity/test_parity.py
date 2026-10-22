@@ -377,6 +377,19 @@ def test_relocation_table_matches_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def test_file_hashes_match_r2(session, r2) -> None:
+    """``itj`` hashes the input file itself, so all three digests must agree."""
+    ours = {
+        key: value
+        for key, value in json.loads("\n".join(session.run("itj"))).items()
+        if value
+    }
+    theirs = json.loads("\n".join(r2("itj")))
+    assert ours
+    for name in ("md5", "sha1", "sha256"):
+        assert ours.get(name) == theirs.get(name), name
+
+
 def _header_field_rows(lines: list[str]) -> list[tuple[int, int, int, str]]:
     rows = []
     for line in lines:

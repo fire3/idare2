@@ -126,6 +126,38 @@ def test_demangled_names_survives_a_failing_demangler() -> None:
     assert envelope["result"] == []
 
 
+def test_file_hashes_hashes_the_input_file(tmp_path, monkeypatch) -> None:
+    import hashlib
+    import sys
+
+    path = tmp_path / "sample.bin"
+    path.write_bytes(b"hello")
+    ida_nalt = SimpleNamespace(get_input_file_path=lambda: str(path))
+    monkeypatch.setitem(sys.modules, "ida_nalt", ida_nalt)
+
+    envelope = dispatch.invoke(SimpleNamespace(path="other"), "file_hashes", {})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {
+        "md5": hashlib.md5(b"hello").hexdigest(),
+        "sha1": hashlib.sha1(b"hello").hexdigest(),
+        "sha256": hashlib.sha256(b"hello").hexdigest(),
+    }
+
+
+def test_file_hashes_falls_back_to_the_loader(tmp_path, monkeypatch) -> None:
+    import sys
+
+    missing = tmp_path / "gone.bin"
+    ida_nalt = SimpleNamespace(get_input_file_path=lambda: str(missing))
+    monkeypatch.setitem(sys.modules, "ida_nalt", ida_nalt)
+
+    db = SimpleNamespace(path=str(tmp_path / "openvpn.i64"), md5="aa", sha256="bb")
+    envelope = dispatch.invoke(db, "file_hashes", {})
+    assert protocol.is_ok(envelope), envelope
+    # The IDB itself must never be hashed, and IDA has no sha1 to offer.
+    assert envelope["result"] == {"md5": "aa", "sha1": None, "sha256": "bb"}
+
+
 def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None:
     import sys
 

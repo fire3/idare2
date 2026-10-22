@@ -8,6 +8,7 @@ be changed mid-session any more than IDA can swap disassemblers.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,6 +17,10 @@ from idare2.errors import UsageError
 BOOL = "bool"
 INT = "int"
 STR = "str"
+
+#: Binary suffixes radare2 accepts on size-like numbers (``bin.hashlimit=10M``).
+_SIZE_SUFFIX = {"k": 1024, "m": 1024**2, "g": 1024**3, "t": 1024**4}
+_SIZE_NUMBER = re.compile(r"(0[xX][0-9a-fA-F]+|\d+)([kKmMgGtT]?)")
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,8 @@ class Key:
     #: Only meaningful when ``kind`` is ``INT``.
     minimum: int | None = None
     maximum: int | None = None
+    #: Accept ``10M``-style binary suffixes (radare2's size options do).
+    suffixes: bool = False
 
 
 KEYS: tuple[Key, ...] = (
@@ -65,6 +72,9 @@ KEYS: tuple[Key, ...] = (
     Key("hex.ascii", True, BOOL, "show the ASCII column"),
     Key("hex.header", True, BOOL, "show the hexdump header row"),
     # -- general -----------------------------------------------------------
+    #: r2's default is the string "10M"; hashes are only computed for inputs
+    #: smaller than this.
+    Key("bin.hashlimit", 10 * 1024 * 1024, INT, "hash only inputs up to this size", suffixes=True),
     Key("cfg.bigendian", False, BOOL, "big-endian mode (reflects the database)", readonly=True),
     Key("cfg.debug", False, BOOL, "debugger mode (idare2 has none)", readonly=True),
     Key("cfg.editor", "", STR, "editor for `-` and `CC!` (defaults to $EDITOR)"),
@@ -104,10 +114,17 @@ def _coerce(key: Key, value: Any) -> Any:
             return False
         raise UsageError(f"e {key.name}: expected a boolean, not {value!r}")
     if key.kind == INT:
-        try:
-            number = int(str(value).strip(), 0)
-        except ValueError:
-            raise UsageError(f"e {key.name}: expected a number, not {value!r}") from None
+        text = str(value).strip()
+        if key.suffixes:
+            match = _SIZE_NUMBER.fullmatch(text)
+            if not match:
+                raise UsageError(f"e {key.name}: expected a size, not {value!r}")
+            number = int(match.group(1), 0) * _SIZE_SUFFIX.get(match.group(2).lower(), 1)
+        else:
+            try:
+                number = int(text, 0)
+            except ValueError:
+                raise UsageError(f"e {key.name}: expected a number, not {value!r}") from None
         if key.minimum is not None and number < key.minimum:
             raise UsageError(f"e {key.name}: must be at least {key.minimum}")
         if key.maximum is not None and number > key.maximum:

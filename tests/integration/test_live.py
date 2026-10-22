@@ -94,6 +94,22 @@ def test_iI(session) -> None:
     assert any(line.startswith("bits") for line in lines)
 
 
+def test_it_hashes_the_input_file(session) -> None:
+    """``itj`` hashes the input when reachable, otherwise uses the loader.
+
+    The checked-in ``.i64`` was built on Windows, so its recorded input path
+    (``C:\\...``) does not exist here: the fallback must still return the
+    loader's md5/sha256 and simply omit sha1.  The file-read path is covered by
+    the parity test, where the worker opens the ELF itself.
+    """
+    session.failed = False
+    payload = json.loads("\n".join(session.run("itj")))
+    assert payload["md5"] and payload["sha256"]
+    assert payload["md5"] == session.info["md5"]
+    assert payload["sha256"] == session.info["sha256"]
+    assert not session.failed
+
+
 def test_seek_sticks(session) -> None:
     # Regression: a temporary-seek scope used to restore the seek even for `s`,
     # which made `s main; s` print the old address.
