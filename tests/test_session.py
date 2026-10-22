@@ -126,6 +126,9 @@ class FakeRemote:
                     "is_ifunc": False,
                 },
             ],
+            "demangled_names": lambda: [
+                {"ea": 0x1000, "realname": "main_real"},
+            ],
             "header_fields": lambda: {
                 "bits": 32,
                 "fields": [
@@ -787,6 +790,123 @@ def test_f_rejects_a_fourth_positional() -> None:
     assert session.run("f zz7 16 0x10000 extra") == []
     assert session.failed
     assert "unexpected argument" in str(session.last_error)
+
+
+# ---------------------------------------------------------------------------
+# fq / fn / fnj / fN / fr / fx -- explicit suffixes, never a fall-through
+# ---------------------------------------------------------------------------
+
+
+def test_fq_lists_only_names() -> None:
+    session, _remote = make_session()
+    assert session.run("fq") == ["main", "helper"]
+
+
+def test_fn_lists_real_names() -> None:
+    session, _remote = make_session()
+    assert session.run("fn") == [
+        "0x00001000 1 main_real",
+        "0x00002000 1 helper",
+    ]
+
+
+def test_fnj_marks_only_differing_real_names() -> None:
+    session, _remote = make_session()
+    rows = json.loads("\n".join(session.run("fnj")))
+    assert rows == [
+        {"name": "main", "realname": "main_real", "size": 1, "addr": 0x1000},
+        {"name": "helper", "size": 1, "addr": 0x2000},
+    ]
+
+
+def test_fN_shows_the_real_name_at_the_seek() -> None:
+    session, _remote = make_session()
+    session.seek = 0x1000
+    assert session.run("fN") == ["main_real"]
+    session.seek = 0x3000
+    assert session.run("fN") == []
+
+
+def test_fN_set_is_refused() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    session.run("fN main other")
+    assert session.failed
+    assert "real-name" in str(session.last_error)
+
+
+def test_fr_renames_the_flag_at_the_seek() -> None:
+    session, remote = make_session()
+    session.seek = 0x1000
+    assert session.run("fr renamed") == []
+    assert _flag(session, "renamed").ea == 0x1000
+    assert _flag(session, "main") is None
+    assert ("set_name", {"ea": 0x1000, "name": "renamed"}) in remote.calls
+
+
+def test_fr_renames_a_named_flag_and_keeps_its_size() -> None:
+    session, remote = make_session()
+    session.run("f big 64 @ 0x2000")
+    assert session.run("fr big huge") == []
+    flag = _flag(session, "huge")
+    assert (flag.ea, flag.size) == (0x2000, 64)
+    assert _flag(session, "big") is None
+    assert ("set_name", {"ea": 0x2000, "name": "huge"}) in remote.calls
+
+
+def test_fr_without_a_flag_reports_an_error() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    session.run("fr nothing_here renamed")
+    assert session.failed
+    assert "no flag" in str(session.last_error)
+    session.failed = False
+    session.seek = 0x5000
+    session.run("fr renamed")
+    assert session.failed
+    assert "no flag at the current address" in str(session.last_error)
+
+
+def test_fx_hexdumps_the_flag_bytes() -> None:
+    session, _remote = make_session()
+    session.run("f blob 4 @ 0x5000")
+    expected = ["0x00005000", *session.run("px 4 @ 0x5000")]
+    assert session.run("fx blob") == expected
+
+
+def test_known_suffix_with_arguments_does_not_create_a_flag() -> None:
+    """Regression: `fn foo` used to create a flag named "foo"."""
+    session, remote = make_session()
+    session.failed = False
+    session.run("fn foo")
+    assert session.failed
+    assert session.flags.get("foo") is None
+    assert not any(name == "set_name" for name, _ in remote.calls)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "fz", "fs", "ft", "fi", "f=", "f+", "f--", "fa", "fb", "fc",
+        "fd", "fl", "fo", "fO", "fh", "fu", "fv", "f.",
+    ],
+)
+def test_unknown_f_suffixes_fail_loudly(command: str) -> None:
+    """Regression: unimplemented suffixes fell through to `_create` or crashed."""
+    session, remote = make_session()
+    session.failed = False
+    session.run(command)
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported flag command" in str(session.last_error)
+    assert not any(name == "set_name" for name, _ in remote.calls)
+
+
+def test_f_suffix_errors_do_not_abort_the_line() -> None:
+    """The old `IndexError` escaped `Session.run` and killed the rest of a line."""
+    session, _remote = make_session()
+    assert session.run("?e before; fz; ?e after") == ["before", "after"]
+    assert session.failed
 
 
 # ---------------------------------------------------------------------------

@@ -74,6 +74,9 @@ class FlagStore:
         flag = self._by_name.get(name)
         return None if flag is None else flag.ea
 
+    def get(self, name: str) -> Flag | None:
+        return self._by_name.get(name)
+
     def at(self, ea: int) -> list[Flag]:
         return [self._by_name[n] for n in self._by_ea.get(int(ea), []) if n in self._by_name]
 

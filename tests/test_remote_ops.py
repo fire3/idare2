@@ -106,6 +106,26 @@ def test_header_fields_needs_the_original_elf(monkeypatch) -> None:
     assert "ELF" in envelope["error"]["message"]
 
 
+def test_demangled_names_returns_only_differing_entries() -> None:
+    names = SimpleNamespace(
+        get_all=lambda: [(0x1000, "plain"), (0x2000, "_Z3foov")],
+        demangle_name=lambda name: "foo()" if name == "_Z3foov" else name,
+    )
+    envelope = dispatch.invoke(SimpleNamespace(names=names), "demangled_names", {})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == [{"ea": 0x2000, "realname": "foo()"}]
+
+
+def test_demangled_names_survives_a_failing_demangler() -> None:
+    def explode(name):
+        raise RuntimeError("no demangler")
+
+    names = SimpleNamespace(get_all=lambda: [(0x1000, "x")], demangle_name=explode)
+    envelope = dispatch.invoke(SimpleNamespace(names=names), "demangled_names", {})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == []
+
+
 def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None:
     import sys
 

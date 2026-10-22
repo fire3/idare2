@@ -452,6 +452,24 @@ def _locate(
     return ea, "unknown"
 
 
+@op("demangled_names")
+def demangled_names(db: Any) -> list[dict[str, Any]]:
+    """Names whose demangled form differs from the IDA name (``fn``/``fN``).
+
+    Only the differing entries are returned: on a typical binary that is the
+    C++/Rust symbols rather than every name in the database.
+    """
+    out: list[dict[str, Any]] = []
+    for ea, name in db.names.get_all():
+        try:
+            real = db.names.demangle_name(name)
+        except Exception:
+            continue
+        if real and real != name:
+            out.append({"ea": int(ea), "realname": real})
+    return out
+
+
 @op("set_name", writes=True)
 def set_name(db: Any, ea: int, name: str) -> dict[str, Any]:
     """Rename the location at ``ea`` (``f name @ addr``, ``afn``)."""

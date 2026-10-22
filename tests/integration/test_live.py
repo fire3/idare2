@@ -15,6 +15,7 @@ ida-domain handlers, and the client-side formatters -- which unit tests cannot.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -510,6 +511,32 @@ def test_flags_degrade_to_session_local_when_readonly(session) -> None:
     """
     session.run("f test_flag @ 0x10000")
     assert session.flags.lookup("test_flag") == 0x10000
+
+
+def test_fn_fq_and_fx_use_real_names(session) -> None:
+    """``fq``/``fn``/``fnj`` read IDA's demangled names; ``fx`` dumps a flag.
+
+    ``demangled_names`` walks the whole name table, so this also proves the
+    remote operation is safe on a real database (and that its signature matches
+    what the client sends).
+    """
+    session.failed = False
+    names = session.run("fq")
+    assert names
+    lines = session.run("fn")
+    assert len(lines) == len(names)
+    assert all(line.startswith("0x") for line in lines)
+    assert not session.failed
+
+    payload = json.loads("\n".join(session.run("fnj")))
+    assert len(payload) == len(names)
+    assert all({"name", "size", "addr"} <= set(row) for row in payload)
+
+    address = int(session.run("afl")[0].split()[0], 16)
+    session.run(f"f fx_probe 4 @ 0x{address:x}")
+    out = session.run("fx fx_probe")
+    assert out[0] == f"0x{address:08x}"
+    assert len(out) > 1
 
 
 def test_readonly_blocks_database_writes(session) -> None:
