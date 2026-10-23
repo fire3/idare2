@@ -420,8 +420,7 @@ class Session:
         if statement.iterator_size is not None:
             items = self._sized_iterator_items(statement.iterator_size)
         else:
-            spec = statement.iterator or ""
-            items = [(ea, None) for ea in self._iterator_addresses(spec)]
+            items = [(ea, None) for ea in self._iterator_addresses(statement.iterator or "")]
 
         lines: list[str] = []
         for ea, size in items:

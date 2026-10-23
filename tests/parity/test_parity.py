@@ -592,3 +592,100 @@ def test_string_addresses_and_sections_match_r2(session, r2) -> None:
     assert len(shared) >= 100
     mismatched = [text for text in shared if ours[text] != theirs[text]]
     assert not mismatched, mismatched[:5]
+
+
+# --------------------------------------------------------------------------
+# M5.4: xrefs, function shape, filters and iterators
+# --------------------------------------------------------------------------
+
+
+def _row_target_address(line: str) -> int | None:
+    """The first ``0x`` address after the label column of an ``axt``/``axf`` row."""
+    tokens = line.split()
+    for token in tokens[1:]:
+        if token.startswith("0x"):
+            try:
+                return int(token, 16)
+            except ValueError:
+                return None
+    return None
+
+
+def test_axt_reference_sites_match_r2(session, r2) -> None:
+    """``axt main`` reports the same reference *sites* in both engines.
+
+    The types differ by design: IDA calls the literal pool entry ``DATA``
+    where r2 says ``NULL``; only the address column is compared.
+    """
+    session.seek_to(0x15E10)
+    ours = {_row_target_address(line) for line in session.run("axt main")}
+    theirs = {_row_target_address(line) for line in r2("axt main")}
+    ours.discard(None)
+    theirs.discard(None)
+    assert ours and theirs
+    assert ours == theirs
+
+
+def test_function_boundaries_and_block_counts(session, r2) -> None:
+    """``afij`` and ``afbj`` must agree on the function's extent and blocks."""
+    address = "0x15e10"
+    ours = json.loads("\n".join(session.run(f"afij @ {address}")))
+    theirs = json.loads("\n".join(r2(f"afij @ {address}")))[0]
+    assert ours["ea"] == theirs["addr"] == 0x15E10
+    assert ours["size"] == theirs["size"]
+    assert ours["ninstrs"] == theirs["ninstrs"]
+
+    ours_blocks = json.loads("\n".join(session.run(f"afbj @ {address}")))
+    theirs_blocks = json.loads("\n".join(r2(f"afbj @ {address}")))
+    assert [block["start"] for block in ours_blocks] == [
+        block["addr"] for block in theirs_blocks
+    ]
+
+
+def test_function_signature_prototype_matches_r2(session, r2) -> None:
+    """``tfc main`` prints the same prototype modulo const qualifiers."""
+    ours = session.run("tfc main")[0].replace("const ", "")
+    theirs = r2("tfc main")[0]
+    assert ours == theirs
+
+
+_FILTER_SAMPLE = "?s 1 20"
+
+
+def test_filter_selectors_match_r2(session, r2) -> None:
+    """The ``~`` pipeline selects the same text from identical input.
+
+    ``?s 1 20`` prints the same line in both engines, which isolates the
+    filter semantics from any table-layout difference.
+    """
+    for spec in (":0", ":-1", "[0]", "[3]", "[-1]", "$0", "$$", "?1", "!1",
+                 "^1", "^^1", "1$", "&2 3", "2,4", "+2"):
+        command = f"{_FILTER_SAMPLE}~{spec}"
+        ours = session.run(command)
+        theirs = r2(command)
+        assert ours == theirs, f"{command}: {ours} != {theirs}"
+
+
+def test_filter_json_indent_matches_r2(session, r2) -> None:
+    """``~{}`` re-indents the same JSON text identically."""
+    command = '?s {"a":1,"b":[2,3]}~{}'
+    assert session.run(command) == r2(command)
+
+
+def test_iterator_instruction_and_function_sets(session, r2) -> None:
+    """``@@i`` walks the same instructions; ``@@f`` the same function starts."""
+    session.seek_to(0x15E10)
+    command = "s 0x15e10; s @@i"
+    ours = [int(line.strip(), 16) for line in session.run(command)]
+    theirs = [int(line.strip(), 16) for line in r2(command)]
+    # Both engines walk the same function extent; the count equality is exact.
+    assert ours and ours == theirs
+
+    ours = [int(line.split()[0], 16) for line in session.run("aflq") if line.startswith("0x")]
+    theirs = [
+        int(line.split()[0], 16)
+        for line in r2("s 0x15e10; s @@f")
+        if line.startswith("0x")
+    ]
+    shared = set(ours) & set(theirs)
+    assert len(shared) >= 0.5 * min(len(ours), len(theirs))

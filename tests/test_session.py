@@ -1255,6 +1255,15 @@ def test_blocksize() -> None:
     assert session.blocksize == 79
 
 
+def test_plain_iterators_apply_the_item_seek() -> None:
+    """Each ``@@`` item runs with its own seek; the original is restored after."""
+    session, _remote = make_session()
+    session.seek = 0x3000
+    assert session.run("?v $$ @@f") == ["0x1000", "0x2000"]
+    assert session.run("?v $$ @@s:0x1000 0x1002") == ["0x1000", "0x1001"]
+    assert session.seek == 0x3000
+
+
 def test_sized_iterator_pairs_set_seek_and_blocksize_then_restore() -> None:
     session, _remote = make_session()
     session.seek = 0x3000
