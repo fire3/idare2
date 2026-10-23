@@ -1439,14 +1439,53 @@ def test_undo_shortens_the_history() -> None:
     assert session.run("s=") == ["0x00001000"]
 
 
-def test_history_modifiers_are_reported_as_unimplemented() -> None:
-    """r2 documents s[j*=!]; saying so beats inventing output for them."""
+def test_seek_history_explicit_list_uses_names_and_offsets() -> None:
+    """``s==``: r2 labels each entry by its nearest flag, then current/future."""
     session, _remote = make_session()
-    for token in ("s==", "s=*", "s=!", "s=j"):
-        session.failed = False
-        assert session.run(token) == []
-        assert session.failed, token
-        assert "not implemented yet" in str(session.last_error)
+    session.run("s 0x2000")
+    session.run("s 0x3000")
+    assert session.run("s==") == ["main > helper > helper + 4096"]
+
+
+def test_seek_history_as_commands() -> None:
+    """``s=*``: `<addr> ; <n>s- # <comment>` rows, then the current seek."""
+    session, _remote = make_session()
+    session.run("s 0x2000")
+    session.run("s 0x3000")
+    assert session.run("s=*") == [
+        "0x00001000 ; 2s- # main",
+        "0x00002000 ; 1s- # helper",
+        "0x00003000 ; # CUR helper + 4096",
+    ]
+
+
+def test_seek_history_as_commands_includes_redo_entries() -> None:
+    session, _remote = make_session()
+    session.run("s 0x2000")
+    session.run("s 0x3000")
+    session.run("s-")
+    assert session.run("s=*") == [
+        "0x00001000 ; 1s- # main",
+        "0x00002000 ; # CUR helper",
+        "0x00003000 ; 1s+ # helper + 4096",
+    ]
+    assert session.run("s==") == ["main > helper > helper + 4096"]
+
+
+def test_seek_history_bang_and_json_are_r2_aliases() -> None:
+    """r2 6.2.5 ignores the modifier and prints the plain chain."""
+    session, _remote = make_session()
+    session.run("s 0x2000")
+    expected = ["0x00001000"]
+    assert session.run("s=!") == expected
+    assert session.run("s=j") == expected
+    assert session.run("s=") == expected
+
+
+def test_seek_history_forms_with_no_past_seeks() -> None:
+    session, _remote = make_session()
+    assert session.run("s==") == ["main"]
+    assert session.run("s=*") == ["0x00001000 ; # CUR main"]
 
 
 def test_s_still_seeks_to_a_name() -> None:

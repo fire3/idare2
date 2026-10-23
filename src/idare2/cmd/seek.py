@@ -34,6 +34,10 @@ DETAIL = [
     ("so", "[n]", "seek to the next instruction (skipping calls)"),
     ("sp", "[n]", "seek to the previous instruction"),
     ("s=", "", "list the undo seek history (oldest first)"),
+    ("s==", "", "list the history with names or addresses"),
+    ("s=*", "", "list the history as radare2 commands"),
+    ("s=!", "", "alias of s= (r2 ignores the !)"),
+    ("s=j", "", "alias of s= (r2 ignores the j)"),
     ("s:", "", "print the current address, zero padded"),
 ]
 
@@ -128,30 +132,70 @@ def seek(session: Session, statement: Statement) -> list[str]:
     raise UsageError(f"unsupported seek modifier '{suffix}' (see s?)")
 
 
-#: r2 documents ``s[j*=!]``; 5.5.0 accepts all of them and prints the same
-#: chain, so idare2 says plainly which ones it has not implemented rather than
-#: inventing output for them.
+#: r2 6.2.5 only special-cases the second ``=`` (explicit list) and ``*``
+#: (radare commands); ``s=!`` and ``s=j`` fall through to the plain chain.
 _HISTORY_MODIFIERS = {
     "==": "the explicit list form",
     "=*": "the history as radare2 commands",
-    "=!": "the history as flag names",
-    "=j": "the history as JSON",
 }
 
 
 def _history(session: Session, suffix: str) -> list[str]:
-    """``s=`` -- the undo seek history, oldest first, `` > ``-joined.
+    """``s=`` and friends -- the undo seek history.
 
-    Matches r2 5.5.0 exactly: the *current* seek is not part of the chain, and
-    an empty history prints an empty line.  ``s`` already seeks to a flag or
-    symbol by name, so this does not double as a lookup.
+    ``s=`` is the chain of past seeks (oldest first, current excluded), ``s==``
+    labels each entry with its nearest name or address, and ``s=*`` prints the
+    radare2 commands r2 uses to replay the history.  ``s=!``/``s=j`` are
+    aliases of ``s=`` because r2 ignores those modifiers.
     """
-    if suffix != "=":
-        raise UsageError(
-            f"s{suffix} ({_HISTORY_MODIFIERS[suffix]}) is not implemented yet; "
-            "use s= for the plain history"
-        )
-    return [" > ".join(session.format_addr(ea) for ea in session.seek_history)]
+    if suffix in ("=!", "=j"):
+        suffix = "="
+    past = list(session.seek_history)
+    future = list(reversed(session.seek_future))
+
+    if suffix == "=":
+        return [" > ".join(session.format_addr(ea) for ea in past)]
+    if suffix == "==":
+        chain = [*past, session.seek, *future]
+        return [" > ".join(_history_label(session, ea) for ea in chain)]
+    if suffix == "=*":
+        lines = []
+        total = len(past)
+        for index, ea in enumerate(past):
+            lines.append(
+                f"0x{ea:08x} ; {total - index}s- # {_name_delta(session, ea) or ''}"
+            )
+        if session.seek:
+            lines.append(
+                f"0x{session.seek:08x} ; # CUR {_name_delta(session, session.seek) or ''}"
+            )
+        for index, ea in enumerate(future):
+            lines.append(
+                f"0x{ea:08x} ; {index + 1}s+ # {_name_delta(session, ea) or ''}"
+            )
+        return lines
+    raise UsageError(
+        f"s{suffix} ({_HISTORY_MODIFIERS.get(suffix, 'unknown modifier')}) "
+        "is not implemented yet; use s= for the plain history"
+    )
+
+
+def _history_label(session: Session, ea: int) -> str:
+    return _name_delta(session, ea) or f"0x{ea:x}"
+
+
+def _name_delta(session: Session, ea: int) -> str | None:
+    """Nearest flag name at or before ``ea``, with an ``+ N`` delta."""
+    session._ensure_flags()
+    best = None
+    for flag in session.flags.all():
+        if flag.ea > ea:
+            break
+        best = flag
+    if best is None:
+        return None
+    delta = int(ea) - best.ea
+    return best.name if delta == 0 else f"{best.name} + {delta}"
 
 
 def _undo(session: Session) -> list[str]:

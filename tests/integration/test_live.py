@@ -143,6 +143,21 @@ def test_iE_without_the_input_is_empty(session) -> None:
     assert not session.failed
 
 
+def test_seek_history_name_forms(session) -> None:
+    """``s==`` names each seek, ``s=*`` wraps it in r2 commands."""
+    session.failed = False
+    session.run("s 0x1000")
+    session.run("s 0x2000")
+    named = session.run("s==")
+    assert named and " > " in named[0]
+    commands = session.run("s=*")
+    assert len(commands) == 3
+    assert all(" ; " in line for line in commands)
+    assert "# CUR " in commands[-1]
+    assert session.run("s=!") == session.run("s=")
+    assert session.run("s=j") == session.run("s=")
+
+
 def test_afv_reports_hexrays_variables(session) -> None:
     """``afv``/``afvj`` expose Hex-Rays arguments and stack variables."""
     session.failed = False
