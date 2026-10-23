@@ -137,6 +137,16 @@ class FakeRemote:
             "demangle": lambda: {
                 "demangled": "foo()" if arguments["symbol"] == "_Z3foov" else None
             },
+            "archs": lambda: [
+                {
+                    "arch": "arm",
+                    "bits": 32,
+                    "offset": 0,
+                    "size": 0x3000,
+                    "abi": "eabi5",
+                    "machine": "ARM",
+                }
+            ],
             "header_fields": lambda: {
                 "bits": 32,
                 "fields": [
@@ -1656,6 +1666,27 @@ def test_iD_rejects_an_unknown_language() -> None:
 def test_iD_accepts_radare2_language_aliases() -> None:
     session, _remote = make_session()
     assert session.run("iD cxx _Z3foov") == ["foo()"]
+
+
+def test_ia_matches_the_r2_table_shape() -> None:
+    session, _remote = make_session()
+    assert session.run("ia") == ["0   0x00000000 12288 arm_32 abi=eabi5 machine=ARM"]
+
+
+def test_iaj_nests_the_rows_under_bins() -> None:
+    session, _remote = make_session()
+    assert json.loads("\n".join(session.run("iaj"))) == {
+        "bins": [
+            {
+                "arch": "arm",
+                "bits": 32,
+                "offset": 0,
+                "size": 0x3000,
+                "abi": "eabi5",
+                "machine": "ARM",
+            }
+        ]
+    }
 
 
 def test_ir_renders_the_relocation_table() -> None:

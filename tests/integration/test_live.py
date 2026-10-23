@@ -110,6 +110,18 @@ def test_it_hashes_the_input_file(session) -> None:
     assert not session.failed
 
 
+def test_ia_lists_the_database_arch(session) -> None:
+    """Without the original ELF, `ia` falls back to IDA's processor facts."""
+    session.failed = False
+    lines = session.run("ia")
+    assert lines and lines[0].startswith("0   0x00000000 ")
+    payload = json.loads("\n".join(session.run("iaj")))
+    row = payload["bins"][0]
+    assert row["arch"] and row["bits"] in (16, 32, 64)
+    assert row["size"] == session.info["filesize"]
+    assert not session.failed
+
+
 def test_iD_demangles_a_live_symbol(session) -> None:
     session.failed = False
     payload = json.loads("\n".join(session.run("iDj c++ _Z3foov")))

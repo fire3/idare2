@@ -35,7 +35,7 @@ def _names() -> tuple[bytes, dict[str, int]]:
     return data, offsets
 
 
-def _build(bits: int, endian: str = "<") -> bytes:
+def _build(bits: int, endian: str = "<", machine: int = 40) -> bytes:
     shstrtab, shname = _names()
     dynstr = b"\0foo\0puts\0zero_import\0"
     strtab = b"\0test.c\0bss_obj\0foo\0$d\0"
@@ -88,7 +88,7 @@ def _build(bits: int, endian: str = "<") -> bytes:
             endian + "HHIQQQIHHHHHH",
             buf,
             16,
-            2, 40, 1, 0x400100, phoff, shoff, 0, 64, phentsize, 1, shentsize, shnum, 8,
+            2, machine, 1, 0x400100, phoff, shoff, 0, 64, phentsize, 1, shentsize, shnum, 8,
         )
         struct.pack_into(
             endian + "IIQQQQQQ",
@@ -101,7 +101,7 @@ def _build(bits: int, endian: str = "<") -> bytes:
             endian + "HHIIIIIHHHHHH",
             buf,
             16,
-            2, 40, 1, 0x400100, phoff, shoff, 0, 52, phentsize, 1, shentsize, shnum, 8,
+            2, machine, 1, 0x400100, phoff, shoff, 0, 52, phentsize, 1, shentsize, shnum, 8,
         )
         struct.pack_into(
             endian + "IIIIIIII",
@@ -221,6 +221,37 @@ def test_header_fields_follow_the_file_endianness(tmp_path: Path) -> None:
     assert rows["Machine"]["value"] == 40
     assert rows["EntryPoint"]["value"] == 0x400100
     assert rows["ShOff"]["value"] == 0x300
+
+
+def test_arch_rows_match_radare2_ia(elf) -> None:
+    """``ia``: arch name, bits, file size, ARM EABI and the machine text."""
+    assert elf.arch_rows() == [
+        {
+            "arch": "arm",
+            "bits": elf.bits,
+            "offset": 0,
+            "size": elf.file_size,
+            "abi": "eabi0",
+            "machine": "ARM",
+        }
+    ]
+
+
+def test_mips_abi_names_follow_radare2(tmp_path: Path) -> None:
+    from idare2.remote.elf import EM_MIPS
+
+    path = tmp_path / "mips32"
+    path.write_bytes(_build(32, "<", EM_MIPS))
+    parsed = load_elf(str(path))
+    assert parsed is not None
+    row = parsed.arch_rows()[0]
+    assert (row["arch"], row["abi"], row["machine"]) == ("mips", "o32", "MIPS R3000")
+
+    path = tmp_path / "mips64"
+    path.write_bytes(_build(64, "<", EM_MIPS))
+    parsed = load_elf(str(path))
+    assert parsed is not None
+    assert parsed.arch_rows()[0]["abi"] == "n64"
 
 
 def test_symbol_rows_follow_radare2_order_and_fields(elf) -> None:

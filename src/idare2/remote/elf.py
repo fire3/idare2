@@ -33,8 +33,70 @@ SHF_ALLOC = 0x2
 SHN_UNDEF = 0
 SHN_ABS = 0xFFF1
 
+EM_NONE = 0
+EM_SPARC = 2
+EM_386 = 3
+EM_68K = 4
+EM_MIPS = 8
+EM_MIPS_RS3_LE = 10
+EM_PPC = 20
+EM_PPC64 = 21
+EM_S390 = 22
 EM_ARM = 40
+EM_SH = 42
+EM_SPARCV9 = 43
+EM_X86_64 = 62
 EM_AARCH64 = 183
+EM_RISCV = 243
+
+#: ``e_machine`` -> radare2's bin arch name (``Elf_(get_arch)``).
+ARCH_NAMES = {
+    EM_NONE: "null",
+    EM_SPARC: "sparc",
+    EM_386: "x86",
+    EM_68K: "m68k",
+    EM_MIPS: "mips",
+    EM_MIPS_RS3_LE: "mips",
+    EM_PPC: "ppc",
+    EM_PPC64: "ppc",
+    EM_S390: "s390",
+    EM_ARM: "arm",
+    EM_AARCH64: "arm",
+    EM_SH: "sh",
+    EM_SPARCV9: "sparc",
+    EM_X86_64: "x86",
+    EM_RISCV: "riscv",
+}
+
+#: ``e_machine`` -> radare2's machine description (``Elf_(get_machine_name)``).
+MACHINE_NAMES = {
+    EM_NONE: "No machine",
+    EM_SPARC: "SUN SPARC",
+    EM_386: "Intel 80386",
+    EM_68K: "Motorola m68k family",
+    EM_MIPS: "MIPS R3000",
+    EM_MIPS_RS3_LE: "MIPS R3000 little-endian",
+    EM_PPC: "PowerPC",
+    EM_PPC64: "PowerPC 64-bit",
+    EM_S390: "IBM S390",
+    EM_ARM: "ARM",
+    EM_SH: "Hitachi SH",
+    EM_SPARCV9: "SPARC v9 64-bit",
+    EM_X86_64: "AMD x86-64 architecture",
+    EM_AARCH64: "ARM aarch64",
+    EM_RISCV: "RISC V",
+}
+
+#: ARM ``e_flags`` EABI version bits and soft/8-bit float markers.
+EF_ARM_EABIMASK = 0xFF000000
+EF_ARM_BE8 = 0x00800000
+EF_ARM_LE8 = 0x00400000
+
+#: MIPS ``e_flags`` ABI bits (see ``is_mips_*`` in radare2's elf.c).
+EF_MIPS_ABI = 0x0000F000
+EF_MIPS_ABI_O32 = 0x00001000
+EF_MIPS_ABI2 = 0x00000020
+EF_MIPS_MICROMIPS = 0x02000000
 
 R_ARM_JUMP_SLOT = 22
 
@@ -557,6 +619,43 @@ class ElfFile:
         return (paddr if paddr is not None else vaddr), name
 
     # -- listing rows ------------------------------------------------------
+
+    def _abi(self) -> str | None:
+        """radare2's ``Elf_(get_abi)`` for the ABIs IDA can load."""
+        flags = self.header.flags
+        if self.machine == EM_ARM:
+            arg = ""
+            if flags & EF_ARM_BE8:
+                arg = " be8"
+            elif flags & EF_ARM_LE8:
+                arg = " le8"
+            return f"eabi{(flags & EF_ARM_EABIMASK) >> 24}{arg}"
+        if self.machine in (EM_MIPS, EM_MIPS_RS3_LE):
+            if self.bits == 64:
+                return "n64"
+            abi2 = flags & EF_MIPS_ABI2
+            abi = flags & EF_MIPS_ABI
+            if abi2 and not abi:
+                return "n32"
+            if not abi2 and (not abi or abi == EF_MIPS_ABI_O32):
+                return "o32"
+            if flags & EF_MIPS_MICROMIPS:
+                return "micro"
+        return None
+
+    def arch_rows(self) -> list[dict[str, Any]]:
+        """Rows in ``ia`` order: the file's arch/bits/offset/size/abi/machine."""
+        row: dict[str, Any] = {
+            "arch": ARCH_NAMES.get(self.machine, "unknown"),
+            "bits": self.bits,
+            "offset": 0,
+            "size": self.file_size,
+        }
+        abi = self._abi()
+        if abi:
+            row["abi"] = abi
+        row["machine"] = MACHINE_NAMES.get(self.machine, "unknown_machine")
+        return [row]
 
     def header_rows(self) -> list[dict[str, Any]]:
         """Rows in ``ih`` order: radare2's ``fields`` table.

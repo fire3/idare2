@@ -390,6 +390,14 @@ def test_file_hashes_match_r2(session, r2) -> None:
         assert ours.get(name) == theirs.get(name), name
 
 
+def test_arch_listing_matches_r2(session, r2) -> None:
+    """``ia``/``iaj``: arch, bits, abi and machine derived from the ELF header."""
+    assert session.run("ia") == [line for line in r2("ia") if line.startswith("0")]
+    assert json.loads("\n".join(session.run("iaj"))) == json.loads(
+        "\n".join(r2("iaj"))
+    )
+
+
 def test_demangle_matches_r2(session, r2) -> None:
     """``iD`` demangles with a different implementation but the same result.
 

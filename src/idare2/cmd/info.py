@@ -20,6 +20,8 @@ INFO_DETAIL = [
     ("it", "", "file hashes"),
     ("itj", "", "file hashes as JSON"),
     ("iD", "[lang] sym", "demangle a symbol"),
+    ("ia", "", "architectures found in the file"),
+    ("iaj", "", "architectures as JSON"),
     ("iS", "", "segments with permissions"),
     ("ii", "[pat]", "imports"),
     ("is", "[pat]", "symbols"),
@@ -250,6 +252,38 @@ def demangle_symbol(session: Session, statement: Statement) -> list[str]:
     if not demangled:
         raise UsageError("Cannot demangle string")
     return [demangled]
+
+
+@command(
+    "ia",
+    usage="[j]",
+    summary="list the architectures found in the file",
+    detail=[("ia", "", "architectures found in the file"), ("iaj", "", "architectures as JSON")],
+    json_suffix=True,
+)
+def architectures(session: Session, statement: Statement) -> list[str]:
+    """``ia``/``iaj`` -- the file's arch(es).
+
+    r2 prints a hidden-header table: ``nth  offset  size  arch_bits
+    [abi=...] [machine=...]``; the JSON form nests the rows under ``bins``.
+    """
+    rows = session.remote.call("archs")
+    if statement.cmd.endswith("j"):
+        return [to_json({"bins": rows})]
+
+    size_width = max([4, *(len(str(int(row["size"]))) for row in rows)])
+    lines = []
+    for index, row in enumerate(rows):
+        arch = f"{row['arch']}_{int(row['bits'])}"
+        if row.get("abi"):
+            arch += f" abi={row['abi']}"
+        if row.get("machine"):
+            arch += f" machine={row['machine']}"
+        size = str(int(row["size"]))
+        lines.append(
+            f"{index:<3} 0x{int(row['offset']):08x} {size:<{size_width}} {arch}".rstrip()
+        )
+    return lines
 
 
 def _main_address(session: Session) -> list[str]:

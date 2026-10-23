@@ -58,6 +58,36 @@ _MACHINE = {
     "m68k": "Motorola 68000",
 }
 
+#: IDA processor name -> radare2 bin arch name, used when there is no ELF
+#: header to read (``ia`` on raw binaries and other container formats).
+_R2_ARCH = {
+    "arm": "arm",
+    "arm64": "arm",
+    "arm64e": "arm",
+    "aarch64": "arm",
+    "x86": "x86",
+    "metapc": "x86",
+    "x86_64": "x86",
+    "amd64": "x86",
+    "mips": "mips",
+    "mipsb": "mips",
+    "mipsl": "mips",
+    "mips64": "mips",
+    "mips64el": "mips",
+    "ppc": "ppc",
+    "powerpc": "ppc",
+    "riscv": "riscv",
+    "risc-v": "riscv",
+    "sh": "sh",
+    "sh4": "sh",
+    "m68k": "m68k",
+    "68000": "m68k",
+    "s390": "s390",
+    "s390x": "s390",
+    "sparc": "sparc",
+    "sparc64": "sparc",
+}
+
 
 def _is_dummy(name: str) -> bool:
     return name.startswith(_DUMMY_PREFIXES)
@@ -143,6 +173,28 @@ def _count(iterator: Any) -> int:
     for _ in iterator:
         total += 1
     return total
+
+
+@op("archs")
+def archs(db: Any) -> list[dict[str, Any]]:
+    """Architectures present in the input (``ia``).
+
+    The ELF header carries the authoritative arch, machine description and ABI
+    (r2 derives all three from ``e_machine``/``e_flags``).  Other formats fall
+    back to IDA's processor name and bitness.
+    """
+    elf = _elf_for(db)
+    if elf is not None:
+        return elf.arch_rows()
+    return [
+        {
+            "arch": _R2_ARCH.get(str(db.architecture or "").lower(), str(db.architecture or "unknown")),
+            "bits": int(db.bitness or 0),
+            "offset": 0,
+            "size": int(db.filesize or 0),
+            "machine": _MACHINE.get(str(db.architecture or "").lower(), str(db.architecture or "unknown_machine")),
+        }
+    ]
 
 
 @op("header_fields")
