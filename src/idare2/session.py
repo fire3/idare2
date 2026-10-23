@@ -568,6 +568,8 @@ class Session:
         if spec == "s":
             payload, _ = self.remote.call_with_meta("symbols", offset=0, count=-1)
             return [int(row["ea"]) for row in payload]
+        if spec in ("S", "SS", "G"):
+            return [int(item["vaddr"]) for item in self.remote.call("segments")]
         if spec.startswith(":"):
             return []
         if spec in ("C:", "c:", "t", "r", "M", "T", "dbt", "dbt*"):

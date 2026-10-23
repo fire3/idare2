@@ -1103,6 +1103,9 @@ def test_iterator_entry_and_export_selectors() -> None:
     assert session._iterator_addresses("R") == [0xF9128]
     assert session._iterator_addresses("s") == [0x1000, 0x2000]
     assert session._iterator_addresses("m:r-x") == [0x1000]
+    assert session._iterator_addresses("S") == [0x1000]
+    assert session._iterator_addresses("SS") == [0x1000]
+    assert session._iterator_addresses("G") == [0x1000]
     sized = session._sized_iterator_items("m:r-x")
     assert sized == [(0x1000, 0x1000)]
 
