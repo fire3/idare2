@@ -36,6 +36,8 @@ ANALYSIS_DETAIL = [
     ("afC", "", "callees of the current function"),
     ("afv", "", "local variables and arguments (needs Hex-Rays)"),
     ("afvj", "", "local variables as JSON (needs Hex-Rays)"),
+    ("afx", "[addr]", "references made from the function"),
+    ("afxj", "[addr]", "references made from the function as JSON"),
     ("axt", "[addr]", "cross-references to an address"),
     ("axf", "[addr]", "cross-references from an address"),
     ("axj", "[addr]", "cross-references as JSON"),
@@ -59,6 +61,8 @@ FUNCTION_DETAIL = [
     ("afC", "", "callees of the current function"),
     ("afv", "", "local variables and arguments (needs Hex-Rays)"),
     ("afvj", "", "local variables as JSON (needs Hex-Rays)"),
+    ("afx", "[addr]", "references made from the function"),
+    ("afxj", "[addr]", "references made from the function as JSON"),
 ]
 
 
@@ -153,6 +157,13 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
         payload = session.remote.call(op, ea=target)
         formatter = fmt_xrefs.format_callers if token == "afc" else fmt_xrefs.format_callees
         return formatter(payload, session)
+
+    if token in ("afx", "afxj"):
+        target = session.resolve(rest[0]) if rest else session.seek
+        payload = session.remote.call("function_xrefs", ea=target)
+        if token.endswith("j"):
+            return [to_json(payload)]
+        return fmt_xrefs.format_function_xrefs(payload)
 
     if token in ("afv", "afvj"):
         target = session.resolve(rest[0]) if rest else session.seek

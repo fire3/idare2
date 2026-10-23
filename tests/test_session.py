@@ -213,6 +213,16 @@ class FakeRemote:
                 ],
                 "bp": [],
             },
+            "function_xrefs": lambda: [
+                {"type": "CALL", "from": 0x1000, "to": 0x2000, "text": "bl sym.imp.printf"},
+                {
+                    "type": "STRN",
+                    "from": 0x1004,
+                    "to": 0x4000,
+                    "string": "hello",
+                    "text": "ldr r0, [pc]",
+                },
+            ],
             "graph": lambda: {
                 "name": "main",
                 "addr": arguments["ea"],
@@ -1225,6 +1235,23 @@ def test_afv_renders_args_and_stack_variables() -> None:
         ("function_locals", {"ea": 0x1000}),
         ("function_locals", {"ea": 0x1000}),
     ]
+
+
+def test_afx_lists_function_references() -> None:
+    """``afx``/``afxj``: r2's type char, from/to and the instruction text."""
+    session, _remote = make_session()
+    assert session.run("afx") == [
+        "C 0x00001000 -> 0x00002000 bl sym.imp.printf",
+        "s 0x00001004 -> 0x00004000 ldr r0, [pc]  hello",
+    ]
+    rows = json.loads("\n".join(session.run("afxj")))
+    assert rows[0] == {
+        "type": "CALL",
+        "from": 0x1000,
+        "to": 0x2000,
+        "text": "bl sym.imp.printf",
+    }
+    assert rows[1]["string"] == "hello"
 
 
 def test_afb_and_afi_json_forms_are_reachable() -> None:

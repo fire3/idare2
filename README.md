@@ -158,7 +158,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
 | Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `pf` `pfj` `pfs` `ps` `psw` `pv` `ph` `pwd` |
 | Information | `i` `iI` `ij` `it` `itj` `iD` `ia` `iaj` `il` `ilj` `ilq` `iS` `ii` `is` `iz` `ir` `ih` `iH` `ie` `iE` `iM` |
-| Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `ab` `axt` `axf` `axj` `agf` `agfj` `agfd` |
+| Analysis | `aa` `aaa` `af` `afr` `afn` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afx` `afxj` `ab` `axt` `axf` `axj` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
 | Metadata | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |

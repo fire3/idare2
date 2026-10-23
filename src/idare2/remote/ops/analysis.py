@@ -202,6 +202,85 @@ def xrefs(db: Any, ea: int, direction: str = "to") -> list[dict[str, Any]]:
     return out
 
 
+#: IDA xref type -> r2's ``afxj`` type name.  Ordinary flow is dropped: r2's
+#: function refs do not contain a ref for every sequential instruction.
+_AFX_KIND = {
+    "CALL_NEAR": "CALL",
+    "CALL_FAR": "CALL",
+    "JUMP_NEAR": "JUMP",
+    "JUMP_FAR": "JUMP",
+    "USER_SPECIFIED": "CODE",
+}
+
+
+def _afx_type(db: Any, xref: Any) -> str | None:
+    """``afxj`` type for one IDA xref, or ``None`` when r2 would omit it."""
+    raw = getattr(xref.type, "name", None) or str(xref.type)
+    if raw == "ORDINARY_FLOW":
+        return None
+    if raw in _AFX_KIND:
+        return _AFX_KIND[raw]
+    target = int(xref.to_ea)
+    try:
+        if db.bytes.is_string_literal_at(target):
+            return "STRN"
+    except Exception:
+        pass
+    return "DATA"
+
+
+@op("function_xrefs")
+def function_xrefs(db: Any, ea: int) -> list[dict[str, Any]]:
+    """References made from a whole function (``afx``/``afxj``).
+
+    One ``(from, to)`` pair per target, in instruction order, with r2's type
+    names (CALL/JUMP/CODE/DATA/STRN).  Ordinary fall-through flow is skipped
+    because r2's function refs do not include it.
+    """
+    func = helpers.require_func(db, ea)
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[int, int, str]] = set()
+    for insn in db.functions.get_instructions(func):
+        source = int(insn.ea)
+        text = helpers.clean_disasm(
+            helpers.strip_comment(
+                db.instructions.get_disassembly(insn) or "",
+                _xref_comment(db, source),
+            )
+        )
+        # IDA appends auto-comments (``; "text"``) to the listing; r2's afx
+        # shows the bare instruction, so drop them here.
+        text = text.split(" ;", 1)[0].rstrip()
+        for xref in db.xrefs.from_ea(source):
+            kind = _afx_type(db, xref)
+            if kind is None:
+                continue
+            target = int(xref.to_ea)
+            key = (source, target, kind)
+            if key in seen:
+                continue
+            seen.add(key)
+            row: dict[str, Any] = {"type": kind, "from": source, "to": target}
+            if kind == "STRN":
+                try:
+                    text_at = db.bytes.get_string_at(target, 64)
+                except Exception:
+                    text_at = None
+                if text_at:
+                    row["string"] = text_at
+            row["text"] = text
+            out.append(row)
+    return out
+
+
+def _xref_comment(db: Any, ea: int) -> str:
+    try:
+        info = db.comments.get_at(ea)
+    except Exception:
+        return ""
+    return info.comment if info is not None else ""
+
+
 @op("callers")
 def callers(db: Any, ea: int) -> list[dict[str, Any]]:
     """Callers of the function at ``ea`` (``afc``, ``ac``)."""

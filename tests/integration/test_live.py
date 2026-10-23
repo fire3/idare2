@@ -169,6 +169,22 @@ def test_afv_reports_hexrays_variables(session) -> None:
     assert not session.failed
 
 
+def test_afx_reports_references_from_a_function(session) -> None:
+    """Exercise the remote xref walk on a real database (types/shape only).
+
+    Exact rows are not compared with r2: the two engines discover slightly
+    different reference sets, but every row must carry r2's field names.
+    """
+    session.failed = False
+    first = session.run("afl")[0].split()[0]
+    rows = json.loads("\n".join(session.run(f"afxj @ {first}")))
+    assert isinstance(rows, list)
+    for row in rows:
+        assert {"type", "from", "to"} <= set(row)
+        assert row["type"] in ("CALL", "JUMP", "CODE", "DATA", "STRN")
+    assert not session.failed
+
+
 def test_iD_demangles_a_live_symbol(session) -> None:
     session.failed = False
     payload = json.loads("\n".join(session.run("iDj c++ _Z3foov")))
