@@ -240,6 +240,20 @@ class FakeRemote:
                     "text": "ldr r0, [pc]",
                 },
             ],
+            "op_info_many": lambda: [
+                {
+                    "address": arguments["ea"] + index * 4,
+                    "opcode": "mov r0, r1",
+                    "disasm": "mov r0, r1",
+                    "mnemonic": "mov",
+                    "family": "mov",
+                    "bytes": "0100a0e1",
+                    "size": 4,
+                    "sign": False,
+                    "type": "null" if index == 0 else "jmp",
+                }
+                for index in range(arguments["count"])
+            ],
             "resize_function": lambda: {
                 "ea": 0x1000,
                 "end": arguments["end"],
@@ -611,6 +625,37 @@ def test_p_equal_rejects_unimplemented_modes() -> None:
         session.run(command)
         assert session.failed, command
         assert isinstance(session.last_error, UsageError)
+
+
+def test_ao_reports_ida_fields_and_skips_r2_only_ones() -> None:
+    session, _remote = make_session()
+    assert session.run("ao") == [
+        "address: 0x1000",
+        "opcode: mov r0, r1",
+        "disasm: mov r0, r1",
+        "mnemonic: mov",
+        "bytes: 0100a0e1",
+        "size: 4",
+        "sign: false",
+        "type: null",
+        "family: mov",
+    ]
+
+
+def test_aoj_is_an_array_and_ao_n_counts() -> None:
+    session, remote = make_session()
+    rows = json.loads("\n".join(session.run("aoj 2")))
+    assert len(rows) == 2
+    assert rows[1]["type"] == "jmp"
+    assert ("op_info_many", {"ea": 0x1000, "count": 2}) in remote.calls
+
+
+def test_ao_rejects_bad_counts() -> None:
+    session, _remote = make_session()
+    for command in ("ao x", "ao 0", "aO"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
 
 
 def test_pj_reindents_the_json_value() -> None:

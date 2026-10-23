@@ -193,6 +193,60 @@ def _block_at(db: Any, ea: int) -> Any | None:
     return None
 
 
+@op("op_info")
+def op_info(db: Any, ea: int) -> dict[str, Any]:
+    """One instruction in r2's ``ao`` field set (``ao``/``aoj``).
+
+    r2's analyser supplies several fields IDA does not expose (mask, its own
+    opcode id, ESIL, cycle costs, r2's opcode family).  Those are omitted
+    rather than invented; everything returned here is IDA's own answer.
+    """
+    insns = list(db.instructions.get_between(ea, ea + 1))
+    if not insns:
+        helpers.fail(protocol.BAD_ADDRESS, f"no instruction at 0x{ea:x}")
+    insn = insns[0]
+    start = int(insn.ea)
+    size = int(insn.size)
+    raw = db.bytes.get_bytes_at(start, size)
+    mnemonic = db.instructions.get_mnemonic(insn) or ""
+    text = helpers.clean_disasm(
+        helpers.strip_comment(db.instructions.get_disassembly(insn) or "", _comment(db, start))
+    )
+    if db.instructions.is_call_instruction(insn):
+        kind = "call"
+    elif db.instructions.is_return(insn):
+        kind = "ret"
+    elif db.instructions.is_jump(insn):
+        kind = "cjmp" if db.instructions.is_conditional_jump(insn) else "jmp"
+    else:
+        kind = "null"
+    return {
+        "address": start,
+        "opcode": text,
+        "disasm": text,
+        "mnemonic": mnemonic,
+        "family": mnemonic,
+        "bytes": bytes(raw).hex() if raw else "",
+        "size": size,
+        "sign": False,
+        "type": kind,
+    }
+
+
+@op("op_info_many")
+def op_info_many(db: Any, ea: int, count: int = 1) -> list[dict[str, Any]]:
+    """``count`` consecutive instructions in ``ao`` shape (``ao 3``)."""
+    rows: list[dict[str, Any]] = []
+    cursor = int(ea)
+    for _ in range(max(int(count), 0)):
+        insns = list(db.instructions.get_between(cursor, cursor + 1))
+        if not insns:
+            break
+        rows.append(op_info(db, cursor))
+        cursor = int(insns[0].ea) + int(insns[0].size)
+    return rows
+
+
 @op("block_info")
 def block_info(db: Any, ea: int) -> dict[str, Any]:
     """Basic block boundaries and neighbours at ``ea`` (``ab``)."""

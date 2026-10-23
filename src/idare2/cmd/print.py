@@ -418,6 +418,55 @@ def _beats(ts: int) -> str:
     return f"@{whole:03d}.{sub}"
 
 
+AO_DETAIL = [
+    ("ao", "[n]", "instruction details"),
+    ("aoj", "[n]", "instruction details as JSON"),
+]
+
+#: r2's ``ao`` text order, restricted to the fields IDA can answer.
+_AO_ORDER = ("address", "opcode", "disasm", "mnemonic", "bytes", "size", "sign", "type", "family")
+
+
+@command("a[oO]", usage="[n]", summary="instruction details", detail=AO_DETAIL, json_suffix=True)
+def print_op_info(session: Session, statement: Statement) -> list[str]:
+    """``ao``/``aoj`` -- one instruction at the seek.
+
+    r2's fields that come from its own analyser (mask, opcode id, ESIL,
+    cycles, r2 opcode families) are not in the output; IDA has no equivalent.
+    """
+    token = statement.cmd
+    if token not in ("ao", "aoj"):
+        raise UsageError(f"unsupported print modifier '{token[1:]}' (see ao?)")
+    rest, count, _offset = numeric_args(session, statement)
+    if rest:
+        raise UsageError("ao takes only a count")
+    amount = count if count is not None else 1
+    if amount <= 0:
+        raise UsageError("ao needs a positive count")
+    rows = session.remote.call("op_info_many", ea=session.seek, count=amount)
+    if token.endswith("j"):
+        return [to_json(rows)]
+    if not rows:
+        return []
+    lines: list[str] = []
+    for index, row in enumerate(rows):
+        if index:
+            lines.append("")
+        for key in _AO_ORDER:
+            value = row.get(key)
+            if value in (None, ""):
+                continue
+            if key == "address":
+                lines.append(f"address: 0x{int(value):x}")
+            elif key == "sign":
+                lines.append(f"sign: {str(bool(value)).lower()}")
+            elif key == "bytes":
+                lines.append(f"bytes: {value}")
+            else:
+                lines.append(f"{key}: {value}")
+    return lines
+
+
 @command("pt", usage="[dhnb.] [len]", summary="print timestamps", detail=PT_DETAIL)
 def print_timestamp(session: Session, statement: Statement) -> list[str]:
     """``pt``/``ptd``/``pth``/``ptn``/``ptb`` -- r2's timestamp decoders."""

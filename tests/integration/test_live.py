@@ -688,6 +688,22 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_ao_reports_instruction_details_live(session) -> None:
+    session.failed = False
+    first = session.run("afl")[0].split()[0]
+    text = session.run(f"ao @ {first}")
+    assert any(line.startswith("address: 0x") for line in text)
+    assert any(line.startswith("mnemonic: ") for line in text)
+    assert any(line.startswith("type: ") for line in text)
+    rows = json.loads("\n".join(session.run(f"aoj 3 @ {first}")))
+    assert len(rows) == 3
+    for row in rows:
+        assert row["size"] > 0
+        assert row["bytes"] and len(row["bytes"]) == row["size"] * 2
+        assert row["type"] in ("call", "ret", "cjmp", "jmp", "null")
+    assert not session.failed
+
+
 def test_pj_pt_and_pu_live(session) -> None:
     """The new print helpers work against a real database, not just fakes."""
     session.failed = False
