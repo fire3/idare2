@@ -686,3 +686,33 @@ def test_unknown_command(session) -> None:
     session.run("zzz")
     assert session.failed
     assert isinstance(session.last_error, UnknownCommand)
+
+
+def test_afu_resizes_a_function_on_a_writable_copy(working_copy: Path) -> None:
+    """``afu`` is a database write, so it runs against a scratch copy only."""
+    try:
+        with nexus.connect(
+            nexus.Target(path=str(working_copy)), timeout=600, linger=0
+        ) as handle:
+            remote = rpc.Remote(handle, timeout=120)
+            info = remote.call("open_summary")
+            session = Session(handle, remote, Config(), info, readonly=False)
+            session.setup()
+            for line in session.run("afl"):
+                if not line.startswith("0x"):
+                    continue
+                ea = int(line.split()[0], 16)
+                before = json.loads("\n".join(session.run(f"afij @ 0x{ea:x}")))
+                if int(before["size"]) <= 4:
+                    continue
+                new_end = int(before["end"]) - 4
+                session.failed = False
+                session.run(f"s 0x{ea:x}")
+                assert session.run(f"afu 0x{new_end:x}") == []
+                assert not session.failed, session.last_error
+                after = json.loads("\n".join(session.run(f"afij @ 0x{ea:x}")))
+                assert int(after["end"]) == new_end
+                return
+            pytest.skip("no function large enough to resize")
+    except Idare2Error as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"cannot attach to {working_copy}: {exc}")

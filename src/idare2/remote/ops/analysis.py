@@ -450,6 +450,21 @@ def _block_edges(
     return None, None
 
 
+@op("resize_function", writes=True)
+def resize_function(db: Any, ea: int, end: int) -> dict[str, Any]:
+    """Move a function's end (``afu``).  IDA re-analyses the resized body."""
+    func = helpers.require_func(db, ea)
+    start = int(func.start_ea)
+    if end <= start:
+        helpers.fail(
+            protocol.BAD_ARGS, f"afu: the new end 0x{end:x} is not after 0x{start:x}"
+        )
+    if not db.functions.set_end(func, end):
+        helpers.fail(protocol.IDA_ERROR, f"could not resize the function at 0x{start:x}")
+    updated = db.functions.get_at(start) or func
+    return {"ea": int(updated.start_ea), "end": int(updated.end_ea)}
+
+
 @op("reanalyze", writes=True)
 def reanalyze(db: Any, ea: int) -> dict[str, Any]:
     """Re-run IDA's analysis over the function at ``ea`` (``afr``)."""

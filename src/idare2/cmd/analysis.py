@@ -27,6 +27,7 @@ ANALYSIS_DETAIL = [
     ("af", "", "create a function at the current address"),
     ("afr", "", "re-analyse the current function"),
     ("afn", "[name]", "rename the current function"),
+    ("afu", "addr", "resize the function to end at addr"),
     ("afi", "", "function details"),
     ("afl", "[pat]", "list functions"),
     ("aflj", "[pat]", "list functions as JSON"),
@@ -50,6 +51,7 @@ ANALYSIS_DETAIL = [
 FUNCTION_DETAIL = [
     ("af", "", "create a function at the current address"),
     ("afr", "", "re-analyse the current function"),
+    ("afu", "addr", "resize the function to end at addr"),
     ("afi", "", "function details"),
     ("afij", "", "function details as JSON"),
     ("afl", "[pat]", "list functions"),
@@ -113,8 +115,11 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
         session.remote.call("reanalyze", ea=target)
         return []
 
-    if token in ("afn", "afN"):
+    if token == "afn" or token == "afN":
         return _rename(session, rest)
+
+    if token == "afu":
+        return _resize(session, statement)
 
     if token in ("afl", "aflj", "aflq"):
         pattern = rest[0] if rest else None
@@ -173,6 +178,23 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
         return fmt_disasm.format_locals(payload)
 
     raise UsageError(f"unsupported function command '{token}' (see af?)")
+
+
+def _resize(session: Session, statement: Statement) -> list[str]:
+    """``afu <end>`` -- move the end of the function containing the seek.
+
+    The end is read from the raw argv: ``numeric_args`` would swallow a bare
+    hex end address as a repeat count.
+    """
+    from idare2 import cmd as cmd_module
+
+    cmd_module.require_write(session, "'afu'")
+    words = statement.argv
+    if len(words) != 1:
+        raise UsageError("afu needs an end address")
+    end = session.resolve(words[0])
+    session.remote.call("resize_function", ea=session.seek, end=end)
+    return []
 
 
 def _rename(session: Session, rest: list[str]) -> list[str]:

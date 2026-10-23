@@ -229,6 +229,10 @@ class FakeRemote:
                     "text": "ldr r0, [pc]",
                 },
             ],
+            "resize_function": lambda: {
+                "ea": 0x1000,
+                "end": arguments["end"],
+            },
             "graph": lambda: {
                 "name": "main",
                 "addr": arguments["ea"],
@@ -1282,6 +1286,33 @@ def test_afx_lists_function_references() -> None:
         "text": "bl sym.imp.printf",
     }
     assert rows[1]["string"] == "hello"
+
+
+def test_afu_resizes_the_function_at_the_seek() -> None:
+    session, remote = make_session()
+    session.seek = 0x1000
+    assert session.run("afu 0x2000") == []
+    assert ("resize_function", {"ea": 0x1000, "end": 0x2000}) in remote.calls
+    assert not session.failed
+
+
+def test_afu_requires_write_access() -> None:
+    session, remote = make_session()
+    session.readonly = True
+    session.failed = False
+    session.run("afu 0x2000")
+    assert session.failed
+    assert "resize_function" not in remote.operations
+
+
+def test_afu_needs_an_end_address() -> None:
+    session, remote = make_session()
+    session.failed = False
+    session.run("afu")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "end address" in str(session.last_error)
+    assert "resize_function" not in remote.operations
 
 
 def test_afb_and_afi_json_forms_are_reachable() -> None:
