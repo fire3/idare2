@@ -254,6 +254,18 @@ class FakeRemote:
                 }
                 for index in range(arguments["count"])
             ],
+            "var_accesses": lambda: [
+                {
+                    "name": "arg1",
+                    "read": [0x1004, 0x1008],
+                    "write": [],
+                },
+                {
+                    "name": "var_10h",
+                    "read": [0x100c],
+                    "write": [0x1010, 0x1014],
+                },
+            ],
             "resize_function": lambda: {
                 "ea": 0x1000,
                 "end": arguments["end"],
@@ -625,6 +637,28 @@ def test_p_equal_rejects_unimplemented_modes() -> None:
         session.run(command)
         assert session.failed, command
         assert isinstance(session.last_error, UsageError)
+
+
+def test_afvR_and_afvW_list_variable_accesses() -> None:
+    session, remote = make_session()
+    assert session.run("afvR") == [
+        "      arg1  0x1004,0x1008",
+        "   var_10h  0x100c",
+    ]
+    assert session.run("afvW") == [
+        "      arg1",
+        "   var_10h  0x1010,0x1014",
+    ]
+    payload = json.loads("\n".join(session.run("afvRj")))
+    assert payload[1] == {"name": "var_10h", "addrs": [0x100c]}
+    assert ("var_accesses", {"ea": 0x1000, "name": None}) in remote.calls
+
+
+def test_afvR_can_filter_by_name() -> None:
+    session, remote = make_session()
+    session.run("afvR arg1")
+    calls = [args for name, args in remote.calls if name == "var_accesses"]
+    assert calls[-1] == {"ea": 0x1000, "name": "arg1"}
 
 
 def test_ao_reports_ida_fields_and_skips_r2_only_ones() -> None:

@@ -37,6 +37,8 @@ ANALYSIS_DETAIL = [
     ("afC", "", "callees of the current function"),
     ("afv", "", "local variables and arguments (needs Hex-Rays)"),
     ("afvj", "", "local variables as JSON (needs Hex-Rays)"),
+    ("afvR", "[name]", "addresses where variables are read"),
+    ("afvW", "[name]", "addresses where variables are written"),
     ("afx", "[addr]", "references made from the function"),
     ("afxj", "[addr]", "references made from the function as JSON"),
     ("axt", "[addr]", "cross-references to an address"),
@@ -63,6 +65,8 @@ FUNCTION_DETAIL = [
     ("afC", "", "callees of the current function"),
     ("afv", "", "local variables and arguments (needs Hex-Rays)"),
     ("afvj", "", "local variables as JSON (needs Hex-Rays)"),
+    ("afvR", "[name]", "addresses where variables are read"),
+    ("afvW", "[name]", "addresses where variables are written"),
     ("afx", "[addr]", "references made from the function"),
     ("afxj", "[addr]", "references made from the function as JSON"),
 ]
@@ -177,7 +181,32 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
             return [to_json(payload)]
         return fmt_disasm.format_locals(payload)
 
+    if token in ("afvR", "afvW", "afvRj", "afvWj"):
+        return _var_accesses(session, statement, rest)
+
     raise UsageError(f"unsupported function command '{token}' (see af?)")
+
+
+def _var_accesses(
+    session: Session, statement: Statement, rest: list[str]
+) -> list[str]:
+    """``afvR``/``afvW`` -- addresses where each variable is read or written."""
+    token = statement.cmd
+    kind = "read" if "R" in token else "write"
+    name = rest[0] if rest else None
+    if len(rest) > 1:
+        raise UsageError(f"{token} takes at most one variable name")
+    rows = session.remote.call("var_accesses", ea=session.seek, name=name)
+    if token.endswith("j"):
+        return [to_json([{"name": row["name"], "addrs": row[kind]} for row in rows])]
+    lines = []
+    for row in rows:
+        addrs = row[kind]
+        line = f"{row['name']:>10}"
+        if addrs:
+            line += "  " + ",".join(f"0x{int(ea):x}" for ea in addrs)
+        lines.append(line)
+    return lines
 
 
 def _resize(session: Session, statement: Statement) -> list[str]:

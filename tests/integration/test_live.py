@@ -688,6 +688,33 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_afvR_and_afvW_report_accesses_live(session) -> None:
+    """Read/write address lists come from one Hex-Rays ctree walk."""
+    session.failed = False
+    addresses = [line.split()[0] for line in session.run("afl") if line.startswith("0x")]
+    main = next(
+        (line.split()[0] for line in session.run("afl") if line.endswith(" main")), None
+    )
+    candidates = ([main] if main else []) + addresses[:20]
+    reads: list[str] = []
+    for address in candidates:
+        session.run(f"s {address}")
+        reads = session.run("afvR")
+        if any(len(line.split()) > 1 for line in reads if line.split()[1:2]):
+            break
+    else:  # pragma: no cover - depends on the database
+        pytest.skip("no function with variable accesses")
+    writes = session.run("afvW")
+    assert len(reads) == len(writes)
+    for line in reads:
+        tokens = line.split()
+        for item in (tokens[1] if len(tokens) > 1 else "").split(","):
+            if item:
+                assert int(item, 16) >= 0
+    assert any("0x" in line for line in reads)
+    assert not session.failed
+
+
 def test_ao_reports_instruction_details_live(session) -> None:
     session.failed = False
     first = session.run("afl")[0].split()[0]

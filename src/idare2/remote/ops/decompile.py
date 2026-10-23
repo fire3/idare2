@@ -29,6 +29,41 @@ def decompile(
     return result, helpers.page_meta(items, next_offset, len(lines))
 
 
+@op("var_accesses")
+def var_accesses(db: Any, ea: int, name: str | None = None) -> list[dict[str, Any]]:
+    """Read/write addresses per local variable (``afvR``/``afvW``).
+
+    One decompilation and one ctree walk for the whole function: references
+    carry the variable index and the binary address, so grouping is free.
+    Address-taken references count as reads, like r2's ``R_PERM_R``.
+    """
+    helpers.require_hexrays()
+    func = helpers.require_func(db, ea)
+    pcfunc = db.pseudocode.decompile(func)
+    raw = pcfunc.raw_cfunc
+    names = [str(getattr(raw.lvars[i], "name", "") or "") for i in range(raw.lvars.size())]
+    rows: dict[int, dict[str, Any]] = {}
+    for index, lvar_name in enumerate(names):
+        if not lvar_name:
+            continue
+        if name is not None and lvar_name != name:
+            continue
+        rows[index] = {"name": lvar_name, "read": [], "write": []}
+
+    for ref in pcfunc.find_variable_references():
+        expr = getattr(ref, "expr", None)
+        index = getattr(expr, "variable_index", None) if expr is not None else None
+        if index is None or index not in rows:
+            continue
+        address = getattr(ref, "ea", None)
+        if address is None:
+            continue
+        access = str(getattr(getattr(ref, "access_type", None), "name", "") or "")
+        key = "write" if access == "WRITE" else "read"
+        rows[index][key].append(int(address))
+    return list(rows.values())
+
+
 @op("locals")
 def locals_(db: Any, ea: int) -> dict[str, Any]:
     """Hex-Rays local variables of the function at ``ea`` (``afv``)."""
