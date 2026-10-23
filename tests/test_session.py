@@ -1034,6 +1034,34 @@ def test_unimplemented_iterators_fail_loudly(spec: str) -> None:
         session._iterator_addresses(spec)
 
 
+def test_temporary_instruction_and_value_selectors() -> None:
+    """``@i:n``/``@B:n``/``@v:`` relocate the seek for one statement."""
+    session, remote = make_session()
+    session.seek = 0x1000
+    lines = session.run("s @i:1")
+    assert lines == []
+    assert session.seek == 0x1000  # temporary: restored afterwards
+    assert ("disasm", {"ea": 0x1000, "count": -1, "mode": "function"}) in remote.calls
+    session.run("s @v:0x2000")
+    assert session.seek == 0x1000
+
+
+def test_temporary_command_selector_uses_its_first_address() -> None:
+    session, _remote = make_session()
+    session.seek = 0x1000
+    assert session.run("s @c:?e 0x1234") == ["0x00001234"]
+    assert session.seek == 0x1000
+
+
+@pytest.mark.parametrize("spec", ["r:rax", "o:3", "p:42", "k:key", "x:4142"])
+def test_unsupported_temporary_selectors_fail_loudly(spec: str) -> None:
+    session, _remote = make_session()
+    session.failed = False
+    assert session.run(f"s @{spec}") == []
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+
+
 def test_search_creates_session_flags() -> None:
     session, _ = make_session()
     session.config.set("search.from", 0x1000)

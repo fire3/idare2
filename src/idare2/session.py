@@ -350,7 +350,56 @@ class Session:
             if spec.startswith(prefix):
                 setter(spec[len(prefix) :])
                 return
+        if spec.startswith("B:") or spec.startswith("i:"):
+            self._tmp_instruction(spec[2:], block=spec.startswith("B:"))
+            return
+        if spec.startswith("c:"):
+            self._tmp_command(spec[2:])
+            return
+        if spec.startswith("v:"):
+            self.seek = self.eval(spec[2:])
+            return
+        for prefix, reason in (
+            ("r:", "registers need a debugger"),
+            ("o:", "file descriptors are not exposed"),
+            ("p:", "process ids need a debugger"),
+            ("k:", "the sdb key-value store is not available"),
+            ("x:", "replacing the block from hexpairs is not supported"),
+            ("xc:", "replacing the block from command output is not supported"),
+            ("xf:", "replacing the block from a file is not supported"),
+        ):
+            if spec.startswith(prefix):
+                raise UsageError(f"@ {spec}: {reason}")
         self.seek = self.resolve(spec)
+
+    def _tmp_instruction(self, text: str, *, block: bool) -> None:
+        """``@B:n`` / ``@i:n`` -- seek to the nth instruction (negative = end)."""
+        index = self.eval(text)
+        payload = self.remote.call(
+            "disasm", ea=self.seek, count=-1, mode="block" if block else "function"
+        )
+        lines = payload.get("lines") or []
+        if not lines:
+            raise UsageError(f"@ {'B' if block else 'i'}: no instructions at the seek")
+        if index < 0:
+            index += len(lines)
+        if not 0 <= index < len(lines):
+            raise UsageError(
+                f"@ {'B' if block else 'i'}: index {index} out of range (0..{len(lines) - 1})"
+            )
+        self.seek = int(lines[index]["ea"])
+
+    def _tmp_command(self, command: str) -> None:
+        """``@c:cmd`` -- seek to the first address printed by a command."""
+        for line in self.run(command):
+            for token in line.split():
+                if token.startswith("0x"):
+                    try:
+                        self.seek = int(token, 16)
+                    except ValueError:
+                        continue
+                    return
+        raise UsageError(f"@ c:{command}: no address in the command output")
 
     def _tmp_config(self, spec: str) -> None:
         for assignment in spec.split(","):
