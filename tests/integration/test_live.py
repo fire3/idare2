@@ -688,6 +688,20 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_wide_search_live(session) -> None:
+    """``/w`` searches UTF-16LE bytes; each match is two bytes per character."""
+    session.failed = False
+    payload = json.loads("\n".join(session.run("/wj a")))
+    assert payload["kind"] == "wide"
+    assert payload["match"] == 2
+    assert isinstance(payload["hits"], list)
+    lines = session.run("/w a")
+    for line in lines:
+        assert len(line.split()) >= 3
+        assert len(line.split()[2]) % 2 == 0
+    assert not session.failed
+
+
 def test_afu_resizes_a_function_on_a_writable_copy(working_copy: Path) -> None:
     """``afu`` is a database write, so it runs against a scratch copy only."""
     try:

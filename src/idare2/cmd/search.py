@@ -29,6 +29,8 @@ SEARCH_DETAIL = [
     ("/x", " hexpairs", "search for bytes"),
     ("/v", " value", "search for an immediate value"),
     ("/r", " regex", "search the string table with a regex"),
+    ("/w", " text", "search for a UTF-16LE wide string"),
+    ("/wi", " text", "search for a wide string, ignoring case"),
     ("//", "", "repeat the previous search"),
     ("/+", "", "continue the previous search after its last hit"),
     ("/j", " ...", "the same searches as JSON (append j to the kind)"),
@@ -37,7 +39,17 @@ SEARCH_DETAIL = [
 #: Characters of context r2 shows around a text hit.
 CONTEXT = 16
 
-_KINDS = {"": "text", "x": "bytes", "v": "immediate", "r": "regex"}
+_KINDS = {
+    "": "text",
+    "x": "bytes",
+    "v": "immediate",
+    "r": "regex",
+    "w": "wide",
+    "wi": "wide",
+}
+
+#: Extra characters that are fixed by the kind itself (``/wi`` ignores case).
+_KIND_FIXED = {"wi": "-i"}
 
 
 @command("/", usage="[xvr] [pattern]", summary="search", detail=SEARCH_DETAIL, json_suffix=True)
@@ -56,7 +68,12 @@ def search(session: Session, statement: Statement) -> list[str]:
     pattern = _pattern(statement.args)
     if not pattern:
         raise UsageError(f"/{kind_token} needs a pattern")
-    return _run(session, _KINDS[kind_token], pattern, as_json=as_json)
+    return _run(
+        session,
+        _KINDS[kind_token] + _KIND_FIXED.get(kind_token, ""),
+        pattern,
+        as_json=as_json,
+    )
 
 
 def _pattern(raw: str) -> str:
@@ -84,7 +101,10 @@ def _run(session: Session, kind: str, pattern: str, *, as_json: bool) -> list[st
 
     session.search_counter += 1
     session.last_search = SearchState(
-        kind=kind, pattern=pattern, last_hit=hits[-1] if hits else None
+        kind=kind,
+        pattern=pattern,
+        last_hit=hits[-1] if hits else None,
+        match=payload.get("match"),
     )
 
     if as_json:
@@ -150,6 +170,16 @@ def _context(session: Session, ea: int, kind: str, width: int | None) -> str:
         span = width or 4
         try:
             payload = session.remote.call("read_bytes", ea=ea, count=span)
+        except Exception:
+            return ""
+        return bytes(payload.get("data") or b"").hex()
+
+    if kind.startswith("wide"):
+        match = session.last_search.match if session.last_search else None
+        if not match:
+            return ""
+        try:
+            payload = session.remote.call("read_bytes", ea=ea, count=match)
         except Exception:
             return ""
         return bytes(payload.get("data") or b"").hex()

@@ -44,6 +44,26 @@ def _collect(
     return hits
 
 
+def _wide_variants(text: str) -> list[str]:
+    """Case variants of ``text`` for ``/wi`` (at most 8 ASCII letters)."""
+    import itertools
+
+    choices: list[tuple[str, ...]] = []
+    combinations = 1
+    for char in text:
+        if char.isascii() and char.isalpha():
+            choices.append((char.lower(), char.upper()))
+            combinations *= 2
+        else:
+            choices.append((char,))
+    if combinations > 256:
+        helpers.fail(
+            protocol.BAD_ARGS,
+            "wide case-insensitive search supports at most 8 ASCII letters",
+        )
+    return ["".join(variant) for variant in itertools.product(*choices)]
+
+
 @op("search")
 def search(
     db: Any,
@@ -56,11 +76,38 @@ def search(
 ) -> dict[str, Any]:
     """Search the database.
 
-    ``kind`` is one of ``bytes`` (hexpairs), ``text``, ``immediate`` (a number)
-    or ``regex`` (over the string table).  Hits come back as addresses; the
-    client decides how to render them.
+    ``kind`` is one of ``bytes`` (hexpairs), ``text``, ``immediate`` (a number),
+    ``regex`` (over the string table), ``wide`` (UTF-16LE) or ``wide-i``
+    (UTF-16LE, ASCII letters case-insensitive).  Hits come back as addresses;
+    the client decides how to render them.
     """
     first, last = _bounds(db, start, end)
+
+    if kind in ("wide", "wide-i"):
+        variants = _wide_variants(pattern) if kind == "wide-i" else [pattern]
+        needles = [variant.encode("utf-16-le") for variant in variants]
+        if not any(needles):
+            helpers.fail(protocol.BAD_ARGS, "empty search pattern")
+
+        def wide_finder(begin: int, finish: int) -> int | None:
+            best: int | None = None
+            for needle in needles:
+                hit = db.bytes.find_bytes_between(needle, begin, finish)
+                if hit is not None and int(hit) >= 0:
+                    hit = int(hit)
+                    if best is None or hit < best:
+                        best = hit
+            return best
+
+        hits = _collect(wide_finder, first, last, limit, inclusive=True)
+        return {
+            "kind": kind,
+            "pattern": pattern,
+            "match": len(pattern.encode("utf-16-le")),
+            "hits": hits,
+            "start": first,
+            "end": last,
+        }
 
     if kind == "bytes":
         try:

@@ -140,6 +140,48 @@ def test_demangle_uses_the_ida_demangler() -> None:
     assert envelope["result"] == {"demangled": None}
 
 
+def _search_db(data: bytes):
+    """A fake db whose byte finder is a plain ``bytes.find``."""
+
+    def find(needle, start, end):
+        index = data.find(needle, start, end)
+        return index if index >= 0 else None
+
+    return SimpleNamespace(
+        minimum_ea=0,
+        maximum_ea=len(data),
+        bytes=SimpleNamespace(find_bytes_between=find),
+    )
+
+
+def test_wide_search_matches_utf16le() -> None:
+    data = b"AA" + "hello".encode("utf-16-le") + b"BB"
+    envelope = dispatch.invoke(
+        _search_db(data), "search", {"pattern": "hello", "kind": "wide"}
+    )
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"]["hits"] == [2]
+    assert envelope["result"]["match"] == 10
+
+
+def test_wide_search_can_ignore_case() -> None:
+    data = b"zz" + "HeLLo".encode("utf-16-le")
+    envelope = dispatch.invoke(
+        _search_db(data), "search", {"pattern": "hEllO", "kind": "wide-i"}
+    )
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"]["hits"] == [2]
+
+
+def test_wide_case_insensitive_search_refuses_absurd_variant_counts() -> None:
+    envelope = dispatch.invoke(
+        _search_db(b"\x00" * 16), "search", {"pattern": "abcdefghi", "kind": "wide-i"}
+    )
+    assert not protocol.is_ok(envelope)
+    assert envelope["error"]["code"] == protocol.BAD_ARGS
+    assert "at most 8" in envelope["error"]["message"]
+
+
 def test_file_hashes_hashes_the_input_file(tmp_path, monkeypatch) -> None:
     import hashlib
     import sys

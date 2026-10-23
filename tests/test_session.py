@@ -56,8 +56,13 @@ class FakeRemote:
             "read_bytes": lambda: self._read_bytes(arguments),
             "search": lambda: {
                 "hits": list(self.search_hits),
-                "kind": "bytes",
-                "pattern": "aa",
+                "kind": arguments["kind"],
+                "pattern": arguments["pattern"],
+                "match": (
+                    len(arguments["pattern"].encode("utf-16-le"))
+                    if arguments["kind"].startswith("wide")
+                    else None
+                ),
             },
             "search_ranges": lambda: [{"start": 0x1000, "end": 0x2000, "name": ".text"}],
             "segments": lambda: [
@@ -642,6 +647,39 @@ def test_search_creates_session_flags() -> None:
     assert len(lines) == 2
     assert "hit0_0" in lines[0]
     assert session.flags.lookup("hit0_1") == 0x1010
+
+
+def test_wide_search_uses_utf16_and_prints_the_matched_bytes() -> None:
+    session, remote = make_session()
+    session.config.set("search.from", 0x1000)
+    session.config.set("search.to", 0x2000)
+    lines = session.run("/w hello")
+    assert lines[0] == "0x00001000 hit0_0 " + "aa" * 10
+    search = [args for name, args in remote.calls if name == "search"][-1]
+    assert search["kind"] == "wide"
+    assert search["pattern"] == "hello"
+    # The match width is 2 bytes per character, not the UTF-8 length.
+    reads = [args for name, args in remote.calls if name == "read_bytes"]
+    assert {"ea": 0x1000, "count": 10} in reads
+
+
+def test_wide_case_insensitive_search_sets_the_kind() -> None:
+    session, remote = make_session()
+    session.config.set("search.from", 0x1000)
+    session.config.set("search.to", 0x2000)
+    session.run("/wi HELLO")
+    search = [args for name, args in remote.calls if name == "search"][-1]
+    assert search["kind"] == "wide-i"
+    assert search["pattern"] == "HELLO"
+
+
+def test_wide_json_reports_the_match_width() -> None:
+    session, _remote = make_session()
+    session.config.set("search.from", 0x1000)
+    session.config.set("search.to", 0x2000)
+    payload = json.loads("\n".join(session.run("/wj hi")))
+    assert payload["match"] == 4
+    assert payload["hits"] == [0x1000, 0x1010]
 
 
 def test_search_repeat_uses_the_last_query() -> None:

@@ -45,6 +45,8 @@ class SearchState:
     kind: str
     pattern: str
     last_hit: int | None = None
+    #: Byte length of one match, for kinds whose width is not in the pattern.
+    match: int | None = None
 
 
 class Session:
