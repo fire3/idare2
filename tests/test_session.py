@@ -147,6 +147,7 @@ class FakeRemote:
                     "machine": "ARM",
                 }
             ],
+            "libs": lambda: ["libc.so.6", "libm.so.6"],
             "header_fields": lambda: {
                 "bits": 32,
                 "fields": [
@@ -1687,6 +1688,13 @@ def test_iaj_nests_the_rows_under_bins() -> None:
             }
         ]
     }
+
+
+def test_il_forms_list_the_needed_libraries() -> None:
+    session, _remote = make_session()
+    assert session.run("il") == ["libc.so.6", "libm.so.6"]
+    assert session.run("ilq") == ["libc.so.6", "libm.so.6"]
+    assert json.loads("\n".join(session.run("ilj"))) == ["libc.so.6", "libm.so.6"]
 
 
 def test_ir_renders_the_relocation_table() -> None:

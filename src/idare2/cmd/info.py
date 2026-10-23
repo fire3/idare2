@@ -22,6 +22,9 @@ INFO_DETAIL = [
     ("iD", "[lang] sym", "demangle a symbol"),
     ("ia", "", "architectures found in the file"),
     ("iaj", "", "architectures as JSON"),
+    ("il", "", "needed libraries"),
+    ("ilj", "", "needed libraries as JSON"),
+    ("ilq", "", "needed libraries, names only"),
     ("iS", "", "segments with permissions"),
     ("ii", "[pat]", "imports"),
     ("is", "[pat]", "symbols"),
@@ -284,6 +287,25 @@ def architectures(session: Session, statement: Statement) -> list[str]:
             f"{index:<3} 0x{int(row['offset']):08x} {size:<{size_width}} {arch}".rstrip()
         )
     return lines
+
+
+@command(
+    "il",
+    usage="[jq]",
+    summary="list the libraries the file needs",
+    detail=[
+        ("il", "", "needed libraries"),
+        ("ilj", "", "needed libraries as JSON"),
+        ("ilq", "", "needed libraries, names only"),
+    ],
+    json_suffix=True,
+)
+def libraries(session: Session, statement: Statement) -> list[str]:
+    """``il``/``ilj`` -- ``DT_NEEDED`` entries, one per line like r2."""
+    rows = session.remote.call("libs")
+    if statement.cmd == "ilj":
+        return [to_json(rows)]
+    return list(rows)
 
 
 def _main_address(session: Session) -> list[str]:

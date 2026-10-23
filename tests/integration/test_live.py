@@ -122,6 +122,14 @@ def test_ia_lists_the_database_arch(session) -> None:
     assert not session.failed
 
 
+def test_il_without_the_input_is_empty(session) -> None:
+    """The .i64's recorded input is gone, so there is no ELF to read DT_NEEDED."""
+    session.failed = False
+    assert session.run("il") == []
+    assert json.loads("\n".join(session.run("ilj"))) == []
+    assert not session.failed
+
+
 def test_iD_demangles_a_live_symbol(session) -> None:
     session.failed = False
     payload = json.loads("\n".join(session.run("iDj c++ _Z3foov")))

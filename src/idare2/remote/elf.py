@@ -21,6 +21,9 @@ from pathlib import Path
 from typing import Any
 
 PT_LOAD = 1
+PT_DYNAMIC = 2
+DT_NEEDED = 1
+DT_STRTAB = 5
 SHT_SYMTAB = 2
 SHT_STRTAB = 3
 SHT_RELA = 4
@@ -274,6 +277,7 @@ class ElfFile:
         programs: list[Program],
         dynsyms: list[Symbol],
         symtabs: list[Symbol],
+        libs: list[str],
     ) -> None:
         self.path = path
         self.bits = bits
@@ -285,6 +289,7 @@ class ElfFile:
         self.programs = programs
         self.dynsyms = dynsyms
         self.symtabs = symtabs
+        self.libs = libs
         self.dynsyms_by_index = {symbol.index: symbol for symbol in dynsyms}
         self.symtabs_by_index = {symbol.index: symbol for symbol in symtabs}
         loads = [program.vaddr & ~0xFFF for program in programs if program.type == PT_LOAD]
@@ -336,6 +341,7 @@ class ElfFile:
             sections = cls._read_sections(handle, shoff, shnum, shentsize, sh_format, shstrndx)
             dynsyms, symtabs = cls._read_symbols(handle, sections, bits, sym_format, machine)
             relocs = cls._read_relocations(handle, sections, bits, endian)
+            libs = cls._read_needed(handle, sections, programs, bits, endian)
             handle.seek(0, 2)
             file_size = handle.tell()
 
@@ -364,6 +370,7 @@ class ElfFile:
                 programs=programs,
                 dynsyms=dynsyms,
                 symtabs=symtabs,
+                libs=libs,
             )
             result.relocs = relocs
             result.import_plt = cls._compute_import_plt(handle, result, endian, relocs)
@@ -501,6 +508,60 @@ class ElfFile:
                     )
                 )
         return dynsyms, symtabs
+
+    @staticmethod
+    def _read_needed(
+        handle: Any,
+        sections: list[Section],
+        programs: list[Program],
+        bits: int,
+        endian: str,
+    ) -> list[str]:
+        """``DT_NEEDED`` entries in file order (``il``).
+
+        Like radare2 (and the ELF ABI), the dynamic segment is authoritative:
+        firmware images often strip the section table but keep ``PT_DYNAMIC``.
+        The section form is only a fallback for files without the segment.
+        """
+        fmt = endian + ("QQ" if bits == 64 else "II")
+        size = struct.calcsize(fmt)
+        entries: list[tuple[int, int]] = []
+
+        def parse(raw: bytes) -> None:
+            for position in range(0, len(raw) - size + 1, size):
+                tag, value = struct.unpack(fmt, raw[position : position + size])
+                if tag == 0:  # DT_NULL terminates the array
+                    break
+                entries.append((tag, value))
+
+        for program in programs:
+            if program.type != PT_DYNAMIC or not program.filesz:
+                continue
+            handle.seek(program.offset)
+            parse(handle.read(program.filesz))
+        if not entries:
+            for section in sections:
+                if section.type == SHT_DYNAMIC:
+                    parse(_read_section(handle, section))
+        if not entries:
+            return []
+
+        strtab_vaddr = next((value for tag, value in entries if tag == DT_STRTAB), None)
+        if strtab_vaddr is None:
+            return []
+        strtab_paddr = _map_vaddr(programs, sections, strtab_vaddr)
+        if strtab_paddr is None:
+            return []
+
+        out: list[str] = []
+        for tag, value in entries:
+            if tag != DT_NEEDED:
+                continue
+            handle.seek(strtab_paddr + value)
+            name = _cstr(handle.read(256), 0)
+            if name:
+                out.append(name)
+        return out
 
     @staticmethod
     def _read_relocations(
@@ -793,6 +854,24 @@ class ElfFile:
                 "paddr": self.vaddr_to_paddr(reloc.offset),
                 "is_ifunc": False,
             }
+
+
+def _map_vaddr(
+    programs: list[Program], sections: list[Section], vaddr: int
+) -> int | None:
+    """Map a virtual address to a file offset (used while loading)."""
+    for program in programs:
+        if program.type == PT_LOAD and program.vaddr <= vaddr < program.vaddr + program.filesz:
+            return program.offset + (vaddr - program.vaddr)
+    for section in sections:
+        if (
+            section.flags & SHF_ALLOC
+            and section.type != SHT_NOBITS
+            and section.size
+            and section.addr <= vaddr < section.addr + section.size
+        ):
+            return section.offset + (vaddr - section.addr)
+    return None
 
 
 def _read_section(handle: Any, section: Section) -> bytes:

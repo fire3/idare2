@@ -390,6 +390,17 @@ def test_file_hashes_match_r2(session, r2) -> None:
         assert ours.get(name) == theirs.get(name), name
 
 
+def test_library_list_matches_r2(session, r2) -> None:
+    """``il``/``ilj`` are the ELF DT_NEEDED entries in file order."""
+    ours = session.run("il")
+    theirs = [line for line in r2("il") if line.strip()]
+    assert ours
+    assert ours == theirs
+    assert json.loads("\n".join(session.run("ilj"))) == json.loads(
+        "\n".join(r2("ilj"))
+    )
+
+
 def test_arch_listing_matches_r2(session, r2) -> None:
     """``ia``/``iaj``: arch, bits, abi and machine derived from the ELF header."""
     assert session.run("ia") == [line for line in r2("ia") if line.startswith("0")]

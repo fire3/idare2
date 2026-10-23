@@ -175,6 +175,13 @@ def _count(iterator: Any) -> int:
     return total
 
 
+@op("libs")
+def libs(db: Any) -> list[str]:
+    """Needed libraries (``il``) from the ELF ``DT_NEEDED`` entries."""
+    elf = _elf_for(db)
+    return list(elf.libs) if elf is not None else []
+
+
 @op("archs")
 def archs(db: Any) -> list[dict[str, Any]]:
     """Architectures present in the input (``ia``).
