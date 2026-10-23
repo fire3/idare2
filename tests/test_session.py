@@ -148,6 +148,20 @@ class FakeRemote:
                 }
             ],
             "libs": lambda: ["libc.so.6", "libm.so.6"],
+            "exports": lambda: [
+                {
+                    "ordinal": 1,
+                    "ea": 0x2000,
+                    "paddr": 0x2000,
+                    "vaddr": 0x2000,
+                    "bind": "GLOBAL",
+                    "type": "FUNC",
+                    "size": 32,
+                    "lib": "",
+                    "name": "exported",
+                    "demangled": "",
+                }
+            ],
             "header_fields": lambda: {
                 "bits": 32,
                 "fields": [
@@ -1695,6 +1709,26 @@ def test_il_forms_list_the_needed_libraries() -> None:
     assert session.run("il") == ["libc.so.6", "libm.so.6"]
     assert session.run("ilq") == ["libc.so.6", "libm.so.6"]
     assert json.loads("\n".join(session.run("ilj"))) == ["libc.so.6", "libm.so.6"]
+
+
+def test_iE_prints_the_export_table() -> None:
+    """`iE` is the dynsym export table, not IDA's entry-point list."""
+    session, remote = make_session()
+    lines = session.run("iE")
+    assert lines[0].split() == [
+        "nth", "paddr", "vaddr", "bind", "type", "size", "lib", "name", "demangled",
+    ]
+    assert lines[2].split()[:7] == [
+        "1", "0x00002000", "0x00002000", "GLOBAL", "FUNC", "32", "exported",
+    ]
+    assert "exports" in remote.operations
+
+
+def test_iEj_is_the_export_rows_as_json() -> None:
+    session, _remote = make_session()
+    rows = json.loads("\n".join(session.run("iEj")))
+    assert rows[0]["name"] == "exported"
+    assert rows[0]["ordinal"] == 1
 
 
 def test_ir_renders_the_relocation_table() -> None:

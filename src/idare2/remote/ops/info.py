@@ -334,6 +334,21 @@ def entries(db: Any, pattern: str | None = None) -> list[dict[str, Any]]:
     return out
 
 
+@op("exports")
+def exports(db: Any, pattern: str | None = None) -> list[dict[str, Any]]:
+    """Exported symbols (``iE``): defined GLOBAL entries from both symbol tables.
+
+    IDA's name table cannot distinguish exported from local names, so this
+    needs the ELF symbol tables (as ``is`` already does).  Non-ELF inputs yield
+    an empty list rather than pretending every name is exported.
+    """
+    predicate = helpers.name_filter(pattern)
+    elf = _elf_for(db)
+    if elf is None:
+        return []
+    return [row for row in elf.export_rows() if predicate(row["name"])]
+
+
 @op("relocations")
 def relocations(db: Any) -> list[dict[str, Any]]:
     """Relocation table (``ir``)."""

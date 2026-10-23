@@ -340,6 +340,15 @@ def test_relocation_rows_match_radare2_table_fields(elf) -> None:
     ]
 
 
+def test_export_rows_keep_defined_global_symbols(elf) -> None:
+    """``iE``: defined GLOBAL symbols from dynsym and symtab, in table order."""
+    rows = list(elf.export_rows())
+    assert [(row["ordinal"], row["name"], row["bind"], row["type"]) for row in rows] == [
+        (1, "foo", "GLOBAL", "FUNC"),
+        (4, "foo", "GLOBAL", "FUNC"),
+    ]
+
+
 def test_needed_libraries_come_from_dynamic(elf) -> None:
     """``il``: DT_NEEDED entries, resolved through .dynstr."""
     assert elf.libs == ["libc.so.6"]

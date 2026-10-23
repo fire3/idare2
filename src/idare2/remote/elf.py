@@ -819,6 +819,19 @@ class ElfFile:
                 continue
             yield self._symbol_row(symbol, name=f"imp.{symbol.name}", size=16)
 
+    def export_rows(self) -> Iterator[dict[str, Any]]:
+        """Rows in ``iE`` order: defined GLOBAL symbols from both tables.
+
+        r2's ``its_an_export`` is just "not imported and bind == GLOBAL", so
+        symtab entries that duplicate the dynsym are listed too (weak symbols
+        are not exports).  The order is the same as :meth:`symbol_rows`.
+        """
+        for table in (self.dynsyms, self.symtabs):
+            for symbol in table:
+                if symbol.shndx == SHN_UNDEF or symbol.bind != "GLOBAL":
+                    continue
+                yield self._symbol_row(symbol)
+
     def import_rows(self) -> Iterator[dict[str, Any]]:
         """Rows in ``ii`` order: undefined entries of ``.dynsym``."""
         for symbol in self.dynsyms:

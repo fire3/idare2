@@ -130,6 +130,19 @@ def test_il_without_the_input_is_empty(session) -> None:
     assert not session.failed
 
 
+def test_iE_without_the_input_is_empty(session) -> None:
+    """IDA cannot distinguish exports; without the ELF there are no rows.
+
+    r2 still prints the table header and rule for an empty export table, so the
+    text form keeps them while the JSON form is an empty array.
+    """
+    session.failed = False
+    lines = session.run("iE")
+    assert lines[0].startswith("nth paddr")
+    assert json.loads("\n".join(session.run("iEj"))) == []
+    assert not session.failed
+
+
 def test_iD_demangles_a_live_symbol(session) -> None:
     session.failed = False
     payload = json.loads("\n".join(session.run("iDj c++ _Z3foov")))

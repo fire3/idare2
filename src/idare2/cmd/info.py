@@ -148,8 +148,12 @@ def listing(session: Session, statement: Statement) -> list[str]:
         )
     elif base == "ir":
         rows = session.remote.call("relocations")
-    elif base in ("ie", "iE"):
+    elif base == "ie":
         rows = session.remote.call("entries", pattern=pattern)
+    elif base == "iE":
+        # `iE` is the export table proper: defined GLOBAL/WEAK dynsym entries.
+        # IDA has no notion of "exported", so this comes from the ELF dynsym.
+        rows = session.remote.call("exports", pattern=pattern)
     else:
         raise AssertionError(f"unhandled info listing {token!r}")
 
@@ -163,7 +167,7 @@ def listing(session: Session, statement: Statement) -> list[str]:
         "iz": fmt_listing.format_strings,
         "ir": fmt_listing.format_relocations,
         "ie": fmt_listing.format_entries,
-        "iE": fmt_listing.format_entries,
+        "iE": fmt_listing.format_symbols,
     }[base]
     return with_more(formatter(rows, session), meta)
 

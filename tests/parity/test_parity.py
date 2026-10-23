@@ -369,6 +369,29 @@ def _relocation_rows(
     return rows
 
 
+def _export_rows(lines: list[str]) -> list[tuple[int, int | None, int | None, str, str, int, str]]:
+    rows = []
+    for line in lines[2:]:
+        # The lib column is empty for ELF exports, so `split` collapses it.
+        tokens = line.split(None, 6)
+        if len(tokens) < 7 or not tokens[0].isdigit():
+            continue
+        paddr = None if tokens[1].startswith("-") else int(tokens[1], 16)
+        vaddr = None if tokens[2].startswith("-") else int(tokens[2], 16)
+        rows.append(
+            (int(tokens[0]), paddr, vaddr, tokens[3], tokens[4], int(tokens[5]), tokens[6])
+        )
+    return rows
+
+
+def test_export_table_matches_r2(session, r2) -> None:
+    """``iE`` uses the ELF dynsym exports, which IDA's entries list lacks."""
+    ours = _export_rows(session.run("iE"))
+    theirs = _export_rows(r2("iE"))
+    assert ours
+    assert ours == theirs
+
+
 def test_relocation_table_matches_r2(session, r2) -> None:
     """``ir`` uses the raw ELF relocation sections, which IDA does not expose."""
     ours = _relocation_rows(session.run("ir"))
