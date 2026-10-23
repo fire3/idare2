@@ -281,6 +281,11 @@ class FakeRemote:
                     "write": [0x1010, 0x1014],
                 },
             ],
+            "type_load_header": lambda: {
+                "path": arguments["path"],
+                "errors": 0,
+                "created": ["foo", "color"],
+            },
             "noreturn_functions": lambda: [
                 {"ea": 0x2000, "name": "panic"},
                 {"ea": 0x3000, "name": "die"},
@@ -690,6 +695,26 @@ def test_afvR_can_filter_by_name() -> None:
     session.run("afvR arg1")
     calls = [args for name, args in remote.calls if name == "var_accesses"]
     assert calls[-1] == {"ea": 0x1000, "name": "arg1"}
+
+
+def test_to_loads_types_from_a_header() -> None:
+    session, remote = make_session()
+    assert session.run("to /tmp/h.h") == ["-- loaded foo, color from /tmp/h.h --"]
+    assert ("type_load_header", {"path": "/tmp/h.h"}) in remote.calls
+
+
+def test_to_requires_write_access_and_a_path() -> None:
+    session, remote = make_session()
+    session.readonly = True
+    session.failed = False
+    session.run("to /tmp/h.h")
+    assert session.failed
+    assert "type_load_header" not in remote.operations
+    session.readonly = False
+    session.failed = False
+    session.run("to")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
 
 
 def test_tn_lists_and_marks_noreturn_functions() -> None:

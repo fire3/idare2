@@ -33,6 +33,7 @@ TYPE_DETAIL = [
     ("tfc", " name", "function signature as a C prototype"),
     ("tn", "[addr]", "list or set noreturn functions"),
     ("tn-", " addr", "clear a noreturn mark"),
+    ("to", " header", "load types from a C header file"),
     ("dt", " name [addr]", "read a typed value at an address"),
 ]
 
@@ -73,7 +74,22 @@ def types(session: Session, statement: Statement) -> list[str]:
     if suffix in ("n", "n-"):
         return _noreturn(session, token, argument)
 
+    if suffix == "o":
+        return _load_header(session, argument)
+
     raise UsageError(f"unsupported type command '{token}' (see t?)")
+
+
+def _load_header(session: Session, argument: str) -> list[str]:
+    """``to <header>`` -- parse a C header into the database's type library."""
+    cmd_module.require_write(session, "'to'")
+    if not argument:
+        raise UsageError("to needs a header file path")
+    payload = session.remote.call("type_load_header", path=_unquote(argument))
+    created = payload.get("created") or []
+    if created:
+        return [f"-- loaded {', '.join(created)} from {payload['path']} --"]
+    return [f"-- parsed {payload['path']} --"]
 
 
 def _noreturn(session: Session, token: str, argument: str) -> list[str]:

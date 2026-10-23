@@ -184,6 +184,32 @@ def test_afv_reports_hexrays_variables(session) -> None:
     assert not session.failed
 
 
+def test_to_loads_a_header_on_a_writable_copy(working_copy: Path) -> None:
+    """``to`` parses a C header into a scratch database's type library."""
+    header = working_copy.parent / "types.h"
+    header.write_text(
+        "struct bar { int x; unsigned char y; };\ntypedef struct bar bar_t;\n"
+        "typedef enum { E1 = 1, E2 = 2 } my_enum;\n",
+        encoding="utf-8",
+    )
+    try:
+        with nexus.connect(
+            nexus.Target(path=str(working_copy)), timeout=600, linger=0
+        ) as handle:
+            remote = rpc.Remote(handle, timeout=120)
+            info = remote.call("open_summary")
+            session = Session(handle, remote, Config(), info, readonly=False)
+            session.setup()
+            session.failed = False
+            lines = session.run(f"to {header}")
+            assert not session.failed, session.last_error
+            assert lines and "bar" in lines[0]
+            listing = "\n".join(session.run("t"))
+            assert "bar_t" in listing and "my_enum" in listing
+    except Idare2Error as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"cannot attach to {working_copy}: {exc}")
+
+
 def test_afx_reports_references_from_a_function(session) -> None:
     """Exercise the remote xref walk on a real database (types/shape only).
 

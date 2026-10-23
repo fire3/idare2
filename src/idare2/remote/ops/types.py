@@ -210,6 +210,30 @@ def type_at(db: Any, ea: int) -> dict[str, Any]:
     return {"ea": ea, **_describe(tinfo)}
 
 
+@op("type_load_header", writes=True)
+def type_load_header(db: Any, path: str) -> dict[str, Any]:
+    """Parse a C header file into the local type library (``to``)."""
+    from pathlib import Path
+
+    import ida_typeinf
+
+    header = Path(path).expanduser()
+    if not header.is_file():
+        helpers.fail(protocol.NOT_FOUND, f"no such header file: {path}")
+    try:
+        text = header.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        helpers.fail(protocol.BAD_ARGS, f"cannot read {path}: {exc}")
+    til = ida_typeinf.get_idati()
+    errors = int(db.types.parse_declarations(til, text))
+    created = _declared_names(text)
+    return {
+        "path": str(header),
+        "errors": errors,
+        "created": [name for name in created if db.types.get_by_name(name) is not None],
+    }
+
+
 @op("type_parse", writes=True)
 def type_parse(db: Any, declaration: str) -> dict[str, Any]:
     """Parse C declarations into the database (``tc``).
