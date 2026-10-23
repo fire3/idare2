@@ -688,6 +688,26 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_pj_pt_and_pu_live(session) -> None:
+    """The new print helpers work against a real database, not just fakes."""
+    session.failed = False
+    first = session.run("afl")[0].split()[0]
+    encoded = session.run(f"pu 8 @ {first}")
+    assert encoded and encoded[0].startswith("%") and len(encoded[0]) == 24
+    wide = session.run(f"puw 8 @ {first}")
+    assert wide and len(wide[0]) == 12
+    timestamps = session.run(f"pt 8 @ {first}")
+    assert len(timestamps) == 2
+    beats = session.run(f"ptb 8 @ {first}")
+    assert beats and beats[0].startswith("@")
+    stats = session.run(f"p=d 8 @ {first}")
+    assert stats[0].startswith("min:") and stats[-1].startswith("size (of block):")
+    # `pj` on non-JSON memory yields nothing rather than crashing.
+    lines = session.run(f"pj 16 @ {first}")
+    assert lines == []
+    assert not session.failed
+
+
 def test_p6_round_trips_against_the_database(session) -> None:
     session.failed = False
     encoded = session.run("p6es hello world")

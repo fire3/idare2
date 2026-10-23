@@ -245,6 +245,250 @@ P6_DETAIL = [
 ]
 
 
+EQUAL_DETAIL = [
+    ("p=d", "[len]", "min/max/unique/range statistics for the block"),
+]
+
+
+@command("p=", usage="[d] [len]", summary="block statistics", detail=EQUAL_DETAIL)
+def print_equal(session: Session, statement: Statement) -> list[str]:
+    """``p=d`` -- r2's per-block dictionary statistics.
+
+    r2 also has ``p=e``/``p=0``/``p=F``/``p=p``/``p=b`` bar charts whose
+    ranges come from r2's "zoom" map boundaries; idare2 has no equivalent
+    notion, so those modes fail loudly instead of plotting different ranges.
+    """
+    token = statement.cmd
+    if token != "p=d":
+        raise UsageError(f"unsupported print modifier '{token}' (only p=d is implemented)")
+    rest, count, _offset = numeric_args(session, statement)
+    if rest:
+        raise UsageError("p=d takes only a length")
+    size = count if count is not None else session.blocksize
+    if size <= 0:
+        raise UsageError("p=d needs a positive length")
+    payload = session.remote.call("read_bytes", ea=session.seek, count=size)
+    data = bytes(payload.get("data") or b"")
+    if data:
+        values = list(data)
+        unique = set(values)
+        minimum, maximum = min(unique), max(unique)
+        rows = (
+            ("min:", minimum),
+            ("max:", maximum),
+            ("unique (count):", len(unique)),
+            ("range (max-min):", maximum - minimum),
+            ("size (of block):", len(data)),
+        )
+    else:
+        # r2's own initialisers for an empty block: min stays -1 (printed with
+        # %x, hence 0xffffffff) and range becomes 0 - (-1).
+        rows = (
+            ("min:", -1),
+            ("max:", 0),
+            ("unique (count):", 0),
+            ("range (max-min):", 1),
+            ("size (of block):", 0),
+        )
+    return [f"{label:<18}{value}  0x{value & 0xFFFFFFFF:x}" for label, value in rows]
+
+
+#: Two spaces per level, matching the ``"  "`` tab r2 passes to its indenter.
+_JSON_TAB = 2
+
+
+def _json_indent(text: str) -> str:
+    """Re-indent a JSON value the way r2's ``r_print_json_indent`` does.
+
+    Everything before the first ``{``/``[`` is dropped; whitespace outside
+    strings is discarded; ``:`` gains one space and ``,`` a newline; braces and
+    brackets indent by two.  Colours are left to the session instead of being
+    baked into the string.
+    """
+    out: list[str] = []
+    indent = 0
+    in_string = False
+    started = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            if char == '"':
+                in_string = False
+            elif char == "\\" and index + 1 < len(text):
+                out.append(char)
+                index += 1
+                char = text[index]
+            out.append(char)
+            index += 1
+            continue
+        if not started and char not in "{[":
+            index += 1
+            continue
+        if char in " \t\r\n" or not char.isprintable():
+            index += 1
+            continue
+        started = True
+        if char == '"':
+            in_string = True
+            out.append(char)
+        elif char == ":":
+            out.append(": ")
+            index += 1
+            while index < len(text) and text[index] in " \t\r\n":
+                index += 1
+            continue
+        elif char == ",":
+            out.append(",\n")
+            out.append(" " * (indent * _JSON_TAB))
+        elif char in "{[":
+            out.append(char)
+            out.append("\n")
+            indent += 1
+            out.append(" " * (indent * _JSON_TAB))
+        elif char in "}]":
+            out.append("\n")
+            indent = max(indent - 1, 0)
+            out.append(" " * (indent * _JSON_TAB))
+            out.append(char)
+        else:
+            out.append(char)
+        index += 1
+    return "".join(out)
+
+
+@command("pj", usage="[len]", summary="print the block as indented JSON")
+def print_json_indent(session: Session, statement: Statement) -> list[str]:
+    """``pj`` -- re-indent the JSON value at the seek.
+
+    Only the JSON part is printed: like r2, leading bytes before the first
+    ``{``/``[`` are skipped and whitespace outside strings is normalised.
+    """
+    rest, count, _offset = numeric_args(session, statement)
+    if rest:
+        raise UsageError("pj takes only a length")
+    size = count if count is not None else session.blocksize
+    if size <= 0:
+        raise UsageError("pj needs a positive length")
+    payload = session.remote.call("read_bytes", ea=session.seek, count=size)
+    text = bytes(payload.get("data") or b"").decode("latin-1")
+    formatted = _json_indent(text)
+    return formatted.splitlines() if formatted else []
+
+
+PT_DETAIL = [
+    ("pt", "[len]", "UNIX timestamps (32-bit)"),
+    ("ptd", "[len]", "DOS timestamps (32-bit)"),
+    ("pth", "[len]", "HFS timestamps (32-bit)"),
+    ("ptn", "[len]", "NTFS timestamps (64-bit)"),
+    ("ptb", "[len]", "Swatch Internet Time (@beats)"),
+    ("pt.", "", "current local time"),
+]
+
+
+def _ctime(timestamp: float) -> str:
+    """``ctime`` formatting, but computed from an explicit epoch value."""
+    import time as _time
+
+    return _time.strftime("%a %b %e %H:%M:%S %Y", _time.localtime(timestamp))
+
+
+def _dos_time(value: int) -> float:
+    date = value >> 16
+    clock = value & 0xFFFF
+    year = ((date & 0xFE00) >> 9) + 1980
+    month = (date & 0x01E0) >> 5 or 1
+    day = date & 0x001F or 1
+    hour = (clock & 0xF800) >> 11
+    minute = (clock & 0x07E0) >> 5
+    second = (clock & 0x001F) << 1
+    import time as _time
+
+    return _time.mktime((year, month, day, hour, minute, second, 0, 0, -1))
+
+
+def _beats(ts: int) -> str:
+    """r2's ``ptb``: divide by 1e6, wrap at a day, then 86.4 s per beat."""
+    seconds = (ts // 1_000_000) % 86400
+    beats = seconds / 86.4
+    whole = int(beats)
+    sub = int((beats - whole) * 1000)
+    if whole >= 1000:
+        whole = abs(whole - 1000)
+    return f"@{whole:03d}.{sub}"
+
+
+@command("pt", usage="[dhnb.] [len]", summary="print timestamps", detail=PT_DETAIL)
+def print_timestamp(session: Session, statement: Statement) -> list[str]:
+    """``pt``/``ptd``/``pth``/``ptn``/``ptb`` -- r2's timestamp decoders."""
+    import time as _time
+
+    token = statement.cmd
+    if token == "pt.":
+        return [_ctime(_time.time())]
+    rest, count, _offset = numeric_args(session, statement)
+    if rest:
+        raise UsageError(f"{token} takes only a length")
+    size = count if count is not None else session.blocksize
+    if size <= 0:
+        raise UsageError(f"{token} needs a positive length")
+    payload = session.remote.call("read_bytes", ea=session.seek, count=size)
+    data = bytes(payload.get("data") or b"")
+    big = session.config.get_bool("cfg.bigendian")
+
+    if token in ("ptn", "ptb"):
+        width = 8
+    elif token in ("pt", "ptd", "pth"):
+        width = 4
+    else:
+        raise UsageError(f"unsupported print modifier '{token[1:]}' (see pt?)")
+
+    if len(data) < width:
+        raise UsageError(f"{token} needs at least {width} bytes at the seek")
+
+    lines = []
+    for offset in range(0, len(data) - width + 1, width):
+        value = int.from_bytes(data[offset : offset + width], "big" if big else "little")
+        if token == "pt":
+            lines.append(_ctime(value))
+        elif token == "ptd":
+            lines.append(_ctime(_dos_time(value)))
+        elif token == "pth":
+            lines.append(_ctime(value + 2082844800))
+        elif token == "ptn":
+            seconds = value // 10_000_000
+            seconds = seconds - 0x2B6109100 if seconds > 0x2B6109100 else 0
+            lines.append(_ctime(seconds))
+        else:
+            lines.append(_beats(value))
+    return lines
+
+
+PU_DETAIL = [
+    ("pu", "[len]", "URL-encode N bytes"),
+    ("puw", "[len]", "URL-encode N bytes, low byte of each UTF-16 unit"),
+]
+
+
+@command("pu", usage="[w] [len]", summary="URL-encode bytes", detail=PU_DETAIL)
+def print_urlencoded(session: Session, statement: Statement) -> list[str]:
+    """``pu``/``puw`` -- ``%xx`` for every byte (``puw``: every second byte)."""
+    token = statement.cmd
+    if token not in ("pu", "puw"):
+        raise UsageError(f"unsupported print modifier '{token[1:]}' (see pu?)")
+    rest, count, _offset = numeric_args(session, statement)
+    if rest:
+        raise UsageError(f"{token} takes only a length")
+    size = count if count is not None else session.blocksize
+    if size <= 0:
+        raise UsageError(f"{token} needs a positive length")
+    payload = session.remote.call("read_bytes", ea=session.seek, count=size)
+    data = bytes(payload.get("data") or b"")
+    if token == "puw":
+        data = data[::2]
+    return ["".join(f"%{byte:02x}" for byte in data)]
+
+
 @command("p6", usage="[de][sz] [arg]", summary="base64 encode/decode", detail=P6_DETAIL)
 def print_base64(session: Session, statement: Statement) -> list[str]:
     """``p6e``/``p6d`` -- r2's base64 helpers.

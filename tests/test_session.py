@@ -583,6 +583,106 @@ def test_unknown_x_forms_fail_loudly(command: str) -> None:
     assert "read_bytes" not in remote.operations
 
 
+def test_p_equal_dict_statistics_match_r2() -> None:
+    session, remote = make_session()
+    remote.read_data = bytes([0, 1, 2, 3, 0xA8, 0xA8, 5, 7])
+    assert session.run("p=d 8 @ 0x1000") == [
+        "min:              0  0x0",
+        "max:              168  0xa8",
+        "unique (count):   7  0x7",
+        "range (max-min):  168  0xa8",
+        "size (of block):  8  0x8",
+    ]
+
+
+def test_p_equal_defaults_to_the_block_size() -> None:
+    session, remote = make_session()
+    session.blocksize = 4
+    remote.read_data = b"\x01\x01\x02\x03"
+    lines = session.run("p=d")
+    assert lines[0] == "min:              1  0x1"
+    assert lines[4] == "size (of block):  4  0x4"
+
+
+def test_p_equal_rejects_unimplemented_modes() -> None:
+    session, remote = make_session()
+    for command in ("p=", "p=e 16", "p=0 16", "p=b"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
+        assert isinstance(session.last_error, UsageError)
+
+
+def test_pj_reindents_the_json_value() -> None:
+    session, remote = make_session()
+    remote.read_data = b'{"a":1,"b":[2,3]}'
+    session.blocksize = 64
+    assert session.run("pj") == [
+        "{",
+        '  "a": 1,',
+        '  "b": [',
+        "    2,",
+        "    3",
+        "  ]",
+        "}",
+    ]
+
+
+def test_pj_skips_leading_noise_like_r2() -> None:
+    session, remote = make_session()
+    remote.read_data = b"\x00\x01 {\"a\":true}"
+    session.blocksize = 64
+    lines = session.run("pj")
+    assert lines[0] == "{"
+    assert lines[1] == '  "a": true'
+    assert lines[-1] == "}"
+
+
+def test_pu_url_encodes_every_byte() -> None:
+    session, remote = make_session()
+    remote.read_data = bytes([0x7C, 0x05, 0x00, 0xFF])
+    assert session.run("pu 4 @ 0x1000") == ["%7c%05%00%ff"]
+    assert session.run("puw 4 @ 0x1000") == ["%7c%00"]
+
+
+def test_pt_variants_decode_timestamps() -> None:
+    import struct
+    import time
+
+    session, remote = make_session()
+    epoch = 1234567890
+    remote.read_data = struct.pack("<I", epoch)
+    expected = time.strftime("%a %b %e %H:%M:%S %Y", time.localtime(epoch))
+    assert session.run("pt 4 @ 0x1000") == [expected]
+    assert session.run("pth 4 @ 0x1000") == [
+        time.strftime("%a %b %e %H:%M:%S %Y", time.localtime(epoch + 2082844800))
+    ]
+
+    ntfs = struct.pack("<Q", (epoch + 0x2B6109100) * 10_000_000)
+    remote.read_data = ntfs
+    assert session.run("ptn 8 @ 0x1000") == [expected]
+
+
+def test_ptb_prints_swatch_beats() -> None:
+    import struct
+
+    session, remote = make_session()
+    remote.read_data = struct.pack("<Q", 1234567890 * 10**6)
+    assert session.run("ptb 8 @ 0x1000") == ["@980.208"]
+    remote.read_data = struct.pack("<Q", 1234567890)
+    assert session.run("ptb 8 @ 0x1000") == ["@014.282"]
+
+
+def test_pt_needs_enough_bytes() -> None:
+    session, remote = make_session()
+    remote.read_data = b"\x00"
+    session.failed = False
+    session.run("ptn 1 @ 0x1000")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "at least 8 bytes" in str(session.last_error)
+
+
 def test_p6_encodes_and_decodes_base64() -> None:
     session, _remote = make_session()
     assert session.run("p6es hello world") == ["aGVsbG8gd29ybGQ="]
