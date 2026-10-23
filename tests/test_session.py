@@ -72,7 +72,13 @@ class FakeRemote:
             },
             "search_ranges": lambda: [{"start": 0x1000, "end": 0x2000, "name": ".text"}],
             "segments": lambda: [
-                {"vaddr": 0x1000, "vsize": 0x1000, "paddr": 0x4000, "name": ".text"}
+                {
+                    "vaddr": 0x1000,
+                    "vsize": 0x1000,
+                    "paddr": 0x4000,
+                    "name": ".text",
+                    "perm": "r-x",
+                }
             ],
             "patch_bytes": lambda: {"ea": arguments["ea"], "size": 2},
             "patch_many": lambda: {"patches": len(arguments["patches"])},
@@ -923,6 +929,24 @@ def test_unknown_compare_suffixes_fail_loudly(command: str) -> None:
     assert isinstance(session.last_error, UsageError)
     assert "unsupported compare command" in str(session.last_error)
     assert "read_bytes" not in remote.operations
+
+
+def test_iterator_entry_and_export_selectors() -> None:
+    """``@@E``/``@@R``/``@@m:r-x``/``@@s`` iterate the new tables."""
+    session, _remote = make_session()
+    assert session._iterator_addresses("E") == [0x2000]
+    assert session._iterator_addresses("R") == [0xF9128]
+    assert session._iterator_addresses("s") == [0x1000, 0x2000]
+    assert session._iterator_addresses("m:r-x") == [0x1000]
+    sized = session._sized_iterator_items("m:r-x")
+    assert sized == [(0x1000, 0x1000)]
+
+
+@pytest.mark.parametrize("spec", ["dbt*", "t", "r", "M", "C:", "c:"])
+def test_unimplemented_iterators_fail_loudly(spec: str) -> None:
+    session, _remote = make_session()
+    with pytest.raises(UsageError):
+        session._iterator_addresses(spec)
 
 
 def test_search_creates_session_flags() -> None:

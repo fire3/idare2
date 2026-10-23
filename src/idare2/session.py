@@ -449,8 +449,28 @@ class Session:
         if spec in ("S", "SS", "G"):
             return [(int(item["vaddr"]), int(item["vsize"])) for item in self.remote.call("segments")]
 
+        if spec == "E":
+            return [(int(row["ea"]), None) for row in self.remote.call("exports")]
+
+        if spec == "R":
+            return [(int(row["vaddr"]), None) for row in self.remote.call("relocations")]
+
+        if spec == "m" or spec.startswith("m:"):
+            perms = spec[2:] if spec.startswith("m:") else None
+            out: list[tuple[int, int | None]] = []
+            for segment in self.remote.call("segments"):
+                perm = str(segment.get("perm") or "")
+                if perms and any(char not in perm for char in perms):
+                    continue
+                out.append((int(segment["vaddr"]), int(segment["vsize"])))
+            return out
+
+        if spec == "s":
+            payload, _ = self.remote.call_with_meta("symbols", offset=0, count=-1)
+            return [(int(row["ea"]), int(row.get("size") or 0) or None) for row in payload]
+
         raise UsageError(
-            f"unsupported @@@ iterator '{spec}'; supported: = b f F i z S SS"
+            f"unsupported @@@ iterator '{spec}'; supported: = b f F i z S SS G E R m[:rwx] s"
         )
 
     def _iterator_addresses(self, spec: str) -> list[int]:
@@ -483,8 +503,26 @@ class Session:
         if spec == "b":
             payload = self.remote.call("blocks", ea=self.seek)
             return [int(block["start"]) for block in payload]
+        if spec == "E":
+            return [int(row["ea"]) for row in self.remote.call("exports")]
+        if spec == "R":
+            return [int(row["vaddr"]) for row in self.remote.call("relocations")]
+        if spec == "m" or spec.startswith("m:"):
+            perms = spec[2:] if spec.startswith("m:") else None
+            out = []
+            for segment in self.remote.call("segments"):
+                perm = str(segment.get("perm") or "")
+                if perms and any(char not in perm for char in perms):
+                    continue
+                out.append(int(segment["vaddr"]))
+            return out
+        if spec == "s":
+            payload, _ = self.remote.call_with_meta("symbols", offset=0, count=-1)
+            return [int(row["ea"]) for row in payload]
         if spec.startswith(":"):
             return []
+        if spec in ("C:", "c:", "t", "r", "M", "T", "dbt", "dbt*"):
+            raise UsageError(f"@@{spec}: this iterator is not implemented by idare2")
         # Anything else is a flag glob.
         self._ensure_flags()
         return [flag.ea for flag in self.flags.all() if _glob(spec, flag.name)]
