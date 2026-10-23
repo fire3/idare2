@@ -688,6 +688,14 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_tn_lists_noreturn_functions_live(session) -> None:
+    session.failed = False
+    rows = session.run("tn")
+    assert rows
+    assert all(not line.startswith("0x") for line in rows)
+    assert not session.failed
+
+
 def test_tf_reports_a_live_function_signature(session) -> None:
     session.failed = False
     main = next(

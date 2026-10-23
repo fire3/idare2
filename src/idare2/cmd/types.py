@@ -31,6 +31,8 @@ TYPE_DETAIL = [
     ("tf", " name", "function signature (func.<name>.* keys)"),
     ("tfj", " name", "function signature as JSON"),
     ("tfc", " name", "function signature as a C prototype"),
+    ("tn", "[addr]", "list or set noreturn functions"),
+    ("tn-", " addr", "clear a noreturn mark"),
     ("dt", " name [addr]", "read a typed value at an address"),
 ]
 
@@ -68,7 +70,30 @@ def types(session: Session, statement: Statement) -> list[str]:
     if suffix in ("f", "fj", "fc"):
         return _function_signature(session, suffix, argument)
 
+    if suffix in ("n", "n-"):
+        return _noreturn(session, token, argument)
+
     raise UsageError(f"unsupported type command '{token}' (see t?)")
+
+
+def _noreturn(session: Session, token: str, argument: str) -> list[str]:
+    """``tn`` -- list noreturn functions, or mark/unmark one."""
+    if token == "tn" and not argument:
+        return [row["name"] for row in session.remote.call("noreturn_functions")]
+    clearing = token == "tn-"
+    words = argument.split()
+    if not words:
+        raise UsageError("tn- needs at least one function" if clearing else "tn needs an address")
+    if len(words) > 1 and not clearing:
+        raise UsageError("tn takes one address")
+    cmd_module.require_write(session, f"'{token}'")
+    marked = []
+    for word in words:
+        ea = session.resolve(word)
+        payload = session.remote.call("set_noreturn", ea=ea, value=not clearing)
+        if not clearing:
+            marked.append(f"0x{int(payload['ea']):x}")
+    return marked
 
 
 def _function_signature(session: Session, suffix: str, argument: str) -> list[str]:

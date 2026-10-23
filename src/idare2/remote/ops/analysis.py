@@ -450,6 +450,39 @@ def _block_edges(
     return None, None
 
 
+@op("noreturn_functions")
+def noreturn_functions(db: Any) -> list[dict[str, Any]]:
+    """Functions IDA considers noreturn (``tn``)."""
+    out = []
+    for func in db.functions.get_all():
+        try:
+            returns = db.functions.does_return(func)
+        except Exception:
+            returns = True
+        if not returns:
+            out.append(
+                {"ea": int(func.start_ea), "name": db.functions.get_name(func)}
+            )
+    return out
+
+
+@op("set_noreturn", writes=True)
+def set_noreturn(db: Any, ea: int, value: bool = True) -> dict[str, Any]:
+    """Set or clear ``FUNC_NORET`` on the function at ``ea`` (``tn``/``tn-``)."""
+    import ida_funcs
+
+    func = helpers.require_func(db, ea)
+    start = int(func.start_ea)
+    flags = int(ida_funcs.get_func_flags(start))
+    if value:
+        flags |= ida_funcs.FUNC_NORET
+    else:
+        flags &= ~ida_funcs.FUNC_NORET
+    if not ida_funcs.set_func_flags(start, flags):
+        helpers.fail(protocol.IDA_ERROR, f"could not update the flags at 0x{start:x}")
+    return {"ea": start, "noreturn": bool(value)}
+
+
 @op("resize_function", writes=True)
 def resize_function(db: Any, ea: int, end: int) -> dict[str, Any]:
     """Move a function's end (``afu``).  IDA re-analyses the resized body."""

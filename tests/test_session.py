@@ -266,6 +266,11 @@ class FakeRemote:
                     "write": [0x1010, 0x1014],
                 },
             ],
+            "noreturn_functions": lambda: [
+                {"ea": 0x2000, "name": "panic"},
+                {"ea": 0x3000, "name": "die"},
+            ],
+            "set_noreturn": lambda: {"ea": arguments["ea"], "noreturn": arguments["value"]},
             "function_signature": lambda: {
                 "name": "main",
                 "ret": "int",
@@ -670,6 +675,34 @@ def test_afvR_can_filter_by_name() -> None:
     session.run("afvR arg1")
     calls = [args for name, args in remote.calls if name == "var_accesses"]
     assert calls[-1] == {"ea": 0x1000, "name": "arg1"}
+
+
+def test_tn_lists_and_marks_noreturn_functions() -> None:
+    session, remote = make_session()
+    assert session.run("tn") == ["panic", "die"]
+    assert session.run("tn 0x2000") == ["0x2000"]
+    assert ("set_noreturn", {"ea": 0x2000, "value": True}) in remote.calls
+    assert session.run("tn- 0x2000 0x3000") == []
+    assert ("set_noreturn", {"ea": 0x3000, "value": False}) in remote.calls
+
+
+def test_tn_requires_write_access_for_changes() -> None:
+    session, remote = make_session()
+    session.readonly = True
+    session.failed = False
+    session.run("tn 0x2000")
+    assert session.failed
+    assert "set_noreturn" not in remote.operations
+    # Listing stays available in read-only sessions.
+    assert session.run("tn") == ["panic", "die"]
+
+
+def test_tnf_fails_loudly() -> None:
+    session, _remote = make_session()
+    session.failed = False
+    session.run("tnf")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
 
 
 def test_tf_prints_r2_function_keys() -> None:
