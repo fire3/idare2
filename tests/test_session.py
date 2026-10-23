@@ -47,6 +47,12 @@ class FakeRemote:
                 {"ea": 0x2000, "name": "helper"},
             ],
             "read_value": lambda: {"ea": arguments["ea"], "width": 4, "value": 0x11223344},
+            "read_values": lambda: {
+                "ea": arguments["ea"],
+                "width": arguments["width"],
+                "count": arguments["count"],
+                "values": [0xAA] * arguments["count"],
+            },
             "read_bytes": lambda: self._read_bytes(arguments),
             "search": lambda: {
                 "hits": list(self.search_hits),
@@ -536,6 +542,30 @@ def test_write_cache_discard() -> None:
     session.run("wc-")
     assert session.write_cache == []
     assert "patch_many" not in remote.operations
+
+
+def test_x_is_a_px_alias() -> None:
+    session, _remote = make_session()
+    assert session.run("x 4 @ 0x1000") == session.run("px 4 @ 0x1000")
+    assert session.run("x8 4 @ 0x1000") == session.run("px 4 @ 0x1000")
+    assert session.run("xw 2 @ 0x1000") == session.run("pxw 2 @ 0x1000")
+    assert session.run("xq 1 @ 0x1000") == session.run("pxq 1 @ 0x1000")
+
+
+def test_xj_is_a_json_byte_array() -> None:
+    session, _remote = make_session()
+    assert json.loads("\n".join(session.run("xj 4 @ 0x1000"))) == [0xAA] * 4
+
+
+@pytest.mark.parametrize("command", ["xh 4", "x/ 4", "xz", "xb 4"])
+def test_unknown_x_forms_fail_loudly(command: str) -> None:
+    session, remote = make_session()
+    session.failed = False
+    session.run(command)
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported print modifier" in str(session.last_error)
+    assert "read_bytes" not in remote.operations
 
 
 def test_yank_and_paste() -> None:

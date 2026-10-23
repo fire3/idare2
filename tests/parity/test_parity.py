@@ -147,6 +147,22 @@ def px_rows(lines: list[str]) -> list[str]:
 # --------------------------------------------------------------------------
 
 
+def test_x_alias_matches_r2(session, r2) -> None:
+    """``x`` and ``xj`` must agree with r2 byte for byte.
+
+    ``xw``/``xq`` alias our ``pxw``/``pxq``, whose one-value-per-line layout
+    still differs from r2's row-wise words dump (tracked in PROGRESS), so the
+    alias itself is covered by the offline tests instead.
+    """
+    address = 0x10000
+    ours = px_rows(session.run(f"x 64 @ 0x{address:x}"))
+    theirs = px_rows(r2(f"x 64 @ 0x{address:x}"))
+    assert ours and ours == theirs
+    assert json.loads("\n".join(session.run(f"xj 16 @ 0x{address:x}"))) == json.loads(
+        "\n".join(r2(f"xj 16 @ 0x{address:x}"))
+    )
+
+
 def test_hexdump_rows_match(session, r2) -> None:
     """``px`` is pure data formatting, so the rows should be identical."""
     address = 0x10000

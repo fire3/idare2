@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from idare2 import assembler
@@ -200,6 +201,38 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
     if token == "px":
         return fmt_memory.format_hexdump(payload, session)
     raise UsageError(f"unsupported print modifier '{token[1:]}' (see p?)")
+
+
+X_DETAIL = [
+    ("x", "[n]", "hexdump N bytes (same as px)"),
+    ("x8", "[n]", "8-bit hexpair dump (same as px)"),
+    ("xw", "[n]", "32-bit word dump (same as pxw)"),
+    ("xq", "[n]", "64-bit word dump (same as pxq)"),
+    ("xj", "[n]", "byte values as a JSON array"),
+]
+
+_X_ALIASES = {"x": "px", "x8": "px", "xw": "pxw", "xq": "pxq"}
+
+
+@command("x", usage="[n]", summary="print memory (alias of px)", detail=X_DETAIL, json_suffix=True)
+def print_x(session: Session, statement: Statement) -> list[str]:
+    """The r2 ``x`` family: ``x``/``x8`` = ``px``, ``xw``/``xq`` = ``pxw``/``pxq``.
+
+    ``xh`` and the gdb-style ``x/`` forms are not implemented; they fail with
+    the usual usage error instead of printing a different dump.
+    """
+    token = statement.cmd
+    if token == "xj":
+        rest, count, _offset = numeric_args(session, statement)
+        target = session.resolve(rest[0]) if rest else session.seek
+        size = count or 64
+        payload = session.remote.call("read_bytes", ea=target, count=size)
+        return [to_json(list(payload.get("data") or b""))]
+
+    alias = _X_ALIASES.get(token)
+    if alias is None:
+        raise UsageError(f"unsupported print modifier '{token[1:]}' (see px?)")
+    return print_memory(session, replace(statement, cmd=alias))
 
 
 @command("pc[*jqPp]", usage="[n]", summary="C array formats", detail=MEMORY_DETAIL)
