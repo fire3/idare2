@@ -210,6 +210,144 @@ def type_at(db: Any, ea: int) -> dict[str, Any]:
     return {"ea": ea, **_describe(tinfo)}
 
 
+def _scalar_row(
+    db: Any, name: str, tinfo: Any, offset: int, base: int, data: bytes | None
+) -> dict[str, Any]:
+    """One typed value: read it from memory (or ``data``) and describe it."""
+    import struct
+
+    size = _size(tinfo)
+    if data is not None:
+        raw = data[offset : offset + size]
+    else:
+        raw = db.bytes.get_bytes_at(base + offset, size) if size else None
+    raw = bytes(raw) if raw else b""
+    big = False
+    try:
+        import ida_ida
+
+        big = bool(ida_ida.inf_is_be())
+    except Exception:
+        big = False
+    kind = _describe(tinfo)["category"]
+    row: dict[str, Any] = {
+        "name": name,
+        "offset": offset,
+        "size": size,
+        "kind": kind,
+        "type": _text(tinfo),
+    }
+    if kind == "ptr" and len(raw) >= 4:
+        width = 8 if len(raw) >= 8 else 4
+        pointer = int.from_bytes(raw[:width], "big" if big else "little")
+        row["pointer"] = pointer
+        row["text"] = ""
+        try:
+            target = db.bytes.get_bytes_at(pointer, 24)
+        except Exception:
+            target = None
+        if target:
+            text = bytes(target).split(b"\0", 1)[0]
+            row["text"] = "".join(
+                chr(byte) if 0x20 <= byte < 0x7F else f"\\x{byte:02x}" for byte in text
+            )
+        return row
+    if not raw:
+        row["value"] = 0
+        return row
+    if _is_float(tinfo):
+        import struct
+
+        fmt = (">f" if big else "<f") if len(raw) == 4 else (">d" if big else "<d")
+        row["float"] = struct.unpack(fmt, raw[: 4 if len(raw) == 4 else 8])[0]
+        return row
+    if kind in ("scalar", "enum", "bitfield"):
+        unsigned = int.from_bytes(raw, "big" if big else "little")
+        signed = unsigned
+        if _is_signed(tinfo):
+            bits = len(raw) * 8
+            if unsigned >= 1 << (bits - 1):
+                signed = unsigned - (1 << bits)
+        row["value"] = signed
+        row["unsigned"] = unsigned
+        row["signed"] = signed != unsigned
+        if _is_char(tinfo) and len(raw) == 1 and 0x20 <= raw[0] < 0x7F:
+            row["char"] = chr(raw[0])
+        return row
+    row["bytes"] = raw.hex()
+    return row
+
+
+def _is_float(tinfo: Any) -> bool:
+    try:
+        return bool(tinfo.is_floating_point())
+    except Exception:
+        return str(tinfo) in ("float", "double", "long double")
+
+
+def _is_signed(tinfo: Any) -> bool:
+    try:
+        return bool(tinfo.is_signed())
+    except Exception:
+        return False
+
+
+def _is_char(tinfo: Any) -> bool:
+    try:
+        return bool(tinfo.is_char())
+    except Exception:
+        return False
+
+
+@op("type_format")
+def type_format(
+    db: Any, name: str, ea: int | None = None, data_hex: str | None = None
+) -> dict[str, Any]:
+    """Typed values for ``tp``/``tpv``/``tpx``.
+
+    Structs/unions yield one row per member (in declaration order, with their
+    byte offsets); scalars yield a single row at offset 0.  ``data_hex`` reads
+    the values from the given bytes (``tpx``) instead of memory.
+    """
+    tinfo = db.types.get_by_name(name)
+    if tinfo is None:
+        # ``tp int`` and friends name IDA's builtin scalar types, which are
+        # not in the database's named-type list; parse them on the fly.
+        import ida_typeinf
+
+        tinfo = ida_typeinf.tinfo_t()
+        parsed = ida_typeinf.parse_decl(
+            tinfo, None, f"{name} __ire2_tmp;", ida_typeinf.PT_VAR | ida_typeinf.PT_SIL
+        )
+        if parsed is None:
+            helpers.fail(protocol.NOT_FOUND, f"Cannot find {name!r} type")
+    base = int(ea) if ea is not None else int(db.minimum_ea or 0)
+    data = None
+    if data_hex is not None:
+        try:
+            data = bytes.fromhex(data_hex)
+        except ValueError:
+            helpers.fail(protocol.BAD_ARGS, f"not a hexpair string: {data_hex!r}")
+    describe = _describe(tinfo)
+    if describe["category"] in ("struct", "union"):
+        import ida_typeinf
+
+        udt = ida_typeinf.udt_type_data_t()
+        if not tinfo.get_udt_details(udt):
+            helpers.fail(protocol.IDA_ERROR, f"cannot read the layout of {name!r}")
+        rows = [
+            _scalar_row(db, str(member.name), member.type, int(member.offset) // 8, base, data)
+            for member in udt
+        ]
+        return {"name": name, "base": base, "kind": describe["category"], "rows": rows}
+    return {
+        "name": name,
+        "base": base,
+        "kind": describe["category"],
+        "rows": [_scalar_row(db, name, tinfo, 0, base, data)],
+    }
+
+
 @op("type_load_header", writes=True)
 def type_load_header(db: Any, path: str) -> dict[str, Any]:
     """Parse a C header file into the local type library (``to``)."""

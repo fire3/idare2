@@ -162,7 +162,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
 | Metadata | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |
-| Types | `t` `tj` `t*` `ts` `tp` `tc` `tt` `t-` `td` `te` `tf` `tfj` `tfc` `tn` `tn-` `to` `dt` |
+| Types | `t` `tj` `t*` `ts` `tp` `tpv` `tpx` `tc` `tt` `t-` `td` `te` `tf` `tfj` `tfc` `tn` `tn-` `to` `dt` |
 | Flags | `f` `f*` `f,` `f-` `f?` `fq` `fn` `fnj` `fN` `fr` `fx` |
 | Sessions | `S` `Ps` `Po` `P-` `Pj` `P` `y` `yy` `yx` `yt` `yf` `cc` `c1` |
 | Other | `?` `b` `e` `q` `L` `_` |

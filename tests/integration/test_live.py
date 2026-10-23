@@ -184,6 +184,34 @@ def test_afv_reports_hexrays_variables(session) -> None:
     assert not session.failed
 
 
+def test_tp_formats_types_on_a_writable_copy(working_copy: Path) -> None:
+    """``tp``/``tpx`` lay IDA's type layout over memory or literal bytes."""
+    header = working_copy.parent / "tp.h"
+    header.write_text("struct bar { int x; unsigned char y; };\n", encoding="utf-8")
+    try:
+        with nexus.connect(
+            nexus.Target(path=str(working_copy)), timeout=600, linger=0
+        ) as handle:
+            remote = rpc.Remote(handle, timeout=120)
+            info = remote.call("open_summary")
+            session = Session(handle, remote, Config(), info, readonly=False)
+            session.setup()
+            session.run(f"to {header}")
+            session.failed = False
+            session.run("s 0")
+            base = int(session.run("s")[0], 16)
+            rows = session.run("tpx bar 7c05000011")
+            assert rows == [
+                f" x : 0x{base:08x} = 0x57c",
+                f" y : 0x{base + 4:08x} = 0x11",
+            ], rows
+            scalar = session.run("tpx int 7c050000")
+            assert scalar == [f"0x{base:08x} = 0x57c"], scalar
+            assert not session.failed
+    except Idare2Error as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"cannot attach to {working_copy}: {exc}")
+
+
 def test_to_loads_a_header_on_a_writable_copy(working_copy: Path) -> None:
     """``to`` parses a C header into a scratch database's type library."""
     header = working_copy.parent / "types.h"

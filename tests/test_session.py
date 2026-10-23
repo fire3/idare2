@@ -17,6 +17,33 @@ from idare2.errors import CommandError, ReadOnlyError, UnknownCommand, UsageErro
 from idare2.session import Session
 
 
+def _fake_type_format(arguments):
+    name = arguments["name"]
+    if name == "bar":
+        rows = [
+            {"name": "x", "offset": 0, "size": 4, "kind": "scalar",
+             "type": "int", "value": 0x57C, "unsigned": 0x57C, "signed": False},
+            {"name": "y", "offset": 4, "size": 1, "kind": "scalar",
+             "type": "unsigned char", "value": 0x11, "unsigned": 0x11, "signed": False},
+        ]
+        return {"name": name, "base": arguments["ea"], "kind": "struct", "rows": rows}
+    if name == "s":
+        rows = [{"name": "p", "offset": 0, "size": 8, "kind": "ptr",
+                 "type": "char *", "pointer": 0x1000, "text": "hello"}]
+        return {"name": name, "base": arguments["ea"], "kind": "struct", "rows": rows}
+    if name == "c":
+        rows = [{"name": "c", "offset": 0, "size": 1, "kind": "scalar",
+                 "type": "char", "value": 65, "unsigned": 65, "char": "A"}]
+        return {"name": name, "base": arguments["ea"], "kind": "scalar", "rows": rows}
+    if name == "f":
+        rows = [{"name": "f", "offset": 0, "size": 4, "kind": "other",
+                 "type": "float", "float": 1.0}]
+        return {"name": name, "base": arguments["ea"], "kind": "scalar", "rows": rows}
+    rows = [{"name": name, "offset": 0, "size": 4, "kind": "scalar",
+             "type": "int", "value": 0x57C, "unsigned": 0x57C}]
+    return {"name": name, "base": arguments["ea"], "kind": "scalar", "rows": rows}
+
+
 class FakeRemote:
     """Answers the handful of ops the session itself uses."""
 
@@ -286,6 +313,7 @@ class FakeRemote:
                 "errors": 0,
                 "created": ["foo", "color"],
             },
+            "type_format": lambda: _fake_type_format(arguments),
             "noreturn_functions": lambda: [
                 {"ea": 0x2000, "name": "panic"},
                 {"ea": 0x3000, "name": "die"},
@@ -695,6 +723,29 @@ def test_afvR_can_filter_by_name() -> None:
     session.run("afvR arg1")
     calls = [args for name, args in remote.calls if name == "var_accesses"]
     assert calls[-1] == {"ea": 0x1000, "name": "arg1"}
+
+
+def test_tp_and_tpx_format_typed_data() -> None:
+    session, remote = make_session()
+    session.seek = 0x1000
+    assert session.run("tp bar") == [
+        " x : 0x00001000 = 0x57c",
+        " y : 0x00001004 = 0x11",
+    ]
+    assert session.run("tpx bar 7c05000011") == [
+        " x : 0x00001000 = 0x57c",
+        " y : 0x00001004 = 0x11",
+    ]
+    assert session.run("tp name") == ["0x00001000 = 0x57c"]
+    assert ("type_format", {"name": "bar", "ea": 0x1000, "data_hex": "7c05000011"}) in remote.calls
+
+
+def test_tp_renders_pointers_chars_and_floats() -> None:
+    session, _remote = make_session()
+    session.seek = 0x1000
+    assert session.run("tp s") == [' p : 0x00001000 = "hello"']
+    assert session.run("tpx c 41") == ["0x00001000 = 'A'"]
+    assert session.run("tpx f 0000803f") == ["0x00001000 = 1"]
 
 
 def test_to_loads_types_from_a_header() -> None:

@@ -23,6 +23,8 @@ TYPE_DETAIL = [
     ("t*", "[pat]", "list named types as radare2 commands"),
     ("ts", " name", "show one type"),
     ("tp", " [addr]", "the type applied at an address"),
+    ("tpv", " name [addr]", "show data formatted for a named type"),
+    ("tpx", " name hexpairs", "format a byte sequence as a named type"),
     ("tc", " declaration", "parse C declarations into the database"),
     ("tt", " name [@addr]", "apply a type at an address"),
     ("t-", " name", "delete a named type"),
@@ -50,9 +52,6 @@ def types(session: Session, statement: Statement) -> list[str]:
     if suffix == "s":
         return _show(session, argument)
 
-    if suffix == "p":
-        return _type_at(session, argument)
-
     if suffix == "c":
         return _parse(session, argument)
 
@@ -77,7 +76,60 @@ def types(session: Session, statement: Statement) -> list[str]:
     if suffix == "o":
         return _load_header(session, argument)
 
+    if suffix in ("p", "pv", "px"):
+        return _type_value(session, suffix, argument, statement)
+
     raise UsageError(f"unsupported type command '{token}' (see t?)")
+
+
+def _type_value(
+    session: Session, suffix: str, argument: str, statement: Statement
+) -> list[str]:
+    """``tp``/``tpv``/``tpx`` -- format data according to a named type.
+
+    ``tpx`` takes the bytes from its second argument; the others read memory
+    at the temporary seek.  ``tpv`` only affects how scalar rows are shown in
+    r2 (offsets); the row data is the same here.
+    """
+    words = statement.argv
+    if not words:
+        raise UsageError(f"t{suffix} needs a type name")
+    type_name = words[0]
+    rest = words[1:]
+    data_hex = None
+    target = session.seek
+    if suffix == "px":
+        if not rest:
+            raise UsageError("tpx needs a hexpair value")
+        data_hex = rest[0]
+    elif rest:
+        target = session.resolve(rest[0])
+    payload = session.remote.call(
+        "type_format", name=type_name, ea=target, data_hex=data_hex
+    )
+    lines = []
+    width = session.addr_width
+    for row in payload["rows"]:
+        address = int(payload["base"]) + int(row["offset"])
+        prefix = f"{row['name']:>2}" if payload["kind"] != "scalar" else ""
+        head = f"{prefix} : 0x{address:08x} = " if prefix else f"0x{address:0{width}x} = "
+        if "pointer" in row:
+            value = row.get("text")
+            if value:
+                lines.append(f'{head}"{value}"')
+            else:
+                lines.append(f"{head}{row.get('text') or ''}".rstrip())
+        elif "float" in row:
+            number = float(row["float"])
+            lines.append(f"{head}{number:g}" if number.is_integer() else f"{head}{number}")
+        elif row.get("char"):
+            lines.append(f"{head}'{row['char']}'")
+        elif "value" in row:
+            value = int(row.get("unsigned", row["value"]))
+            lines.append(f"{head}0x{value & 0xFFFFFFFF:x}")
+        else:
+            lines.append(f"{head}{row.get('bytes', '')}")
+    return lines
 
 
 def _load_header(session: Session, argument: str) -> list[str]:
