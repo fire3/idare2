@@ -64,6 +64,63 @@ def _wide_variants(text: str) -> list[str]:
     return ["".join(variant) for variant in itertools.product(*choices)]
 
 
+#: Refuse pattern searches over huge ranges rather than buffering everything.
+PATTERN_MAX_BYTES = 1 << 26
+
+
+@op("search_patterns")
+def search_patterns(
+    db: Any, size: int, start: int | None = None, end: int | None = None,
+    limit: int = 64,
+) -> dict[str, Any]:
+    """Repeated fixed-size byte patterns (``/p``).
+
+    Mirrors r2's algorithm: starting at the range start, take ``size`` bytes and
+    look for them later in the buffer; a pattern is reported when found at
+    least twice.  The cursor then advances by ``size`` when something was
+    found (so a repeated record is skipped as a unit) or by one byte
+    otherwise.  Only the first ``limit`` distinct patterns are returned.
+    """
+    first, last = _bounds(db, start, end)
+    if size < 2:
+        helpers.fail(protocol.BAD_ARGS, "pattern size must be greater than 1")
+    if last - first > PATTERN_MAX_BYTES:
+        helpers.fail(
+            protocol.BAD_ARGS,
+            f"pattern search range is larger than {PATTERN_MAX_BYTES} bytes",
+        )
+    raw = db.bytes.get_bytes_at(first, last - first)
+    if raw is None:
+        helpers.fail(protocol.BAD_ADDRESS, f"cannot read 0x{first:x}..0x{last:x}")
+    data = bytes(raw)
+    if len(data) < size:
+        return {"start": first, "end": last, "size": size, "groups": []}
+
+    groups: list[dict[str, Any]] = []
+    seen: set[bytes] = set()
+    cursor = 0
+    while cursor + size <= len(data) and len(groups) < limit:
+        needle = data[cursor : cursor + size]
+        if needle in seen:
+            cursor += 1
+            continue
+        hits = [first + cursor]
+        position = cursor + size
+        while position + size <= len(data):
+            index = data.find(needle, position)
+            if index < 0:
+                break
+            hits.append(first + index)
+            position = index + 1
+        if len(hits) > 1:
+            seen.add(needle)
+            groups.append({"bytes": needle.hex(), "hits": hits})
+            cursor += size
+        else:
+            cursor += 1
+    return {"start": first, "end": last, "size": size, "groups": groups}
+
+
 @op("search")
 def search(
     db: Any,

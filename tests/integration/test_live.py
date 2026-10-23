@@ -688,6 +688,18 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_pattern_search_live(session) -> None:
+    """``/p`` groups repeated byte records on the real database."""
+    session.failed = False
+    first = session.run("afl")[0].split()[0]
+    session.run(f"s {first}")
+    session.config.set("search.from", int(first, 16))
+    session.config.set("search.to", int(first, 16) + 64)
+    lines = session.run("/p 4")
+    assert lines and lines[0].startswith("Searching patterns between 0x")
+    assert not session.failed
+
+
 def test_tn_lists_noreturn_functions_live(session) -> None:
     session.failed = False
     rows = session.run("tn")

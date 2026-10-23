@@ -32,6 +32,7 @@ SEARCH_DETAIL = [
     ("/w", " text", "search for a UTF-16LE wide string"),
     ("/wi", " text", "search for a wide string, ignoring case"),
     ("/a", " asm", "assemble an instruction and search for its bytes"),
+    ("/p", " size", "search for repeated patterns of the given size"),
     ("//", "", "repeat the previous search"),
     ("/+", "", "continue the previous search after its last hit"),
     ("/j", " ...", "the same searches as JSON (append j to the kind)"),
@@ -48,6 +49,7 @@ _KINDS = {
     "w": "wide",
     "wi": "wide",
     "a": "bytes",
+    "p": "patterns",
 }
 
 #: Extra characters that are fixed by the kind itself (``/wi`` ignores case).
@@ -68,6 +70,27 @@ def search(session: Session, statement: Statement) -> list[str]:
         raise UsageError(f"unsupported search modifier '/{kind_token}' (see /?)")
 
     pattern = _pattern(statement.args)
+    if kind_token == "p":
+        if not pattern:
+            raise UsageError("/p needs a pattern size")
+        if as_json:
+            raise UsageError("/p has no JSON form in radare2; drop the j")
+        size = session.eval(pattern)
+        start, end = _range(session)
+        payload = session.remote.call(
+            "search_patterns", size=size, start=start, end=end
+        )
+        lines = [
+            f"Searching patterns between 0x{int(payload['start']):08x} "
+            f"and 0x{int(payload['end']):08x}"
+        ]
+        for index, group in enumerate(payload.get("groups") or []):
+            hits = " ".join(f"0x{int(ea):08x}" for ea in group["hits"])
+            lines.append("")
+            lines.append(f"bytes: {index}: {group['bytes']}")
+            lines.append(f"found: {index}: {hits} ")
+            lines.append(f"count: {index}: {len(group['hits'])}")
+        return lines
     if not pattern:
         raise UsageError(f"/{kind_token} needs a pattern")
     if kind_token == "a":

@@ -147,11 +147,43 @@ def _search_db(data: bytes):
         index = data.find(needle, start, end)
         return index if index >= 0 else None
 
+    def get_bytes_at(ea, count):
+        chunk = data[ea : ea + count]
+        return chunk if chunk else None
+
     return SimpleNamespace(
         minimum_ea=0,
         maximum_ea=len(data),
-        bytes=SimpleNamespace(find_bytes_between=find),
+        bytes=SimpleNamespace(
+            find_bytes_between=find,
+            get_bytes_at=get_bytes_at,
+        ),
     )
+
+
+def test_pattern_search_reports_each_repeated_pattern_once() -> None:
+    """Deterministic grouping: one row per distinct repeated pattern.
+
+    r2 6.2.5's block scanner re-reports the same bytes when a later walk
+    starts mid-record; idare2 reports each pattern once with all of its
+    occurrences, so the hit sets are comparable but the row counts differ.
+    """
+    data = b"ABCD" * 4 + b"XXXX" + b"ABCD" * 2 + b"WXYZ" * 3
+    envelope = dispatch.invoke(_search_db(data), "search_patterns", {"size": 4})
+    assert protocol.is_ok(envelope), envelope
+    groups = envelope["result"]["groups"]
+    assert [(g["bytes"], g["hits"]) for g in groups] == [
+        ("41424344", [0, 4, 8, 12, 20, 24]),
+        ("42434441", [5, 9, 21]),
+        ("43444142", [10, 22]),
+        ("5758595a", [28, 32, 36]),
+    ]
+
+
+def test_pattern_search_needs_a_minimum_size() -> None:
+    envelope = dispatch.invoke(_search_db(b"aa"), "search_patterns", {"size": 1})
+    assert not protocol.is_ok(envelope)
+    assert envelope["error"]["code"] == protocol.BAD_ARGS
 
 
 def test_wide_search_matches_utf16le() -> None:

@@ -60,6 +60,15 @@ class FakeRemote:
                 "values": [0xAA] * arguments["count"],
             },
             "read_bytes": lambda: self._read_bytes(arguments),
+            "search_patterns": lambda: {
+                "start": 0,
+                "end": 0x100,
+                "size": arguments["size"],
+                "groups": [
+                    {"bytes": "6162", "hits": [0, 4, 8]},
+                    {"bytes": "6364", "hits": [2, 6]},
+                ],
+            },
             "search": lambda: {
                 "hits": list(self.search_hits),
                 "kind": arguments["kind"],
@@ -990,6 +999,35 @@ def test_wide_json_reports_the_match_width() -> None:
     payload = json.loads("\n".join(session.run("/wj hi")))
     assert payload["match"] == 4
     assert payload["hits"] == [0x1000, 0x1010]
+
+
+def test_pattern_search_renders_r2_groups() -> None:
+    session, remote = make_session()
+    lines = session.run("/p 2")
+    assert lines == [
+        "Searching patterns between 0x00000000 and 0x00000100",
+        "",
+        "bytes: 0: 6162",
+        "found: 0: 0x00000000 0x00000004 0x00000008 ",
+        "count: 0: 3",
+        "",
+        "bytes: 1: 6364",
+        "found: 1: 0x00000002 0x00000006 ",
+        "count: 1: 2",
+    ]
+    assert (
+        "search_patterns",
+        {"size": 2, "start": 0x1000, "end": 0x2000},
+    ) in remote.calls
+
+
+def test_pattern_search_rejects_bad_sizes_and_json() -> None:
+    session, remote = make_session()
+    for command in ("/p", "/p abc", "/pj 2"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
+    assert "search_patterns" not in remote.operations
 
 
 def test_assembled_search_uses_the_assembler_bytes(monkeypatch) -> None:
