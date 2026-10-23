@@ -235,6 +235,58 @@ def print_x(session: Session, statement: Statement) -> list[str]:
     return print_memory(session, replace(statement, cmd=alias))
 
 
+P6_DETAIL = [
+    ("p6e", "[len]", "base64-encode the block at the seek"),
+    ("p6es", " text", "base64-encode the given text"),
+    ("p6ez", "", "base64-encode the zero-terminated string at the seek"),
+    ("p6d", "[len]", "base64-decode the block at the seek"),
+    ("p6ds", " text", "base64-decode the given text"),
+    ("p6dz", "", "base64-decode the zero-terminated string at the seek"),
+]
+
+
+@command("p6", usage="[de][sz] [arg]", summary="base64 encode/decode", detail=P6_DETAIL)
+def print_base64(session: Session, statement: Statement) -> list[str]:
+    """``p6e``/``p6d`` -- r2's base64 helpers.
+
+    ``s`` takes the data from the argument, ``z`` stops at a NUL byte in the
+    block; otherwise ``[len]`` bytes are read at the seek (blocksize default).
+    """
+    import base64 as b64
+
+    token = statement.cmd[2:]
+    if not token:
+        raise UsageError("p6 needs e (encode) or d (decode); see p6?")
+    action, flags = token[0], token[1:]
+    if action not in ("e", "d") or flags not in ("", "s", "z"):
+        raise UsageError(f"unsupported print modifier 'p6{token}' (see p6?)")
+
+    rest, count, _offset = numeric_args(session, statement)
+    zero_terminated = flags == "z"
+    from_argument = flags == "s"
+
+    if from_argument:
+        text = " ".join(rest)
+        if not text:
+            raise UsageError(f"p6{token} needs an argument")
+        data = text.encode("utf-8")
+    else:
+        length = count or session.blocksize
+        payload = session.remote.call("read_bytes", ea=session.seek, count=length)
+        data = bytes(payload.get("data") or b"")
+        if zero_terminated:
+            data = data.split(b"\0", 1)[0]
+
+    if action == "e":
+        return [b64.b64encode(data).decode("ascii")]
+
+    try:
+        decoded = b64.b64decode(data, validate=True)
+    except Exception:
+        raise UsageError("p6d: invalid base64 stream") from None
+    return [decoded.decode("latin-1")]
+
+
 @command("pc[*jqPp]", usage="[n]", summary="C array formats", detail=MEMORY_DETAIL)
 def print_c_array(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd

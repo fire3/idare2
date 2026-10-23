@@ -688,6 +688,17 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_p6_round_trips_against_the_database(session) -> None:
+    session.failed = False
+    encoded = session.run("p6es hello world")
+    assert encoded == ["aGVsbG8gd29ybGQ="]
+    assert session.run("p6ds aGVsbG8gd29ybGQ=") == ["hello world"]
+    first = session.run("afl")[0].split()[0]
+    encoded_block = session.run(f"p6e 4 @ {first}")
+    assert encoded_block and len(encoded_block[0]) > 0
+    assert not session.failed
+
+
 def test_wide_search_live(session) -> None:
     """``/w`` searches UTF-16LE bytes; each match is two bytes per character."""
     session.failed = False

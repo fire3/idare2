@@ -25,16 +25,22 @@ class FakeRemote:
         self.fail: set[str] = set()
         self.search_hits = [0x1000, 0x1010]
         self.read_floor: int | None = None
+        self.read_data: bytes | None = None
         self.assembly = b"\x90"
 
     def _read_bytes(self, arguments: dict):
         ea = arguments["ea"]
         if self.read_floor is not None and ea < self.read_floor:
             raise CommandError(f"read outside mapped segment at 0x{ea:x}")
+        if self.read_data is not None:
+            data = self.read_data[: arguments["count"]]
+            data += b"\x00" * (arguments["count"] - len(data))
+        else:
+            data = b"\xaa" * arguments["count"]
         return {
             "ea": ea,
             "count": arguments["count"],
-            "data": b"\xaa" * arguments["count"],
+            "data": data,
         }
 
     def call(self, operation: str, **arguments):
@@ -575,6 +581,31 @@ def test_unknown_x_forms_fail_loudly(command: str) -> None:
     assert isinstance(session.last_error, UsageError)
     assert "unsupported print modifier" in str(session.last_error)
     assert "read_bytes" not in remote.operations
+
+
+def test_p6_encodes_and_decodes_base64() -> None:
+    session, _remote = make_session()
+    assert session.run("p6es hello world") == ["aGVsbG8gd29ybGQ="]
+    assert session.run("p6ds aGVsbG8gd29ybGQ=") == ["hello world"]
+    # Four 0xaa bytes encode to "qqqqqg==" (padding included).
+    assert session.run("p6e 4 @ 0x1000") == ["qqqqqg=="]
+
+
+def test_p6_zero_terminated_forms_stop_at_nul() -> None:
+    session, remote = make_session()
+    remote.read_data = b"hi\0there"
+    assert session.run("p6ez") == ["aGk="]
+    remote.read_data = b"aGk=\0junk"
+    assert session.run("p6dz @ 0x1000") == ["hi"]
+
+
+def test_p6_rejects_bad_input() -> None:
+    session, _remote = make_session()
+    for command in ("p6", "p6x", "p6dx", "p6ds !!!", "p6es"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
+        assert isinstance(session.last_error, UsageError)
 
 
 def test_yank_and_paste() -> None:
