@@ -143,6 +143,32 @@ def test_iE_without_the_input_is_empty(session) -> None:
     assert not session.failed
 
 
+def test_afv_reports_hexrays_variables(session) -> None:
+    """``afv``/``afvj`` expose Hex-Rays arguments and stack variables."""
+    session.failed = False
+    lines = session.run("afl")
+    addresses = [line.split()[0] for line in lines]
+    main = next((line.split()[0] for line in lines if line.endswith(" main")), None)
+    candidates = [main] if main else addresses[:20]
+    for address in candidates:
+        session.run(f"s {address}")
+        if session.run("afv"):
+            break
+    else:  # pragma: no cover - depends on the database
+        pytest.skip("no function with Hex-Rays locals")
+
+    payload = json.loads("\n".join(session.run("afvj")))
+    assert set(payload) == {"reg", "sp", "bp"}
+    assert payload["bp"] == []
+    if payload["reg"]:
+        assert set(payload["reg"][0]) == {"name", "kind", "type", "ref"}
+    if payload["sp"]:
+        ref = payload["sp"][0]["ref"]
+        assert set(ref) == {"base", "offset"}
+        assert isinstance(ref["offset"], int)
+    assert not session.failed
+
+
 def test_iD_demangles_a_live_symbol(session) -> None:
     session.failed = False
     payload = json.loads("\n".join(session.run("iDj c++ _Z3foov")))

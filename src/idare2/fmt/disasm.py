@@ -170,6 +170,28 @@ def format_function_info(info: dict[str, Any], session: Any) -> list[str]:
     return [f"{key}: {value}" for key, value in rows if value not in (None, "")]
 
 
+def format_locals(payload: dict[str, Any]) -> list[str]:
+    """``afv`` -- r2's ``arg <type> <name> @ <ref>`` / ``var ...`` rows.
+
+    The HUD form of ``afvd`` is not implemented: it needs the live value of
+    each class, which IDA does not expose the same way.
+    """
+    lines = []
+    for item in payload.get("reg", []):
+        lines.append(f"arg {item['type']} {item['name']} @ {item['ref']}")
+    for item in payload.get("bp", []):
+        ref = item["ref"]
+        lines.append(
+            f"var {item['type']} {item['name']} @ {ref['base']}+0x{int(ref['offset']):x}"
+        )
+    for item in payload.get("sp", []):
+        ref = item["ref"]
+        lines.append(
+            f"var {item['type']} {item['name']} @ {ref['base']}+0x{int(ref['offset']):x}"
+        )
+    return lines
+
+
 def format_blocks(blocks: list[dict[str, Any]], session: Any) -> list[str]:
     """``afb`` -- one line per basic block."""
     width = addr_width(session.info.get("bits"))

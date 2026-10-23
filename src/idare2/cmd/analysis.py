@@ -34,6 +34,8 @@ ANALYSIS_DETAIL = [
     ("afb", "", "list the basic blocks of the current function"),
     ("afc", "", "callers of the current function"),
     ("afC", "", "callees of the current function"),
+    ("afv", "", "local variables and arguments (needs Hex-Rays)"),
+    ("afvj", "", "local variables as JSON (needs Hex-Rays)"),
     ("axt", "[addr]", "cross-references to an address"),
     ("axf", "[addr]", "cross-references from an address"),
     ("axj", "[addr]", "cross-references as JSON"),
@@ -55,6 +57,8 @@ FUNCTION_DETAIL = [
     ("afbj", "", "the basic blocks as JSON"),
     ("afc", "", "callers of the current function"),
     ("afC", "", "callees of the current function"),
+    ("afv", "", "local variables and arguments (needs Hex-Rays)"),
+    ("afvj", "", "local variables as JSON (needs Hex-Rays)"),
 ]
 
 
@@ -149,6 +153,13 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
         payload = session.remote.call(op, ea=target)
         formatter = fmt_xrefs.format_callers if token == "afc" else fmt_xrefs.format_callees
         return formatter(payload, session)
+
+    if token in ("afv", "afvj"):
+        target = session.resolve(rest[0]) if rest else session.seek
+        payload = session.remote.call("function_locals", ea=target)
+        if token.endswith("j"):
+            return [to_json(payload)]
+        return fmt_disasm.format_locals(payload)
 
     raise UsageError(f"unsupported function command '{token}' (see af?)")
 

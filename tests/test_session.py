@@ -199,6 +199,20 @@ class FakeRemote:
                 "signature": "int main(void)",
                 "flags": 0,
             },
+            "function_locals": lambda: {
+                "reg": [
+                    {"name": "arg1", "kind": "reg", "type": "int64_t", "ref": "rdx"},
+                ],
+                "sp": [
+                    {
+                        "name": "var_10h",
+                        "kind": "var",
+                        "type": "int32_t",
+                        "ref": {"base": "rsp", "offset": 0x10},
+                    },
+                ],
+                "bp": [],
+            },
             "graph": lambda: {
                 "name": "main",
                 "addr": arguments["ea"],
@@ -1185,6 +1199,32 @@ def test_json_default_switches_agf_without_touching_agfd() -> None:
     session, _remote = _json_default()
     assert json.loads("\n".join(session.run("agf @ 0x1000")))[0]["name"] == "main"
     assert session.run("agfd @ 0x1000")[0] == "digraph code {"
+
+
+def test_afv_renders_args_and_stack_variables() -> None:
+    """``afv``: r2's `arg <type> <name> @ <ref>` / `var ... @ rsp+0xNN`."""
+    session, remote = make_session()
+    assert session.run("afv") == [
+        "arg int64_t arg1 @ rdx",
+        "var int32_t var_10h @ rsp+0x10",
+    ]
+    payload = json.loads("\n".join(session.run("afvj")))
+    assert payload == {
+        "reg": [{"name": "arg1", "kind": "reg", "type": "int64_t", "ref": "rdx"}],
+        "sp": [
+            {
+                "name": "var_10h",
+                "kind": "var",
+                "type": "int32_t",
+                "ref": {"base": "rsp", "offset": 0x10},
+            }
+        ],
+        "bp": [],
+    }
+    assert remote.calls == [
+        ("function_locals", {"ea": 0x1000}),
+        ("function_locals", {"ea": 0x1000}),
+    ]
 
 
 def test_afb_and_afi_json_forms_are_reachable() -> None:
