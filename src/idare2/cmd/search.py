@@ -31,6 +31,7 @@ SEARCH_DETAIL = [
     ("/r", " regex", "search the string table with a regex"),
     ("/w", " text", "search for a UTF-16LE wide string"),
     ("/wi", " text", "search for a wide string, ignoring case"),
+    ("/a", " asm", "assemble an instruction and search for its bytes"),
     ("//", "", "repeat the previous search"),
     ("/+", "", "continue the previous search after its last hit"),
     ("/j", " ...", "the same searches as JSON (append j to the kind)"),
@@ -46,6 +47,7 @@ _KINDS = {
     "r": "regex",
     "w": "wide",
     "wi": "wide",
+    "a": "bytes",
 }
 
 #: Extra characters that are fixed by the kind itself (``/wi`` ignores case).
@@ -68,6 +70,12 @@ def search(session: Session, statement: Statement) -> list[str]:
     pattern = _pattern(statement.args)
     if not pattern:
         raise UsageError(f"/{kind_token} needs a pattern")
+    if kind_token == "a":
+        # r2's `/a` assembles the text, then searches the resulting bytes.
+        from idare2 import assembler
+
+        raw = assembler.assemble(session, pattern)
+        return _run(session, "bytes", raw.hex(), as_json=as_json)
     return _run(
         session,
         _KINDS[kind_token] + _KIND_FIXED.get(kind_token, ""),

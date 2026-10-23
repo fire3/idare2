@@ -147,6 +147,31 @@ def px_rows(lines: list[str]) -> list[str]:
 # --------------------------------------------------------------------------
 
 
+def _hit_addresses(lines: list[str]) -> list[int]:
+    out = []
+    for line in lines:
+        tokens = line.split()
+        if len(tokens) >= 3 and tokens[0].startswith("0x") and tokens[1].startswith("hit"):
+            out.append(int(tokens[0], 16))
+    return out
+
+
+def test_assembled_search_matches_r2(session, r2) -> None:
+    """``/a nop`` on ARM32 searches the same encoding r2 assembles.
+
+    IDA applies the ELF relocations on load, so a few GOT fixups turn into
+    NOPs that r2 (searching the raw file bytes) never sees: r2's hits must be
+    a subset of ours, not an identical set.
+    """
+    if session.info.get("architecture") != "ARM" or session.info.get("bitness") != 32:
+        pytest.skip("the fixed NOP encoding is ARM32-specific")
+    ours = _hit_addresses(session.run("/a nop"))
+    theirs = _hit_addresses(r2("/a nop"))
+    assert "0000a0e1" in " ".join(session.run("/a nop"))
+    assert theirs
+    assert set(theirs) <= set(ours)
+
+
 def test_x_alias_matches_r2(session, r2) -> None:
     """``x`` and ``xj`` must agree with r2 byte for byte.
 

@@ -892,6 +892,22 @@ def test_wide_json_reports_the_match_width() -> None:
     assert payload["hits"] == [0x1000, 0x1010]
 
 
+def test_assembled_search_uses_the_assembler_bytes(monkeypatch) -> None:
+    """``/a`` assembles the text, then searches those bytes like ``/x``."""
+    import idare2.assembler as assembler_module
+
+    monkeypatch.setattr(
+        assembler_module, "assemble", lambda session, text, ea=0: b"\x01\x00\xa0\xe1"
+    )
+    session, remote = make_session()
+    session.config.set("search.from", 0x1000)
+    session.config.set("search.to", 0x2000)
+    assert session.run("/a nop")
+    search = [args for name, args in remote.calls if name == "search"][-1]
+    assert search["kind"] == "bytes"
+    assert search["pattern"] == "0100a0e1"
+
+
 def test_search_repeat_uses_the_last_query() -> None:
     session, remote = make_session()
     session.config.set("search.from", 0x1000)
