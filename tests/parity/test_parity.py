@@ -156,6 +156,27 @@ def _hit_addresses(lines: list[str]) -> list[int]:
     return out
 
 
+def test_function_signature_matches_r2(session, r2) -> None:
+    """``tfj main`` must agree on return type, arg list and calling convention.
+
+    r2 detects the convention itself (``arm32`` here); IDA reports its own,
+    which we map to r2's names. Argument *names* and locations may differ, so
+    the comparison is on types, sizes and offsets -- the parts both engines
+    derive from the prototype.
+    """
+    ours = json.loads("\n".join(session.run("tfj main")))
+    theirs = json.loads("\n".join(r2("tfj main")))
+    assert ours["name"] == theirs["name"] == "main"
+    assert ours["ret"] == theirs["ret"]
+    assert ours["size"] == theirs["size"]
+    assert len(ours["args"]) == len(theirs["args"])
+    for left, right in zip(ours["args"], theirs["args"], strict=True):
+        # IDA often adds const/volatile qualifiers r2's prototype lacks.
+        assert left["type"].replace("const ", "").replace("volatile ", "") == right["type"]
+        assert left["size"] == right["size"]
+        assert left["offset"] == right["offset"]
+
+
 def test_assembled_search_matches_r2(session, r2) -> None:
     """``/a nop`` on ARM32 searches the same encoding r2 assembles.
 

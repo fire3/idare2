@@ -266,6 +266,17 @@ class FakeRemote:
                     "write": [0x1010, 0x1014],
                 },
             ],
+            "function_signature": lambda: {
+                "name": "main",
+                "ret": "int",
+                "cc": "arm32",
+                "ret_reg": "r0",
+                "args": [
+                    {"type": "int", "name": "argc", "size": 4, "offset": 0, "loc": "r0"},
+                    {"type": "char **", "name": "argv", "size": 4, "offset": 4, "loc": "r1"},
+                ],
+                "size": 8,
+            },
             "resize_function": lambda: {
                 "ea": 0x1000,
                 "end": arguments["end"],
@@ -659,6 +670,38 @@ def test_afvR_can_filter_by_name() -> None:
     session.run("afvR arg1")
     calls = [args for name, args in remote.calls if name == "var_accesses"]
     assert calls[-1] == {"ea": 0x1000, "name": "arg1"}
+
+
+def test_tf_prints_r2_function_keys() -> None:
+    session, _remote = make_session()
+    assert session.run("tf main") == [
+        "func.main.ret=int",
+        "func.main.args=2",
+        "func.main.arg.0=int,argc",
+        "func.main.arg.1=char **,argv",
+    ]
+
+
+def test_tfj_and_tfc_have_r2_shapes() -> None:
+    session, _remote = make_session()
+    payload = json.loads("\n".join(session.run("tfj main")))
+    assert payload["cc"] == "arm32"
+    assert payload["ret_reg"] == "r0"
+    assert payload["args"][1] == {
+        "type": "char **",
+        "name": "argv",
+        "size": 4,
+        "offset": 4,
+        "loc": "r1",
+    }
+    assert session.run("tfc main") == ["int main (int argc, char ** argv);"]
+
+
+def test_tf_uses_the_seek_without_a_name() -> None:
+    session, remote = make_session()
+    session.run("tf")
+    call = [args for name, args in remote.calls if name == "function_signature"][-1]
+    assert call == {"ea": 0x1000}
 
 
 def test_ao_reports_ida_fields_and_skips_r2_only_ones() -> None:

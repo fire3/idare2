@@ -688,6 +688,27 @@ def test_unknown_command(session) -> None:
     assert isinstance(session.last_error, UnknownCommand)
 
 
+def test_tf_reports_a_live_function_signature(session) -> None:
+    session.failed = False
+    main = next(
+        (line.split()[0] for line in session.run("afl") if line.endswith(" main")), None
+    )
+    if main is None:
+        pytest.skip("the database has no main function")
+    lines = session.run(f"tf {main}")
+    assert any(line.startswith("func.main.ret=") for line in lines)
+    assert any(line.startswith("func.main.args=") for line in lines)
+    payload = json.loads("\n".join(session.run(f"tfj {main}")))
+    assert payload["name"] == "main"
+    assert set(payload) == {"name", "ret", "cc", "ret_reg", "args", "size"}
+    for arg in payload["args"]:
+        assert set(arg) == {"type", "name", "size", "offset", "loc"}
+    prototype = session.run(f"tfc {main}")
+    assert prototype and " main (" in prototype[0] and prototype[0].endswith(");")
+    assert prototype[0].startswith(payload["ret"] + " ")
+    assert not session.failed
+
+
 def test_afvR_and_afvW_report_accesses_live(session) -> None:
     """Read/write address lists come from one Hex-Rays ctree walk."""
     session.failed = False

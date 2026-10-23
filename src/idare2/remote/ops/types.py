@@ -59,6 +59,109 @@ def _describe(tinfo: Any) -> dict[str, Any]:
     }
 
 
+#: IDA's calling conventions -> r2's names (``get_cc`` returns an int).
+_CC_NAMES = {
+    48: "cdecl",       # CM_CC_CDECL
+    64: "cdecl",       # CM_CC_ELLIPSIS (vararg cdecl)
+    80: "stdcall",     # CM_CC_STDCALL
+    96: "pascal",      # CM_CC_PASCAL
+    112: "fastcall",   # CM_CC_FASTCALL
+    128: "thiscall",   # CM_CC_THISCALL
+    144: "swift",      # CM_CC_SWIFT
+    160: "spoiled",    # CM_CC_SPOILED
+    176: "golang",     # CM_CC_GOLANG
+    208: "special",    # CM_CC_SPECIALE
+    224: "special",    # CM_CC_SPECIALP
+    240: "special",    # CM_CC_SPECIAL
+    256: "gostk",      # CM_CC_GOSTK
+    257: "rust",       # CM_CC_RUST
+}
+
+
+def _cc_name(cc: int) -> str | None:
+    return _CC_NAMES.get(cc)
+
+
+@op("function_signature")
+def function_signature(db: Any, ea: int) -> dict[str, Any]:
+    """One function prototype in r2's ``tfj`` shape (``tf``).
+
+    IDA stores the return and argument types plus their storage locations, so
+    r2's ret/cc/ret_reg/args/size keys all have an equivalent.  r2's
+    ``*aligned_alloc`` style leading-star names are not reproduced.
+    """
+    import ida_nalt
+    import ida_typeinf
+
+    func = helpers.require_func(db, ea)
+    tif = ida_typeinf.tinfo_t()
+    if not ida_nalt.get_tinfo(tif, func.start_ea) or not tif.is_func():
+        helpers.fail(protocol.NOT_FOUND, f"no function type at 0x{int(func.start_ea):x}")
+    details = ida_typeinf.func_type_data_t()
+    if not tif.get_func_details(details):
+        helpers.fail(protocol.IDA_ERROR, f"cannot read the prototype at 0x{int(func.start_ea):x}")
+
+    cc = int(details.get_cc())
+    ret = details.rettype
+    ret_type = ret.dstr() if ret is not None else "void"
+    ret_loc = getattr(details, "retloc", None)
+    ret_reg = None
+    if ret_loc is not None:
+        try:
+            if ret_loc.is_reg1():
+                ret_reg = _reg_name(int(ret_loc.reg1()))
+        except Exception:
+            ret_reg = None
+
+    offset = 0
+    args = []
+    for index in range(len(details)):
+        arg = details[index]
+        type_name = arg.type.dstr() if arg.type is not None else ""
+        size = int(arg.type.get_size()) if arg.type is not None else 0
+        loc = arg.argloc
+        loc_text = _argloc_text(loc)
+        args.append(
+            {
+                "type": type_name,
+                "name": str(arg.name or ""),
+                "size": size,
+                "offset": offset,
+                "loc": loc_text,
+            }
+        )
+        offset += size
+
+    return {
+        "name": db.functions.get_name(func),
+        "ret": ret_type,
+        "cc": _cc_name(cc),
+        "ret_reg": ret_reg,
+        "args": args,
+        "size": offset,
+    }
+
+
+def _reg_name(reg: int) -> str | None:
+    try:
+        import ida_idp
+
+        return ida_idp.get_reg_name(reg, 8) or None
+    except Exception:
+        return None
+
+
+def _argloc_text(loc: Any) -> str:
+    try:
+        if loc.is_reg1():
+            return _reg_name(int(loc.reg1())) or ""
+        if loc.is_stkoff():
+            return f"stack+0x{int(loc.stkoff()):x}"
+    except Exception:
+        pass
+    return ""
+
+
 @op("types_list")
 def types_list(
     db: Any,

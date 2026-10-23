@@ -28,6 +28,9 @@ TYPE_DETAIL = [
     ("t-", " name", "delete a named type"),
     ("td", " name", "struct or union members"),
     ("te", " name", "enum members"),
+    ("tf", " name", "function signature (func.<name>.* keys)"),
+    ("tfj", " name", "function signature as JSON"),
+    ("tfc", " name", "function signature as a C prototype"),
     ("dt", " name [addr]", "read a typed value at an address"),
 ]
 
@@ -62,7 +65,39 @@ def types(session: Session, statement: Statement) -> list[str]:
     if suffix == "e":
         return _enum_members(session, argument)
 
+    if suffix in ("f", "fj", "fc"):
+        return _function_signature(session, suffix, argument)
+
     raise UsageError(f"unsupported type command '{token}' (see t?)")
+
+
+def _function_signature(session: Session, suffix: str, argument: str) -> list[str]:
+    """``tf``/``tfj``/``tfc`` -- function prototype.
+
+    ``tf`` prints r2's ``func.<name>.ret=`` / ``.args=`` / ``.arg.<n>=`` keys
+    (in r2's hash order, which puts the index digits before the name);
+    ``tfj`` returns the ``tfj <name>`` object; ``tfc`` the C prototype.
+    """
+    target = session.resolve(argument) if argument else session.seek
+    payload = session.remote.call("function_signature", ea=target)
+    name = payload["name"]
+    if suffix == "fj":
+        return [to_json(payload)]
+    if suffix == "fc":
+        args = "".join(
+            f"{arg['type']} {arg['name']}, " if arg["name"] else f"{arg['type']}, "
+            for arg in payload["args"]
+        ).rstrip(", ")
+        return [f"{payload['ret']} {name} ({args});"]
+
+    prefix = f"func.{name}"
+    lines = [f"{prefix}.ret={payload['ret']}", f"{prefix}.args={len(payload['args'])}"]
+    # r2 dumps these keys in sdb hash order (arg.2 can precede arg.0); we print
+    # the argument index numerically, which is stable and easier to read.
+    for index, arg in enumerate(payload["args"]):
+        decl = f"{arg['type']},{arg['name']}" if arg["name"] else arg["type"]
+        lines.append(f"{prefix}.arg.{index}={decl}")
+    return lines
 
 
 def _list(session: Session, suffix: str, pattern: str, statement: Statement) -> list[str]:
