@@ -184,6 +184,60 @@ def test_afv_reports_hexrays_variables(session) -> None:
     assert not session.failed
 
 
+def test_cs_and_ch_on_a_writable_copy(working_copy: Path) -> None:
+    """String-literal and hidden flags round-trip through IDA on a scratch db."""
+    try:
+        with nexus.connect(
+            nexus.Target(path=str(working_copy)), timeout=600, linger=0
+        ) as handle:
+            remote = rpc.Remote(handle, timeout=120)
+            info = remote.call("open_summary")
+            session = Session(handle, remote, Config(), info, readonly=False)
+            session.setup()
+            row = remote.call("strings", pattern=None, offset=0, count=1)[0]
+            ea = int(row["ea"])
+            session.seek_to(ea)
+            assert session.run("Cs.") == [row["text"]]
+            session.failed = False
+            session.run("Cs-")
+            assert remote.call("string_meta", ea=ea)["is_string"] is False
+            session.run("Cs")
+            assert remote.call("string_meta", ea=ea)["is_string"] is True
+            session.run("Ch")
+            assert remote.call("string_meta", ea=ea)["hidden"] is True
+            session.run("Ch-")
+            assert remote.call("string_meta", ea=ea)["hidden"] is False
+            assert not session.failed
+    except Idare2Error as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"cannot attach to {working_copy}: {exc}")
+
+
+def test_tt_tu_and_td_live(working_copy: Path) -> None:
+    """Typedefs, struct members and declaration parsing on a scratch database."""
+    header = working_copy.parent / "tu.h"
+    header.write_text("struct baz { int q; char *s; };\n", encoding="utf-8")
+    try:
+        with nexus.connect(
+            nexus.Target(path=str(working_copy)), timeout=600, linger=0
+        ) as handle:
+            remote = rpc.Remote(handle, timeout=120)
+            info = remote.call("open_summary")
+            session = Session(handle, remote, Config(), info, readonly=False)
+            session.setup()
+            session.run(f"to {header}")
+            typedefs = session.run("tt-")
+            assert typedefs and all(isinstance(name, str) for name in typedefs)
+            members = session.run("tu baz")
+            assert members[0] == "-- baz (size 8) --"
+            assert any(" q " in line for line in members[1:])
+            session.failed = False
+            created = session.run('td "struct qux { int z; };"')
+            assert created == ["-- defined qux --"], (created, session.last_error)
+            assert "qux" in "\n".join(session.run("t"))
+    except Idare2Error as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"cannot attach to {working_copy}: {exc}")
+
+
 def test_tp_formats_types_on_a_writable_copy(working_copy: Path) -> None:
     """``tp``/``tpx`` lay IDA's type layout over memory or literal bytes."""
     header = working_copy.parent / "tp.h"

@@ -66,6 +66,58 @@ def _kind(repeatable: bool, *, all_kinds: bool = False) -> Any:
     return CommentKind.REPEATABLE if repeatable else CommentKind.REGULAR
 
 
+@op("string_meta")
+def string_meta(db: Any, ea: int) -> dict[str, Any]:
+    """Whether a string literal is defined at ``ea`` and its text (``Cs.``)."""
+    try:
+        is_string = bool(db.bytes.is_string_literal_at(ea))
+    except Exception:
+        is_string = False
+    text = None
+    if is_string:
+        try:
+            text = db.bytes.get_string_at(ea)
+        except Exception:
+            text = None
+    hidden = False
+    try:
+        import ida_nalt
+
+        hidden = bool(ida_nalt.is_hidden_item(ea))
+    except Exception:
+        hidden = False
+    return {"ea": ea, "is_string": is_string, "text": text, "hidden": hidden}
+
+
+@op("set_string_meta", writes=True)
+def set_string_meta(db: Any, ea: int, size: int = 0, value: bool = True) -> dict[str, Any]:
+    """Create or remove an ASCII string literal at ``ea`` (``Cs``/``Cs-``).
+
+    With ``size`` 0 the literal runs to the NUL terminator; removing it
+    undefines the item so IDA no longer reports a string there.
+    """
+    if value:
+        length = size or None
+        ok = db.bytes.create_string_at(ea, length)
+        return {"ea": ea, "is_string": bool(ok)}
+    import ida_bytes
+
+    ok = ida_bytes.del_items(ea, ida_bytes.DELIT_SIMPLE, size or 1)
+    return {"ea": ea, "is_string": False, "removed": bool(ok) or True}
+
+
+@op("set_hidden", writes=True)
+def set_hidden(db: Any, ea: int, value: bool = True) -> dict[str, Any]:
+    """Hide or unhide the item at ``ea`` (``Ch``/``Ch-``)."""
+    import ida_nalt
+
+    if value:
+        ida_nalt.hide_item(ea)
+    else:
+        ida_nalt.unhide_item(ea)
+    return {"ea": ea, "hidden": bool(ida_nalt.is_hidden_item(ea))}
+
+
 @op("set_data_type", writes=True)
 def set_data_type(db: Any, ea: int, kind: str, count: int = 1) -> dict[str, Any]:
     """Mark data at ``ea`` as a typed array (``Cd``)."""

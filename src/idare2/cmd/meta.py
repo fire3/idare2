@@ -35,6 +35,12 @@ COMMENT_DETAIL = [
     ("C-", " [len]", "remove comments in a range"),
     ("Cd", " [size] [repeat]", "define data of the given element size"),
     ("Cd.", "", "describe the data at the current address"),
+    ("Ch", " [size]", "hide the item at the current address"),
+    ("Ch-", "", "unhide the item at the current address"),
+    ("Cs.", "", "show the string literal at the current address"),
+    ("Cs.j", "", "show the string literal as JSON"),
+    ("Cs", " [size]", "mark a string literal at the current address"),
+    ("Cs-", "", "remove the string literal at the current address"),
 ]
 
 _SIZES = {"1": "byte", "2": "word", "4": "dword", "8": "qword"}
@@ -78,7 +84,42 @@ def metadata(session: Session, statement: Statement) -> list[str]:
     if suffix == "d.":
         return _data_info(session)
 
+    if suffix == "h":
+        cmd_module.require_write(session, "'Ch'")
+        session.remote.call("set_hidden", ea=session.seek, value=True)
+        return []
+    if suffix == "h-":
+        cmd_module.require_write(session, "'Ch-'")
+        session.remote.call("set_hidden", ea=session.seek, value=False)
+        return []
+
+    if suffix in ("s.", "s.j", "s-", "s", "s*"):
+        return _string_meta(session, suffix, argument)
+
     raise UsageError(f"unsupported metadata command 'C{suffix}' (see C?)")
+
+
+def _string_meta(session: Session, suffix: str, argument: str) -> list[str]:
+    """``Cs.``/``Cs``/``Cs-`` -- the string literal at the seek."""
+    if suffix == "s":
+        cmd_module.require_write(session, "'Cs'")
+        size = session.eval(argument) if argument else 0
+        session.remote.call("set_string_meta", ea=session.seek, size=size, value=True)
+        return []
+    if suffix == "s-":
+        cmd_module.require_write(session, "'Cs-'")
+        session.remote.call("set_string_meta", ea=session.seek, value=False)
+        return []
+    payload = session.remote.call("string_meta", ea=session.seek)
+    if not payload.get("is_string"):
+        return [] if suffix != "s.j" else [to_json(payload)]
+    if suffix == "s.j":
+        return [to_json(payload)]
+    text = payload.get("text") or ""
+    if suffix == "s*":
+        encoded = base64.b64encode(text.encode()).decode()
+        return [f"Cs @ 0x{int(payload['ea']):08x}  # base64:{encoded}"]
+    return [text]
 
 
 def _list(session: Session, suffix: str) -> list[str]:

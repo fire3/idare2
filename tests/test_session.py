@@ -308,6 +308,29 @@ class FakeRemote:
                     "write": [0x1010, 0x1014],
                 },
             ],
+            "string_meta": lambda: {
+                "ea": 0x1000,
+                "is_string": True,
+                "text": "hello",
+                "hidden": False,
+            },
+            "set_string_meta": lambda: {
+                "ea": arguments["ea"],
+                "is_string": arguments["value"],
+            },
+            "set_hidden": lambda: {
+                "ea": arguments["ea"],
+                "hidden": arguments["value"],
+            },
+            "type_typedefs": lambda: ["foo_t", "size_t"],
+            "type_members": lambda: {
+                "name": arguments["name"],
+                "size": 8,
+                "members": [
+                    {"name": "a", "type": "int", "offset": 0, "size": 4, "bitfield": False},
+                    {"name": "b", "type": "char *", "offset": 4, "size": 4, "bitfield": False},
+                ],
+            },
             "type_load_header": lambda: {
                 "path": arguments["path"],
                 "errors": 0,
@@ -723,6 +746,63 @@ def test_afvR_can_filter_by_name() -> None:
     session.run("afvR arg1")
     calls = [args for name, args in remote.calls if name == "var_accesses"]
     assert calls[-1] == {"ea": 0x1000, "name": "arg1"}
+
+
+def test_cs_string_metadata_forms() -> None:
+    session, remote = make_session()
+    assert session.run("Cs.") == ["hello"]
+    payload = json.loads("\n".join(session.run("Cs.j")))
+    assert payload == {"ea": 0x1000, "is_string": True, "text": "hello", "hidden": False}
+    assert session.run("Cs 32") == []
+    assert ("set_string_meta", {"ea": 0x1000, "size": 32, "value": True}) in remote.calls
+    assert session.run("Cs-") == []
+    assert ("set_string_meta", {"ea": 0x1000, "value": False}) in remote.calls
+
+
+def test_ch_hides_and_unhides() -> None:
+    session, remote = make_session()
+    assert session.run("Ch") == []
+    assert ("set_hidden", {"ea": 0x1000, "value": True}) in remote.calls
+    assert session.run("Ch-") == []
+    assert ("set_hidden", {"ea": 0x1000, "value": False}) in remote.calls
+
+
+def test_string_and_hide_writes_need_permission() -> None:
+    session, remote = make_session()
+    session.readonly = True
+    for command in ("Cs", "Cs-", "Ch", "Ch-"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
+    assert "set_string_meta" not in remote.operations
+    assert "set_hidden" not in remote.operations
+
+
+def test_tt_lists_typedefs_and_tu_lists_members() -> None:
+    session, remote = make_session()
+    assert session.run("tt-") == ["foo_t", "size_t"]
+    lines = session.run("tu foo")
+    assert lines[0] == "-- foo (size 8) --"
+    assert lines[1].split()[1] == "a"
+    assert ("type_members", {"name": "foo"}) in remote.calls
+
+
+def test_td_and_tc_parse_declarations() -> None:
+    session, remote = make_session()
+    monkeypatched = {"type_parse": lambda: {"errors": 0, "created": ["baz"]}}
+    remote._extra = None
+    # Wire the parse handler through the same call path a real remote uses.
+    original = remote.call
+
+    def call(operation, **arguments):
+        if operation == "type_parse":
+            return monkeypatched["type_parse"]()
+        return original(operation, **arguments)
+
+    remote.call = call
+    session.failed = False
+    assert session.run('td "struct baz { int q; };"') == ["-- defined baz --"]
+    assert not session.failed
 
 
 def test_tp_and_tpx_format_typed_data() -> None:

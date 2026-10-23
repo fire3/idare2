@@ -372,6 +372,27 @@ def type_load_header(db: Any, path: str) -> dict[str, Any]:
     }
 
 
+@op("type_typedefs")
+def type_typedefs(db: Any) -> list[str]:
+    """Names declared with ``typedef`` (``tt``)."""
+    import ida_typeinf
+
+    til = ida_typeinf.get_idati()
+    out: list[str] = []
+    seen: set[str] = set()
+    for index in range(1, 1 << 16):
+        tinfo = ida_typeinf.tinfo_t()
+        if not tinfo.get_numbered_type(til, index):
+            continue
+        if not tinfo.is_typedef():
+            continue
+        name = str(tinfo.get_type_name() or "")
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
 @op("type_parse", writes=True)
 def type_parse(db: Any, declaration: str) -> dict[str, Any]:
     """Parse C declarations into the database (``tc``).

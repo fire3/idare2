@@ -22,13 +22,15 @@ TYPE_DETAIL = [
     ("tj", "[pat]", "list named types as JSON"),
     ("t*", "[pat]", "list named types as radare2 commands"),
     ("ts", " name", "show one type"),
-    ("tp", " [addr]", "the type applied at an address"),
+    ("tu", " name", "struct or union members"),
+    ("tp", " name [addr]", "format data as a named type"),
     ("tpv", " name [addr]", "show data formatted for a named type"),
     ("tpx", " name hexpairs", "format a byte sequence as a named type"),
     ("tc", " declaration", "parse C declarations into the database"),
+    ("td", " declaration", "parse C declarations into the database"),
     ("tt", " name [@addr]", "apply a type at an address"),
+    ("tt-", "", "list typedef names"),
     ("t-", " name", "delete a named type"),
-    ("td", " name", "struct or union members"),
     ("te", " name", "enum members"),
     ("tf", " name", "function signature (func.<name>.* keys)"),
     ("tfj", " name", "function signature as JSON"),
@@ -52,16 +54,23 @@ def types(session: Session, statement: Statement) -> list[str]:
     if suffix == "s":
         return _show(session, argument)
 
-    if suffix == "c":
+    if suffix in ("c", "d"):
+        # r2 6.2.5: `tc` lists C declarations, `td` parses one; idare2 has the
+        # parser, so both accept a declaration (see PROGRESS §3.4 for tc).
+        if not argument:
+            return _c_declarations(session)
         return _parse(session, argument)
 
     if suffix == "t":
         return _apply(session, argument)
 
+    if suffix == "t-":
+        return _typedefs(session)
+
     if suffix == "-":
         return _delete(session, argument)
 
-    if suffix == "d":
+    if suffix == "u":
         return _members(session, argument)
 
     if suffix == "e":
@@ -262,9 +271,23 @@ def _delete(session: Session, argument: str) -> list[str]:
     return []
 
 
+def _typedefs(session: Session) -> list[str]:
+    """``tt-`` -- list typedef names (r2's ``tt``; see PROGRESS)."""
+    return list(session.remote.call("type_typedefs"))
+
+
+def _c_declarations(session: Session) -> list[str]:
+    """Bare ``tc`` -- the named types as C declarations, sorted."""
+    rows = session.remote.call("types_list", pattern=None, offset=0, count=-1)
+    declarations = sorted(
+        str(row.get("declaration") or row["name"]) + ";\n" for row in rows
+    )
+    return ["".join(declarations)] if declarations else []
+
+
 def _members(session: Session, argument: str) -> list[str]:
     if not argument:
-        raise UsageError("td needs a struct or union name")
+        raise UsageError("tu needs a struct or union name")
     payload = session.remote.call("type_members", name=argument)
     width = max((len(member["name"]) for member in payload["members"]), default=0)
     lines = [f"-- {payload['name']} (size {payload['size']}) --"]

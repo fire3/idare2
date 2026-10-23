@@ -161,8 +161,8 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Analysis | `aa` `aaa` `af` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
-| Metadata | `C` `Cj` `C.` `CC` `CCr` `CCu` `CC.` `CC-` `C-` `Cd` `Cd.` |
-| Types | `t` `tj` `t*` `ts` `tp` `tpv` `tpx` `tc` `tt` `t-` `td` `te` `tf` `tfj` `tfc` `tn` `tn-` `to` `dt` |
+| Metadata | `C` `Cj` `C*` `C.` `CC` `CCr` `CCu` `CC*` `CC.` `CC-` `C-` `Cd` `Cd.` `Ch` `Ch-` `Cs` `Cs.` `Cs.j` `Cs-` `Cs*` |
+| Types | `t` `tj` `t*` `ts` `tu` `tp` `tpv` `tpx` `tc` `td` `tt` `tt-` `t-` `te` `tf` `tfj` `tfc` `tn` `tn-` `to` `dt` |
 | Flags | `f` `f*` `f,` `f-` `f?` `fq` `fn` `fnj` `fN` `fr` `fx` |
 | Sessions | `S` `Ps` `Po` `P-` `Pj` `P` `y` `yy` `yx` `yt` `yf` `cc` `c1` |
 | Other | `?` `b` `e` `q` `L` `_` |
