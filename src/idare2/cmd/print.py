@@ -10,9 +10,10 @@ from idare2 import assembler
 from idare2 import pf as pf_format
 from idare2.cmd import _NUMERIC, command, numeric_args, with_more
 from idare2.errors import Idare2Error, UsageError
+from idare2.fmt import addr_width, fmt_addr, to_json
 from idare2.fmt import disasm as fmt_disasm
+from idare2.fmt import listing as fmt_listing
 from idare2.fmt import memory as fmt_memory
-from idare2.fmt import to_json
 
 if TYPE_CHECKING:
     from idare2.parser import Statement
@@ -27,9 +28,17 @@ DISASM_DETAIL = [
     ("pdb", "", "disassemble the current basic block"),
     ("pdr", "", "recursive disassembly across the function graph"),
     ("pi", "[n]", "print N instructions without the address and byte columns"),
+    ("pdi", "[n]", "like pi, with address and bytes"),
     ("pdl", "[n]", "instruction sizes"),
     ("pdc", "[n]", "pseudo-C decompilation (Hex-Rays)"),
     ("pdq", "[n]", "disassemble N instructions, address and text only"),
+    ("pdC", "[n]", "comments found in N instructions"),
+    ("pdJ", "[n]", "formatted disassembly as JSON"),
+    ("pd,", "[n]", "disassembly as a table"),
+    ("pib", "", "instructions of the current basic block, text only"),
+    ("pif", "", "instructions of the current function, text only"),
+    ("pir", "", "recursive function disassembly, text only"),
+    ("pij", "[n]", "instruction records as JSON"),
 ]
 
 ASSEMBLY_DETAIL = [
@@ -65,8 +74,48 @@ PF_DETAIL = [
 ]
 
 
-def _json_mode(token: str) -> bool:
-    return token.endswith("j")
+#: r2 print modifiers idare2 knows about but deliberately does not implement.
+#: They must fail loudly: the registry's prefix match would otherwise hand them
+#: to the plain ``pd`` renderer and print a different command's output.
+DISASM_UNSUPPORTED = frozenset(
+    {
+        "pds",     # referenced-name summary
+        "pd--",    # context disassembly (needs backwards iteration)
+        "pdk",     # class methods (depends on ic)
+        "pda",     # every possible opcode
+        "pde",     # execution-flow following
+        "pdu",     # until-condition
+        "pd*",     # r2 commands
+        "pdg",     # r2ghidra plugin
+        "pdd",     # r2dec plugin
+        "pdo",     # ESIL to C
+        "pdp",     # ROP pointer following
+        "pd:",     # pseudo-decompiler plugins
+        "pdx",     # pad/pix alias
+        "pia",     # every possible opcode
+        "pie",     # ESIL of instructions
+        "piE",     # ESIL of bytes
+        "piu",     # until an operand type
+        "pix",     # pad/pix alias
+    }
+)
+
+#: Tokens rendered as one instruction per line, without address/bytes columns.
+_TEXT_ONLY = frozenset({"pi", "pI", "pib", "pif", "pir"})
+
+#: Tokens whose payload covers a whole function or basic block.
+_FUNCTION_TOKENS = frozenset({"pdf", "pdfj", "pdr", "pdr.", "pif", "pir"})
+_BLOCK_TOKENS = frozenset({"pdb", "pib"})
+
+#: Everything this handler implements.  Validation happens before any remote
+#: call so an unknown suffix can never silently execute another projection.
+DISASM_IMPLEMENTED = frozenset(
+    {
+        "pd", "pD", "pdj", "pdf", "pdfj", "pdb", "pdr", "pdr.",
+        "pi", "pI", "pib", "pif", "pir", "pij",
+        "pdi", "pid", "pdl", "pdc", "pdcc", "pdq", "pdC", "pdJ", "pd,",
+    }
+)
 
 
 @command(
@@ -78,16 +127,21 @@ def _json_mode(token: str) -> bool:
 )
 def print_disasm(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
+    if token in DISASM_UNSUPPORTED or token not in DISASM_IMPLEMENTED:
+        raise UsageError(f"unsupported print modifier '{token[2:]}' (see pd?)")
+
     rest, count, offset = numeric_args(session, statement)
+    if count is not None and count < 0:
+        raise UsageError("negative counts (backward disassembly) are not supported yet")
     target = session.resolve(rest[0]) if rest else session.seek
 
-    if token.startswith("pd") and token.endswith("c"):
+    if token in ("pdc", "pdcc"):
         return _decompile(session, target, count, offset)
 
     mode = "count"
-    if token in ("pdf", "pdfj", "pdr"):
+    if token in _FUNCTION_TOKENS:
         mode = "function"
-    elif token == "pdb":
+    elif token in _BLOCK_TOKENS:
         mode = "block"
     elif token == "pD":
         mode = "bytes"
@@ -99,10 +153,14 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
         {int(line["ea"]): line.get("comment") or "" for line in payload.get("lines", [])}
     )
 
-    if _json_mode(token):
+    if token in ("pdj", "pdfj"):
         return [to_json(payload)]
+    if token == "pij":
+        return [_instruction_json(payload)]
+    if token == "pdJ":
+        return [_formatted_json(payload)]
 
-    if token == "pi":
+    if token in _TEXT_ONLY:
         return [line["text"] for line in payload.get("lines", [])]
     if token == "pdl":
         return [str(line["size"]) for line in payload.get("lines", [])]
@@ -111,9 +169,108 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
             f"{session.format_addr(int(line['ea']))} {line['text']}"
             for line in payload.get("lines", [])
         ]
+    if token in ("pdi", "pid"):
+        return _pdi_lines(payload, session, target)
+    if token == "pdC":
+        return _comment_lines(payload, session, target)
+    if token == "pd,":
+        return _disasm_table(payload, session, target)
+    if token == "pd":
+        lines = fmt_disasm.format_disasm(payload, session)
+        return with_more(lines, meta)
 
-    lines = fmt_disasm.format_disasm(payload, session)
-    return with_more(lines, meta)
+    raise AssertionError(f"unhandled disassembly token {token!r}")
+
+
+def _instruction_json(payload: dict[str, Any]) -> str:
+    """``pij``: the instruction records, with the fields IDA can provide."""
+    records = []
+    for line in payload.get("lines", []):
+        records.append(
+            {
+                "addr": int(line["ea"]),
+                "size": int(line["size"]),
+                "bytes": bytes(line.get("bytes") or b"").hex(),
+                "disasm": line["text"],
+                "comment": line.get("comment") or "",
+                "jump": int(line["targets"][0]) if line.get("targets") else 0,
+                "type": "call" if line.get("is_call") else (
+                    "jmp" if line.get("is_jump") else "cpu"
+                ),
+            }
+        )
+    return json.dumps(records, separators=(",", ":"))
+
+
+def _formatted_json(payload: dict[str, Any]) -> str:
+    """``pdJ``: ``{"addr", "text"}`` pairs, the shape r2's ``pdJ`` uses."""
+    records = [
+        {
+            "addr": int(line["ea"]),
+            "text": line["text"],
+            "bytes": bytes(line.get("bytes") or b"").hex(),
+            "comment": line.get("comment") or "",
+        }
+        for line in payload.get("lines", [])
+    ]
+    return json.dumps(records, separators=(",", ":"))
+
+
+def _pdi_lines(payload: dict[str, Any], session: Session, target: int) -> list[str]:
+    """``pdi``: address, an empty offset column, bytes, text.
+
+    r2 right-aligns the byte column so the text always starts at column 33;
+    keeping that alignment makes ``pdi`` output line up with ``pd``.
+    """
+    width = addr_width(session.info.get("bits"))
+    lines: list[str] = []
+    func = payload.get("func")
+    if func is not None and int(func["start"]) == target:
+        lines.append(f"{fmt_addr(target, width)}   {func['name']}:")
+    for line in payload.get("lines", []):
+        address = fmt_addr(int(line["ea"]), width)
+        raw = bytes(line.get("bytes") or b"").hex()
+        padding = max(31 - len(address) - len(raw), 1)
+        lines.append(f"{address}{' ' * padding}{raw}  {line['text']}")
+    return lines
+
+
+def _comment_lines(payload: dict[str, Any], session: Session, target: int) -> list[str]:
+    """``pdC``: address + comment for every annotated instruction."""
+    width = addr_width(session.info.get("bits"))
+    lines: list[str] = []
+    func = payload.get("func")
+    if func is not None and int(func["start"]) == target:
+        lines.append(f"{fmt_addr(target, width)}   {func['name']}:")
+        signature = func.get("signature")
+        if signature:
+            lines.append(f"{fmt_addr(target, width)} {signature};")
+    for line in payload.get("lines", []):
+        comment = line.get("comment") or ""
+        if comment:
+            lines.append(f"{fmt_addr(int(line['ea']), width)}   {comment}")
+    return lines
+
+
+def _disasm_table(payload: dict[str, Any], session: Session, target: int) -> list[str]:
+    """``pd,``: the columns IDA can fill (esil/refs/xrefs are r2-only)."""
+    width = addr_width(session.info.get("bits"))
+    headers = ("name", "addr", "bytes", "disasm", "comment")
+    rows: list[list[str]] = []
+    func = payload.get("func")
+    name = func["name"] if func is not None and int(func["start"]) == target else ""
+    for line in payload.get("lines", []):
+        rows.append(
+            [
+                name,
+                fmt_addr(int(line["ea"]), width),
+                bytes(line.get("bytes") or b"").hex(),
+                line["text"],
+                line.get("comment") or "",
+            ]
+        )
+        name = ""
+    return fmt_listing.table(headers, rows)
 
 
 def _decompile(session: Session, target: int, count: int | None, offset: int) -> list[str]:

@@ -726,6 +726,93 @@ def test_p_equal_rejects_unimplemented_modes() -> None:
         assert isinstance(session.last_error, UsageError)
 
 
+def test_pdi_aligns_bytes_and_text_like_r2() -> None:
+    session, _remote = make_session()
+    lines = session.run("pdi 1 @ 0x1000")
+    assert lines == [
+        "0x00001000             00b0a0e3  MOV R11, #0",
+    ]
+    assert lines[0].index("00b0a0e3") == 23
+    assert lines[0].index("MOV R11") == 33
+
+
+def test_pi_family_text_only_forms() -> None:
+    session, _remote = make_session()
+    for command in ("pi 1", "pI 1", "pib 1", "pif 1", "pir 1"):
+        assert session.run(command) == ["MOV R11, #0"], command
+
+
+def test_pd_projections_and_json_forms() -> None:
+    session, _remote = make_session()
+    assert session.run("pdq 1 @ 0x1000") == ["0x00001000 MOV R11, #0"]
+    assert session.run("pdl 1 @ 0x1000") == ["4"]
+    assert session.run("pdC 1 @ 0x1000") == []
+
+    rows = json.loads("\n".join(session.run("pij 1 @ 0x1000")))
+    assert rows[0]["addr"] == 0x1000
+    assert rows[0]["bytes"] == "00b0a0e3"
+    assert rows[0]["disasm"] == "MOV R11, #0"
+    assert rows[0]["type"] == "cpu"
+
+    formatted = json.loads("\n".join(session.run("pdJ 1 @ 0x1000")))
+    assert formatted[0]["addr"] == 0x1000
+    assert formatted[0]["text"] == "MOV R11, #0"
+
+
+def test_pd_table_uses_the_columns_ida_can_fill() -> None:
+    session, _remote = make_session()
+    lines = session.run("pd, 1 @ 0x1000")
+    assert lines[0].split() == ["name", "addr", "bytes", "disasm", "comment"]
+    assert "0x00001000" in lines[2]
+    assert "00b0a0e3" in lines[2]
+    assert "MOV R11, #0" in lines[2]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pds 1",
+        "pd-- 1",
+        "pdk 1",
+        "pda 1",
+        "pde 1",
+        "pdu 1",
+        "pd* 1",
+        "pdg 1",
+        "pdd 1",
+        "pdo 1",
+        "pdp 1",
+        "pd: 1",
+        "pdx 1",
+        "pia 1",
+        "pie 1",
+        "piE 1",
+        "piu 1",
+        "pix 1",
+        "pdzz 1",
+    ],
+)
+def test_unimplemented_pd_suffixes_fail_loudly(command: str) -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run(f"{command} @ 0x1000")
+    assert session.failed, command
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported print modifier" in str(session.last_error)
+    assert "disasm" not in remote.operations
+
+
+def test_pd_rejects_negative_counts_instead_of_disassembling_everything() -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run("pd -1")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "disasm" not in remote.operations
+
+
 def test_afvR_and_afvW_list_variable_accesses() -> None:
     session, remote = make_session()
     assert session.run("afvR") == [
