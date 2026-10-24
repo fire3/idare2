@@ -61,9 +61,28 @@ MEMORY_DETAIL = [
     ("pcP", "[n]", "C array of bytes as a Python struct.pack"),
     ("ps", "[n]", "string at the current offset"),
     ("psw", "[n]", "wide (UTF-16) string"),
-    ("pv", "[n]", "value of the given size (1, 2, 4, 8)"),
+    ("psz", "[n]", "zero-terminated string"),
+    ("psp", "[n]", "Pascal (length-prefixed) string"),
+    ("psW", "[n]", "wide (UTF-32) string"),
+    ("psu", "[n]", "UTF-16 string as \\uXXXX escapes"),
+    ("psx", "[n]", "string with every byte escaped"),
+    ("psn", "[n]", "string up to the first newline"),
+    ("pv", "[n]", "value(s) of the given size"),
+    ("pvu", "[n]", "unsigned decimal value(s)"),
+    ("pvd", "[n]", "signed decimal value(s)"),
+    ("pvp", "[n]", "pointer-sized value(s)"),
+    ("pvj", "[n]", "value(s) as JSON"),
     ("ph", "[algo] [n]", "hash of a block; bare `ph` lists the algorithms"),
 ]
+
+#: ``ps`` forms idare2 implements (without the trailing ``j``).
+_PS_FORMS = frozenset({"", "w", "z", "p", "W", "u", "x", "n"})
+#: r2 ``ps`` forms that need semantics IDA cannot provide.
+_PS_UNSUPPORTED = frozenset({"b", "i", "q", "s", "o", "+", "a"})
+
+#: ``pv`` width/flag combinations are parsed by :func:`_pv_spec`; these need a
+#: byte reordering or a display mode idare2 does not implement.
+_PV_UNSUPPORTED = frozenset({"e", "e4", "h"})
 
 PF_DETAIL = [
     ("pf", "<fmt> [name ...]", "print formatted data (pf.<name> applies a saved format)"),
@@ -314,16 +333,10 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
         return [os.getcwd()]
 
     if token.startswith("ps"):
-        encoding = "utf16" if token == "psw" else "auto"
-        payload = session.remote.call(
-            "read_string", ea=target, max_length=count or 4096, encoding=encoding
-        )
-        return fmt_memory.format_string(payload, session)
+        return _print_string(session, token, target, count)
 
     if token.startswith("pv"):
-        size = _value_width(token, width)
-        payload = session.remote.call("read_value", ea=target, width=size)
-        return fmt_memory.format_value(payload, session)
+        return _print_values(session, token, target, count, width)
 
     if token.startswith("px") and token not in ("px", "pxw", "pxq", "pxd", "pxu"):
         raise UsageError(f"unsupported print modifier '{token[2:]}' (see px?)")
@@ -358,6 +371,211 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
     if token == "px":
         return fmt_memory.format_hexdump(payload, session)
     raise UsageError(f"unsupported print modifier '{token[1:]}' (see p?)")
+
+
+def _print_string(
+    session: Session, token: str, target: int, count: int | None
+) -> list[str]:
+    """``ps``/``psz``/``psW``/... -- every form either works or fails loudly."""
+    body = token[2:]
+    json_mode = body.endswith("j")
+    if json_mode:
+        body = body[:-1]
+    if body not in _PS_FORMS:
+        raise UsageError(f"unsupported print modifier '{token[2:]}' (see ps?)")
+
+    payload = session.remote.call(
+        "read_bytes", ea=target, count=count or session.blocksize
+    )
+    text, kind = _decode_string(bytes(payload.get("data") or b""), body)
+
+    if json_mode:
+        return [json.dumps(_string_record(text, target, kind, session))]
+    return [text]
+
+
+def _decode_string(data: bytes, form: str) -> tuple[str, str]:
+    """Decode the bytes the way r2's ``ps`` family does.
+
+    r2 reads a NUL-terminated C string for ``ps``/``psz`` and istelf escapes
+    bytes for the wide/escape forms -- it does not ask the loader to decode
+    anything.  That matters here: IDA's ``get_string_at`` happily returns a
+    whole run of adjacent literals, which is not what ``ps`` prints.
+    """
+    if form in ("", "z"):
+        return data.split(b"\0", 1)[0].decode("utf-8", "replace"), "ascii"
+    if form == "n":
+        return data.split(b"\n", 1)[0].decode("latin-1"), "ascii"
+    if form == "p":
+        if not data:
+            return "", "ascii"
+        length = data[0]
+        return data[1 : 1 + length].decode("utf-8", "replace"), "ascii"
+    if form == "x":
+        return _escape_bytes(data), "ascii"
+    if form == "u":
+        return _utf16_escape(data), "utf16"
+    if form == "w":
+        return _decode_wide(data, 2), "utf16"
+    if form == "W":
+        return _decode_wide(data, 4), "utf32"
+    raise AssertionError(f"unhandled ps form {form!r}")
+
+
+def _escape_bytes(data: bytes) -> str:
+    """r2's ``R_PRINT_STRING_ESC_NL``: printable bytes stay, the rest escape."""
+    out: list[str] = []
+    for byte in data:
+        if byte == 0x5C:
+            out.append("\\\\")
+        elif byte == 0x0A:
+            out.append("\\n")
+        elif byte == 0x0D:
+            out.append("\\r")
+        elif byte == 0x09:
+            out.append("\\t")
+        elif 0x20 <= byte <= 0x7E:
+            out.append(chr(byte))
+        else:
+            out.append(f"\\x{byte:02x}")
+    return "".join(out)
+
+
+def _utf16_escape(data: bytes) -> str:
+    """``psu``: r2's ``r_str_utf16_encode`` escapes every non-ASCII byte."""
+    out: list[str] = []
+    for byte in data:
+        if byte == 0x5C:
+            out.append("\\\\")
+        elif byte == 0x22:
+            out.append('\\"')
+        elif 0x20 <= byte <= 0x7E:
+            out.append(chr(byte))
+        else:
+            out.append(f"\\u00{byte:02x}")
+    return "".join(out)
+
+
+def _decode_wide(data: bytes, unit: int) -> str:
+    """r2's wide/wide32 renderer: skip leading NULs, print the low byte.
+
+    ``unit=2`` stops at the first NUL code unit (r2's WIDE|ZEROEND); ``unit=4``
+    skips up to three leading NULs and then walks every byte, so the nonzero
+    bytes inside a UTF-32 code unit still show up.
+    """
+    out: list[str] = []
+    index = 0
+    length = len(data)
+    while index < length:
+        if unit == 2:
+            if data[index] == 0:
+                break
+        else:
+            start = index
+            while start < min(index + unit, length) and data[start] == 0:
+                start += 1
+            index = start
+            if index >= length:
+                break
+            if data[index] == 0:
+                break
+        byte = data[index]
+        if byte == 0x5C:
+            out.append("\\\\")
+        elif byte == 0x0A:
+            out.append("\n")
+        elif 0x20 <= byte <= 0x7E:
+            out.append(chr(byte))
+        else:
+            out.append(f"\\x{byte:02x}")
+        index += unit if unit == 2 else 1
+    return "".join(out)
+
+
+def _string_record(
+    text: str, ea: int, kind: str, session: Session
+) -> dict[str, Any]:
+    """The ``psj`` object, with the fields IDA can answer."""
+    return {
+        "string": text,
+        "offset": ea,
+        "section": _section_at(session, ea),
+        "length": len(text),
+        "type": kind,
+    }
+
+
+def _section_at(session: Session, ea: int) -> str:
+    for segment in session.search_segments():
+        start = segment.get("vaddr", segment.get("start"))
+        end = segment.get("end")
+        if end is None:
+            start = int(start)
+            end = start + int(segment.get("vsize", 0))
+        if int(start) <= ea < int(end):
+            return str(segment.get("name") or "")
+    return ""
+
+
+def _print_values(
+    session: Session,
+    token: str,
+    target: int,
+    count: int | None,
+    bits: int,
+) -> list[str]:
+    """``pv`` family: ``[width][u|d|j]`` with either order, one line per value."""
+    body = token[2:]
+    json_mode = body.endswith("j")
+    if json_mode:
+        body = body[:-1]
+
+    if body == "z":
+        return _print_string(
+            session, "ps" + ("j" if json_mode else ""), target, count
+        )
+    if body in _PV_UNSUPPORTED:
+        raise UsageError(f"unsupported print modifier '{token[2:]}' (see pv?)")
+
+    width: int | None = None
+    mode = "hex"
+    pointer = False
+    for char in body:
+        if char in "1248" and width is None:
+            width = int(char)
+        elif char in "ud" and mode == "hex":
+            mode = char
+        elif char == "p" and not pointer and width is None:
+            pointer = True
+        else:
+            raise UsageError(f"unsupported print modifier '{token[2:]}' (see pv?)")
+
+    if width is None:
+        width = 8 if bits == 64 else 4
+    amount = 1 if count is None else count
+    if amount < 0:
+        raise UsageError("pv needs a non-negative count")
+
+    payload = session.remote.call(
+        "read_values", ea=target, count=amount, width=width
+    )
+    values = [int(value) for value in payload.get("values") or []]
+    if json_mode:
+        rows = [
+            {"value": value, "string": "", "address": target + index * width}
+            for index, value in enumerate(values)
+        ]
+        return [json.dumps(rows)]
+    if mode == "u":
+        return [str(value) for value in values]
+    if mode == "d":
+        return [str(_signed_value(value, width)) for value in values]
+    return [f"0x{value:0{width * 2}x}" for value in values]
+
+
+def _signed_value(value: int, width: int) -> int:
+    limit = 1 << (width * 8)
+    return value - limit if value >= limit >> 1 else value
 
 
 X_DETAIL = [

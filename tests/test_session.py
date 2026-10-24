@@ -80,6 +80,12 @@ class FakeRemote:
                 {"ea": 0x2000, "name": "helper"},
             ],
             "read_value": lambda: {"ea": arguments["ea"], "width": 4, "value": 0x11223344},
+            "read_string": lambda: {
+                "ea": arguments["ea"],
+                "text": "hello",
+                "length": 5,
+                "encoding": arguments.get("encoding", "auto"),
+            },
             "read_values": lambda: {
                 "ea": arguments["ea"],
                 "width": arguments["width"],
@@ -1119,6 +1125,91 @@ def test_p6_rejects_bad_input() -> None:
         session.run(command)
         assert session.failed, command
         assert isinstance(session.last_error, UsageError)
+
+
+def test_pv_prints_one_value_per_line_like_r2() -> None:
+    session, remote = make_session()
+    assert session.run("pv 2 @ 0x1000") == ["0x000000aa", "0x000000aa"]
+    assert session.run("pv1 2 @ 0x1000") == ["0xaa", "0xaa"]
+    assert session.run("pv8 1 @ 0x1000") == ["0x00000000000000aa"]
+    assert remote.calls[-1][1]["width"] == 8
+
+
+def test_pv_unsigned_signed_and_pointer_modes() -> None:
+    session, _remote = make_session()
+    assert session.run("pvu 2 @ 0x1000") == ["170", "170"]
+    assert session.run("pvd1 2 @ 0x1000") == ["-86", "-86"]
+    assert session.run("pv1d 1 @ 0x1000") == ["-86"]
+    assert session.run("pvp 1 @ 0x1000") == ["0x000000aa"]
+
+
+def test_pv_json_and_string_alias() -> None:
+    session, remote = make_session()
+    rows = json.loads("\n".join(session.run("pv4j 2 @ 0x1000")))
+    assert rows == [
+        {"value": 0xAA, "string": "", "address": 0x1000},
+        {"value": 0xAA, "string": "", "address": 0x1004},
+    ]
+    remote.read_data = b"hello\0junk"
+    assert session.run("pvz @ 0x1000") == ["hello"]
+    payload = json.loads("\n".join(session.run("pvzj @ 0x1000")))
+    assert payload["string"] == "hello"
+    assert payload["type"] == "ascii"
+
+
+def test_ps_variants_decode_the_requested_encoding() -> None:
+    session, remote = make_session()
+    remote.read_data = b"hi\0there"
+    assert session.run("psz 8 @ 0x1000") == ["hi"]
+    assert session.run("ps 8 @ 0x1000") == ["hi"]
+    remote.read_data = b"\x03abcjunk"
+    assert session.run("psp 8 @ 0x1000") == ["abc"]
+    remote.read_data = b"line\nrest"
+    assert session.run("psn 8 @ 0x1000") == ["line"]
+    remote.read_data = b"\x41\x00\x42\x00"
+    assert session.run("psu 4 @ 0x1000") == ["A\\u0000B\\u0000"]
+    assert session.run("psx 2 @ 0x1000") == ["A\\x00"]
+    remote.read_data = b"A\0\0\0B\0\0\0"
+    assert session.run("psW 8 @ 0x1000") == ["AB"]
+    remote.read_data = b"h\0i\0"
+    assert session.run("psw 4 @ 0x1000") == ["hi"]
+
+
+def test_ps_stops_at_the_first_nul_instead_of_returning_a_whole_blob() -> None:
+    session, remote = make_session()
+    remote.read_data = b"action.c\0websValid(wp)\0"
+    assert session.run("ps 32 @ 0x1000") == ["action.c"]
+
+
+def test_ps_json_reports_section_and_length() -> None:
+    session, remote = make_session()
+    remote.read_data = b"hello\0junk"
+    payload = json.loads("\n".join(session.run("psj @ 0x1000")))
+    assert payload == {
+        "string": "hello",
+        "offset": 0x1000,
+        "section": ".text",
+        "length": 5,
+        "type": "ascii",
+    }
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "psb", "psi", "psq", "pss", "pso", "ps+", "psa", "pszz",
+        "pve", "pvh", "pvzz", "pvx",
+    ],
+)
+def test_unimplemented_ps_pv_suffixes_fail_loudly(command: str) -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run(f"{command} @ 0x1000")
+    assert session.failed, command
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported print modifier" in str(session.last_error)
+    assert not {"read_bytes", "read_string", "read_values"} & set(remote.operations)
 
 
 def test_yank_and_paste() -> None:
