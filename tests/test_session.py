@@ -1327,6 +1327,59 @@ def test_p8_projections() -> None:
     assert session.run("p8x 4 @ 0x1000") == ["aaaa", "aaaa"]
 
 
+def test_pc_prints_two_columns() -> None:
+    session, _remote = make_session()
+    lines = session.run("pC 1 @ 0x1000")
+    assert len(lines) == 1
+    assert lines[0].startswith("0x00001000 MOV R11, #0")
+    assert lines[0].count("0x00001000") == 1
+
+
+def test_pa_prints_address_type_size_and_text() -> None:
+    session, _remote = make_session()
+    assert session.run("pA 2 @ 0x1000") == [
+        "0x00001000 null 4 mov r0, r1",
+        "0x00001004 jmp 4 mov r0, r1",
+    ]
+
+
+def test_pattern_generators() -> None:
+    session, _remote = make_session()
+    session.seek = 0x1000
+    assert session.run("pp0 4") == ["00000000"]
+    assert session.run("ppf 4") == ["ffffffff"]
+    assert session.run("pp1 4") == ["00010203"]
+    assert session.run("pp2 4") == ["1000100110021003"]
+    assert session.run("ppa 8") == ["AAAA BAAA CAAA DAAA EAAA FAAA GAAA HAAA "]
+    assert session.run("ppn 8") == [
+        "0000 1000 2000 3000 4000 5000 6000 7000 "
+    ]
+    assert session.run("ppd 8")[0].startswith("4141")
+
+
+def test_po_transforms_the_block() -> None:
+    session, remote = make_session()
+    remote.read_data = b"\xaa\xaa"
+    lines = "\n".join(session.run("poA 0f -n 2 @ 0x1000"))
+    assert "0a0a" in lines
+    lines = "\n".join(session.run("pox ff -n 2 @ 0x1000"))
+    assert "5555" in lines
+    lines = "\n".join(session.run("po2 0000 -n 2 @ 0x1000"))
+    assert "aaaa" in lines
+
+
+@pytest.mark.parametrize("command", ["pCz", "pCa", "pAq", "ppq", "poS", "poD"])
+def test_unimplemented_pc_pp_po_forms_fail_loudly(command: str) -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run(f"{command} @ 0x1000")
+    assert session.failed, command
+    assert isinstance(session.last_error, UsageError)
+    assert "print modifier" in str(session.last_error)
+    assert not remote.operations
+
+
 def test_p8_block_and_function_forms_use_their_own_ranges() -> None:
     session, remote = make_session()
     assert session.run("p8b @ 0x1000") == ["aa" * 8]

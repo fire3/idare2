@@ -41,6 +41,251 @@ DISASM_DETAIL = [
     ("pij", "[n]", "instruction records as JSON"),
 ]
 
+PC_DETAIL = [
+    ("pC", "[rows]", "disassemble in columns"),
+    ("pA", "[n]", "address, type, size and disassembly"),
+]
+
+PC_UNSUPPORTED = frozenset({"pCa", "pCA", "pCc", "pCd", "pCD", "pCx", "pCw"})
+
+
+@command(
+    "pC",
+    usage="[rows]",
+    summary="disassemble in columns",
+    detail=PC_DETAIL,
+    suffixes=frozenset({"", "a", "A", "c", "d", "D", "x", "w"}),
+    suffix_label="print modifier",
+    suffix_help="pC?",
+)
+def print_columns(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    if token in PC_UNSUPPORTED:
+        raise UsageError(f"unsupported print modifier '{token}' (see pC?)")
+    rest, rows, offset = numeric_args(session, statement)
+    target = session.resolve(rest[0]) if rest else session.seek
+    per_column = rows if rows is not None else 16
+    if per_column <= 0:
+        raise UsageError("pC needs a positive row count")
+    columns = 2
+    payload, _meta = session.remote.call_with_meta(
+        "disasm", ea=target, count=per_column * columns, offset=offset, mode="count"
+    )
+    width = addr_width(session.info.get("bits"))
+    cells = [
+        f"{fmt_addr(int(line['ea']), width)} {line['text']}"
+        for line in payload.get("lines", [])
+    ]
+    left_cells = cells[:per_column]
+    func = payload.get("func")
+    if func is not None and int(func["start"]) == target:
+        left_cells = [f"{fmt_addr(target, width)}   {func['name']}:"] + left_cells
+    right_cells = cells[per_column : per_column * 2]
+    column_width = max((len(cell) for cell in left_cells), default=0) + 2
+    lines: list[str] = []
+    for index in range(max(len(left_cells), len(right_cells))):
+        left = left_cells[index] if index < len(left_cells) else ""
+        right = right_cells[index] if index < len(right_cells) else ""
+        lines.append(f"{left:<{column_width}}{right}".rstrip())
+    return lines
+
+
+@command(
+    "pA",
+    usage="[n]",
+    summary="address, type, size and disassembly",
+    detail=PC_DETAIL,
+    suffixes=frozenset({""}),
+    suffix_label="print modifier",
+    suffix_help="pA?",
+)
+def print_address_type(session: Session, statement: Statement) -> list[str]:
+    rest, count, _offset = numeric_args(session, statement)
+    target = session.resolve(rest[0]) if rest else session.seek
+    rows = session.remote.call("op_info_many", ea=target, count=count or 1)
+    width = addr_width(session.info.get("bits"))
+    return [
+        f"{fmt_addr(int(row['address']), width)} {row.get('type') or 'cpu'} "
+        f"{row.get('size', 0)} {row.get('disasm') or row.get('opcode') or ''}"
+        for row in rows
+    ]
+
+
+PP_DETAIL = [
+    ("pp0", "[n]", "zeros"),
+    ("pp1", "[n]", "incremental byte pattern"),
+    ("pp2", "[n]", "incremental word pattern"),
+    ("pp4", "[n]", "incremental dword pattern"),
+    ("pp8", "[n]", "incremental qword pattern"),
+    ("ppa", "[n]", "alphabet pattern"),
+    ("ppal", "[n]", "lowercase alphabet pattern"),
+    ("ppd", "[n]", "de Bruijn pattern"),
+    ("ppf", "[n]", "0xff fill"),
+    ("ppn", "[n]", "numeric pin pattern"),
+]
+
+PP_TOKENS = frozenset({"pp0", "pp1", "pp2", "pp4", "pp8", "ppa", "ppal", "ppau", "ppd", "ppf", "ppn"})
+
+
+@command(
+    "pp",
+    usage="[0|1|2|4|8|a|d|f|n] [len]",
+    summary="print patterns",
+    detail=PP_DETAIL,
+    suffixes=frozenset({"0", "1", "2", "4", "8", "a", "al", "au", "d", "f", "n"}),
+    suffix_label="print modifier",
+    suffix_help="pp?",
+)
+def print_pattern(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    if token not in PP_TOKENS:
+        raise UsageError(f"unsupported print modifier '{token}' (see pp?)")
+    rest, count, _offset = numeric_args(session, statement)
+    if rest:
+        raise UsageError(f"{token} takes only a length")
+    length = count if count is not None else session.blocksize
+    if length <= 0:
+        raise UsageError(f"{token} needs a positive length")
+
+    if token == "pp0":
+        data = bytes(length)
+    elif token == "ppf":
+        data = b"\xff" * length
+    elif token in ("pp1", "pp2", "pp4", "pp8"):
+        unit = 1 if token == "pp1" else int(token[2])
+        units = count if count is not None else max(session.blocksize // unit, 1)
+        mask = (1 << (unit * 8)) - 1
+        value = session.seek & mask
+        chunks = []
+        for _ in range(units):
+            chunks.append(value.to_bytes(unit, "big"))
+            value = (value + 1) & mask
+        data = b"".join(chunks)
+    elif token in ("ppa", "ppal", "ppau"):
+        # r2 6.2.5 prints uppercase for ppal too (measured); preserve that.
+        base = 0x41
+        units = count if count is not None else max(session.blocksize // 4, 1)
+        groups = [
+            chr(base + index % 26) + chr(base) * 3
+            for index in range(units)
+        ]
+        return [" ".join(groups) + " "]
+    elif token == "ppn":
+        units = count if count is not None else max(session.blocksize // 4, 1)
+        return [
+            " ".join(f"{(index * 0x1000) & 0xFFFF:04x}" for index in range(units))
+            + " "
+        ]
+    else:  # ppd
+        data = _debruijn(length).encode("ascii")
+    return [data.hex()]
+
+
+def _debruijn(length: int) -> str:
+    """r2's ``ppd`` alphabet pattern: de Bruijn over A-Z, order 3."""
+    alphabet = [chr(0x41 + index) for index in range(26)]
+    k, n = len(alphabet), 3
+    sequence: list[str] = []
+    work = [0] * (k * n)
+
+    def db(t: int, p: int) -> None:
+        if t > n:
+            if n % p == 0:
+                sequence.extend(alphabet[index] for index in work[1 : p + 1])
+            return
+        work[t] = work[t - p]
+        db(t + 1, p)
+        for j in range(work[t - p] + 1, k):
+            work[t] = j
+            db(t + 1, t)
+
+    db(1, 1)
+    text = "".join(sequence)
+    return text[:length] if text else "A" * length
+
+
+PO_DETAIL = [
+    ("po2/po4", "[val]", "swap 2/4-byte groups"),
+    ("poa/poA", "[val]", "add / AND"),
+    ("pos/poo/pos", "[val]", "subtract / OR / multiply"),
+    ("pol/por/pos", "[val]", "shift left / right"),
+    ("pox", "[val]", "XOR"),
+]
+
+PO_TOKENS = frozenset({"po2", "po4", "poa", "poA", "pos", "pom", "poo", "pol", "por", "pox"})
+PO_UNSUPPORTED = frozenset({"pod", "poD", "poE", "poS"})
+
+
+@command(
+    "po",
+    usage="[2|4|a|A|s|m|o|l|r|x] [val]",
+    summary="block operations",
+    detail=PO_DETAIL,
+    suffixes=frozenset({"2", "4", "a", "A", "s", "m", "o", "l", "r", "x", "d", "D", "E", "S"}),
+    suffix_label="print modifier",
+    suffix_help="po?",
+)
+def print_operation(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    if token in PO_UNSUPPORTED:
+        raise UsageError(f"unsupported print modifier '{token}' (see po?)")
+    if token not in PO_TOKENS:
+        raise UsageError(f"unsupported print modifier '{token}' (see po?)")
+    # r2's positional argument is the *value*, not a length; block size decides
+    # how much to transform (use `-n` for an explicit length).
+    words = list(statement.argv)
+    count: int | None = None
+    if "-n" in words:
+        index = words.index("-n")
+        if index + 1 < len(words):
+            count = session.eval(words[index + 1])
+            del words[index : index + 2]
+    value_text = words[0] if words else ""
+    if len(words) > 1:
+        raise UsageError(f"{token} takes at most one value")
+    length = count if count is not None else session.blocksize
+    if length <= 0:
+        raise UsageError(f"{token} needs a positive length")
+    payload = session.remote.call("read_bytes", ea=session.seek, count=length)
+    data = bytes(payload.get("data") or b"")
+    value = 0
+    if value_text:
+        try:
+            raw = bytes.fromhex(value_text.removeprefix("0x"))
+            value = int.from_bytes(raw, "little") if raw else 0
+        except ValueError:
+            value = session.eval(value_text)
+
+    if token == "po2":
+        unit = 2
+        data = b"".join(
+            data[index : index + unit][::-1]
+            for index in range(0, len(data) - len(data) % unit, unit)
+        )
+    elif token == "po4":
+        unit = 4
+        data = b"".join(
+            data[index : index + unit][::-1]
+            for index in range(0, len(data) - len(data) % unit, unit)
+        )
+    else:
+        mask = value if value < 0x100 else 0xFF
+        operations = {
+            "poa": lambda byte: (byte + mask) & 0xFF,
+            "poA": lambda byte: byte & mask,
+            "pos": lambda byte: (byte - mask) & 0xFF,
+            "pom": lambda byte: (byte * mask) & 0xFF,
+            "poo": lambda byte: byte | mask,
+            "pol": lambda byte: (byte << (mask & 7)) & 0xFF,
+            "por": lambda byte: byte >> (mask & 7),
+            "pox": lambda byte: byte ^ mask,
+        }
+        data = bytes(operations[token](byte) for byte in data)
+
+    payload = {"ea": session.seek, "data": data}
+    return fmt_memory.format_hexdump(payload, session)
+
+
 ASSEMBLY_DETAIL = [
     ("pa", "[asm]", "assemble an instruction and print its hexpairs"),
 ]

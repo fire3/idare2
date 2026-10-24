@@ -383,6 +383,15 @@ def test_constructors_match_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def test_pattern_generators_match_r2(session, r2) -> None:
+    """``pp*`` is generated client-side; the bytes must be identical."""
+    for command in (
+        "pp0 8", "pp1 8", "pp2 8", "pp4 8", "pp8 8",
+        "ppa 8", "ppal 8", "ppd 16", "ppf 8", "ppn 8",
+    ):
+        assert session.run(command) == r2(command), command
+
+
 def test_guess_size_matches_r2(session, r2) -> None:
     assert session.run("ig") == r2("ig")
 
