@@ -20,7 +20,6 @@ import fnmatch
 import os
 import re
 import sys
-import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -102,8 +101,6 @@ class Session:
         self.env: dict[str, str] = dict(os.environ)
         #: Text-log entries for `T` (r2's message log).
         self.text_log: list[dict[str, Any]] = []
-        #: Last duration measured by `?t`.
-        self.last_timing: float | None = None
         # Command modules register themselves on import; doing it here means a
         # Session is usable on its own, without going through the CLI.
         cmd.load_all()
@@ -268,14 +265,10 @@ class Session:
         if statement.shell:
             return pipe.run_shell(statement.args)
 
-        timed = statement.cmd == "?t"
-        started = time.perf_counter() if timed else 0.0
         lines: list[str] = []
         for _ in range(max(statement.repeat, 1)):
             with self._temporary(statement):
                 lines = self.dispatch(statement)
-        if timed:
-            self.last_timing = time.perf_counter() - started
         return self.postprocess(lines, statement)
 
     def dispatch(self, statement: Statement) -> list[str]:

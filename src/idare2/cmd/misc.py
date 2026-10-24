@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from typing import TYPE_CHECKING
 
 from idare2 import cmd as cmd_module
@@ -72,12 +73,13 @@ def question(session: Session, statement: Statement) -> list[str]:
         return _PIPE_HELP
 
     if suffix == "t":
-        # Session.run_statement timed the dispatch; the argument is a nested
-        # command whose output comes first (r2 prints the seconds last).
-        duration = session.last_timing or 0.0
+        # Time the nested command here: run_statement finishes after this
+        # handler returns, so a session-level timer would report a stale value.
         if not argument:
             raise UsageError("?t needs a command")
-        return [*session.run_branch(argument), f"{duration:.6f}"]
+        started = time.perf_counter()
+        produced = session.run_branch(argument)
+        return [*produced, f"{time.perf_counter() - started:.6f}"]
     if suffix == "et":
         # Terminal-title escape, byte-for-byte like r2.
         return [f"\x1b]0;{argument}\x07"]

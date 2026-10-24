@@ -1499,7 +1499,7 @@ def test_question_timing_and_terminal_escapes() -> None:
     session, _remote = make_session()
     lines = session.run("?t ?e hi")
     assert lines[0] == "hi"
-    assert float(lines[1]) >= 0.0
+    assert float(lines[1]) > 0.0
     assert session.run("?et hello") == ["\x1b]0;hello\x07"]
     assert session.run("?eb") == ["[]"]
 
