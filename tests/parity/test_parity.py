@@ -689,3 +689,63 @@ def test_iterator_instruction_and_function_sets(session, r2) -> None:
     ]
     shared = set(ours) & set(theirs)
     assert len(shared) >= 0.5 * min(len(ours), len(theirs))
+
+
+# --------------------------------------------------------------------------
+# Write semantics on a private, writable copy
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def writable_session(working_copy: Path):
+    try:
+        with nexus.connect(
+            nexus.Target(path=str(working_copy)), timeout=900, linger=0
+        ) as handle:
+            remote = rpc.Remote(handle, timeout=300)
+            info = remote.call("open_summary")
+            sess = Session(handle, remote, Config(), info, readonly=False)
+            sess.setup()
+            yield sess
+    except Idare2Error as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"cannot attach to {working_copy}: {exc}")
+
+
+def test_w0_and_wx_write_the_same_bytes_as_r2(writable_session, working_copy) -> None:
+    """``w0``/``wx`` leave the exact same bytes as r2 on an identical copy."""
+    binary = _require_r2()
+    session = writable_session
+    address = 0x10000
+    original = bytes(
+        session.remote.call("read_bytes", ea=address, count=8)["data"]
+    )
+
+    def r2_write(command: str) -> str:
+        completed = subprocess.run(
+            [binary, "-w", "-q", "-e", "scr.color=0", "-c", command, str(working_copy)],
+            capture_output=True, text=True, timeout=R2_TIMEOUT,
+        )
+        return completed.stdout.strip()
+
+    try:
+        assert session.run(f"w0 4 @ 0x{address:x}") == []
+        ours = bytes(
+            session.remote.call("read_bytes", ea=address, count=8)["data"]
+        ).hex()
+        # r2 mutated its own copy of the same bytes; compare the result it
+        # reports after performing the identical write.
+        theirs = r2_write(f"w0 4 @ 0x{address:x}; p8 8 @ 0x{address:x}")
+        assert ours == theirs
+
+        assert session.run(f"wx deadbeef @ 0x{address + 0x10:x}") == []
+        ours = bytes(
+            session.remote.call("read_bytes", ea=address + 0x10, count=4)["data"]
+        ).hex()
+        theirs = r2_write(
+            f"wx deadbeef @ 0x{address + 0x10:x}; p8 4 @ 0x{address + 0x10:x}"
+        )
+        assert ours == theirs == "deadbeef"
+    finally:
+        # Leave the shared copy the way we found it.
+        session.run(f"wx {original.hex()} @ 0x{address:x}")
+        session.run(f"w0 4 @ 0x{address + 0x10:x}")
