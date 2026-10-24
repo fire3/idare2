@@ -94,6 +94,21 @@ def test_iI(session) -> None:
     assert any(line.startswith("bits") for line in lines)
 
 
+def test_analysis_helpers_work_on_a_read_only_database(session) -> None:
+    """``an``/``adk``/``ah`` are informational and must not need -w."""
+    session.failed = False
+    start = int(session.info.get("start_ip") or 0)
+    if not start:
+        pytest.skip("the database has no entry point")
+    session.run(f"s 0x{start:x}")
+    assert session.run("adk")
+    assert not session.failed
+    name = session.run("an")
+    assert isinstance(name, list)
+    assert isinstance(session.run("ah"), list)
+    assert not session.failed
+
+
 def test_cl_exposes_source_file_information(session) -> None:
     """``CLu``/``CLf`` use the lines IDA imported from DWARF.
 

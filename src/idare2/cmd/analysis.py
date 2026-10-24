@@ -25,6 +25,15 @@ ANALYSIS_DETAIL = [
     ("a", "", "file information (idare2 maps r2's analysis info here)"),
     ("ai", "", "file information (r2's address-info form is not available)"),
     ("aa", "", "wait for IDA's automatic analysis to settle"),
+    ("a8", "<hexpairs>", "analyze the given bytes at the seek"),
+    ("ad", "[size]", "define a data word and analyze its references"),
+    ("adk", "", "classify the item at the seek"),
+    ("ah", "", "list forced-operand hints"),
+    ("ah.", "", "list hints at the seek"),
+    ("ah-", "", "remove hints at the seek"),
+    ("an", "[name]", "show or set the name at the seek"),
+    ("anj", "", "the name at the seek as JSON"),
+    ("an*", "", "the name at the seek as an r2 command"),
     ("aaa", "", "the same, plus analysis of unrecognised regions"),
     ("af", "", "create a function at the current address"),
     ("afr", "", "re-analyse the current function"),
@@ -79,7 +88,10 @@ FUNCTION_DETAIL = [
     usage="[a]",
     summary="analysis",
     detail=ANALYSIS_DETAIL,
-    suffixes=frozenset({"", "a", "aa", "aaa", "i"}),
+    suffixes=frozenset(
+        {"", "a", "aa", "aaa", "i", "8", "d", "d4", "d8", "dk",
+         "h", "h.", "h-", "n", "nj", "n*"}
+    ),
     suffix_label="analysis command",
     suffix_help="a?",
 )
@@ -89,7 +101,79 @@ def analysis(session: Session, statement: Statement) -> list[str]:
         return _await_analysis(session, deep=token != "aa")
     if token in ("a", "ai"):
         return fmt_listing.format_info(session.info, session)
+    if token == "a8":
+        return _analyze_bytes(session, statement)
+    if token in ("ad", "ad4", "ad8"):
+        return _analyze_data(session, token)
+    if token == "adk":
+        return _data_kind(session)
+    if token in ("ah", "ah.", "ah-"):
+        return _hints(session, token)
+    if token in ("an", "anj", "an*"):
+        return _name(session, token, statement)
     raise UsageError(f"unsupported analysis command '{token}' (see a?)")
+
+
+def _analyze_bytes(session: Session, statement: Statement) -> list[str]:
+    import idare2.cmd as cmd_module
+
+    data = statement.args.strip()
+    if not data:
+        raise UsageError("a8 needs hexpairs")
+    cmd_module.require_write(session, "'a8'")
+    payload = session.remote.call("analyze_bytes", ea=session.seek, data=data)
+    return [f"-- analyzed {payload['size']} bytes at {session.format_addr(int(payload['ea']))} --"]
+
+
+def _analyze_data(session: Session, token: str) -> list[str]:
+    import idare2.cmd as cmd_module
+
+    size = {"ad": 4, "ad4": 4, "ad8": 8}[token]
+    cmd_module.require_write(session, f"'{token}'")
+    payload = session.remote.call("analyze_data", ea=session.seek, size=size)
+    return [
+        f"-- data 0x{int(payload['value']):x} ({payload['size']} bytes) "
+        f"at {session.format_addr(int(payload['ea']))} --"
+    ]
+
+
+def _data_kind(session: Session) -> list[str]:
+    payload = session.remote.call("data_kind", ea=session.seek)
+    return [f"{payload['type']} size {payload['size']} at {session.format_addr(int(payload['ea']))}"]
+
+
+def _hints(session: Session, token: str) -> list[str]:
+    import idare2.cmd as cmd_module
+
+    if token == "ah-":
+        cmd_module.require_write(session, "'ah-'")
+        payload = session.remote.call("clear_hint", ea=session.seek)
+        return [f"-- cleared {payload['cleared']} hints --"]
+    payload = session.remote.call(
+        "analysis_hints",
+        ea=session.seek if token == "ah." else None,
+        single=token == "ah.",
+    )
+    return [
+        f"{session.format_addr(int(row['ea']))} op{row['slot']} {row['operand']}"
+        for row in payload
+    ]
+
+
+def _name(session: Session, token: str, statement: Statement) -> list[str]:
+    import idare2.cmd as cmd_module
+
+    argument = statement.args.strip()
+    if argument and token == "an":
+        cmd_module.require_write(session, "'an'")
+        payload = session.remote.call("set_name", ea=session.seek, name=argument)
+        return [f"-- {payload['name']} @ {session.format_addr(int(payload['ea']))} --"]
+    payload = session.remote.call("name_at", ea=session.seek)
+    if token == "anj":
+        return [to_json(payload)]
+    if token == "an*":
+        return [f"'f {payload['name']} @ {session.format_addr(int(payload['ea']))}"] if payload["name"] else []
+    return [payload["name"]] if payload["name"] else []
 
 
 def _await_analysis(session: Session, *, deep: bool) -> list[str]:
@@ -119,7 +203,7 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     rest, count, offset = numeric_args(session, statement)
 
-    if token == "af":
+    if token in ("af", "aF"):
         target = session.resolve(rest[0]) if rest else session.seek
         payload = session.remote.call("create_function", ea=target)
         return [f"-- function {payload.get('name')} at {session.format_addr(int(payload['ea']))} --"]

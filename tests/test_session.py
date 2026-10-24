@@ -268,6 +268,22 @@ class FakeRemote:
                 "rawname": "_ZN4Base1fEi",
                 "lang": "c++",
             },
+            "create_function": lambda: {"ea": arguments["ea"], "name": "main"},
+            "analyze_bytes": lambda: {
+                "ea": arguments["ea"],
+                "size": len(bytes.fromhex(arguments["data"])),
+            },
+            "analyze_data": lambda: {
+                "ea": arguments["ea"],
+                "size": arguments["size"],
+                "value": 0x1234,
+            },
+            "data_kind": lambda: {"ea": arguments["ea"], "type": "code", "size": 4},
+            "analysis_hints": lambda: [
+                {"ea": 0x1000, "slot": 0, "operand": "forced"},
+            ],
+            "clear_hint": lambda: {"ea": arguments["ea"], "cleared": 1},
+            "name_at": lambda: {"ea": arguments["ea"], "name": "main"},
             "relocations": lambda: [
                 {
                     "vaddr": 0xF9128,
@@ -556,6 +572,70 @@ def test_aaa_runs_deep_analysis() -> None:
     assert session.run("aaa") == ["-- analysis complete (deep) --"]
     assert session.run("aaaa") == ["-- analysis complete (deep) --"]
     assert [name for name, _ in remote.calls].count("deep_analyze") == 2
+
+
+def test_aF_is_an_af_alias() -> None:
+    session, remote = make_session()
+    line = session.run("aF @ 0x1000")
+    assert line == ["-- function main at 0x00001000 --"]
+    assert ("create_function", {"ea": 0x1000}) in remote.calls
+
+
+def test_a8_analyzes_hexpairs() -> None:
+    session, remote = make_session()
+    assert session.run("a8 9090") == ["-- analyzed 2 bytes at 0x00001000 --"]
+    assert ("analyze_bytes", {"ea": 0x1000, "data": "9090"}) in remote.calls
+
+
+def test_ad_defines_a_data_word() -> None:
+    session, remote = make_session()
+    assert session.run("ad") == ["-- data 0x1234 (4 bytes) at 0x00001000 --"]
+    assert session.run("ad8") == ["-- data 0x1234 (8 bytes) at 0x00001000 --"]
+    assert ("analyze_data", {"ea": 0x1000, "size": 8}) in remote.calls
+
+
+def test_adk_classifies_the_item() -> None:
+    session, _remote = make_session()
+    assert session.run("adk") == ["code size 4 at 0x00001000"]
+
+
+def test_ah_lists_and_clears_hints() -> None:
+    session, _remote = make_session()
+    assert session.run("ah") == ["0x00001000 op0 forced"]
+    assert session.run("ah.") == ["0x00001000 op0 forced"]
+    assert session.run("ah-") == ["-- cleared 1 hints --"]
+
+
+def test_an_shows_and_sets_the_name() -> None:
+    session, remote = make_session()
+    assert session.run("an @ 0x1000") == ["main"]
+    assert json.loads("\n".join(session.run("anj @ 0x1000")))["name"] == "main"
+    assert session.run("an* @ 0x1000") == ["'f main @ 0x00001000"]
+    assert session.run("an renamed @ 0x1000") == ["-- renamed @ 0x00001000 --"]
+    assert ("set_name", {"ea": 0x1000, "name": "renamed"}) in remote.calls
+
+
+def test_a_hints_and_names_need_write_access_for_mutations() -> None:
+    session, remote = make_session()
+    session.readonly = True
+    for command in ("a8 90", "ad", "ah-", "an renamed"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
+        assert isinstance(session.last_error, ReadOnlyError)
+    assert not {"analyze_bytes", "analyze_data", "clear_hint", "set_name"} & set(
+        remote.operations
+    )
+
+
+def test_unknown_a_suffixes_fail_loudly() -> None:
+    session, _remote = make_session()
+    for command in ("az", "aQ", "adx"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
+        assert isinstance(session.last_error, UsageError)
+        assert "analysis command" in str(session.last_error)
 
 
 def test_dot_ida_reports_the_backend() -> None:

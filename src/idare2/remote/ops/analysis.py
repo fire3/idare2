@@ -506,6 +506,132 @@ def reanalyze(db: Any, ea: int) -> dict[str, Any]:
     return {"ea": int(func.start_ea), "reanalyzed": True}
 
 
+@op("analyze_bytes", writes=True)
+def analyze_bytes(db: Any, ea: int, data: str) -> dict[str, Any]:
+    """Write hexpairs and queue analysis at ``ea`` (``a8``)."""
+    try:
+        raw = bytes.fromhex(data)
+    except ValueError:
+        helpers.fail(protocol.BAD_ARGS, "a8 needs hexpairs")
+    if not raw:
+        helpers.fail(protocol.BAD_ARGS, "a8 needs at least one byte")
+    import ida_auto
+    import ida_ua
+
+    db.bytes.patch_bytes_at(ea, raw)
+    ida_ua.create_insn(ea)
+    ida_auto.plan_and_wait(ea, ea + len(raw))
+    return {"ea": ea, "size": len(raw)}
+
+
+@op("analyze_data", writes=True)
+def analyze_data(db: Any, ea: int, size: int = 4) -> dict[str, Any]:
+    """Define a data word and let IDA follow its references (``ad``)."""
+    import ida_auto
+    import ida_bytes
+
+    if size <= 0:
+        helpers.fail(protocol.BAD_ARGS, "ad needs a positive size")
+    payload = db.bytes.get_bytes_at(ea, size)
+    if payload is None:
+        helpers.fail(protocol.BAD_ADDRESS, f"cannot read {size} bytes at 0x{ea:x}")
+    creators = {
+        1: ida_bytes.create_byte,
+        2: ida_bytes.create_word,
+        4: ida_bytes.create_dword,
+        8: ida_bytes.create_qword,
+    }
+    creator = creators.get(size)
+    if creator is None:
+        helpers.fail(protocol.BAD_ARGS, "ad supports 1, 2, 4 or 8 byte words")
+    if not creator(ea, size, True):
+        helpers.fail(protocol.IDA_ERROR, f"cannot define data at 0x{ea:x}")
+    # auto_mark_range(..., AU_USED|AU_TYPE) crashes IDA 9.5's script engine;
+    # data creation plus plan_and_wait is enough to pick up the new item.
+    ida_auto.plan_and_wait(ea, ea + size)
+    value = int.from_bytes(bytes(payload), "little")
+    return {"ea": ea, "size": size, "value": value}
+
+
+@op("data_kind")
+def data_kind(db: Any, ea: int) -> dict[str, Any]:
+    """Classify the item at ``ea`` (``adk``)."""
+    import ida_bytes
+
+    if db.bytes.is_code_at(ea):
+        return {"ea": ea, "type": "code", "size": int(ida_bytes.get_item_size(ea))}
+    if db.bytes.get_data_size_at(ea) is not None:
+        return {"ea": ea, "type": "data", "size": int(ida_bytes.get_item_size(ea))}
+    return {"ea": ea, "type": "invalid", "size": 0}
+
+
+@op("name_at")
+def name_at(db: Any, ea: int) -> dict[str, Any]:
+    """The name at ``ea`` (``an``)."""
+    try:
+        name = db.names.get_at(ea)
+    except Exception:
+        name = None
+    return {"ea": ea, "name": str(name) if name else ""}
+
+
+@op("analysis_hints")
+def analysis_hints(db: Any, ea: int | None = None, single: bool = False) -> list[dict[str, Any]]:
+    """Forced operands / hint records (``ah``)."""
+    import ida_bytes
+    import ida_ida
+    import ida_idaapi
+
+    addresses: list[int] = []
+    if single:
+        if ea is not None:
+            addresses.append(int(ea))
+    elif ea is None:
+        address = int(ida_ida.inf_get_min_ea())
+        end = int(ida_ida.inf_get_max_ea())
+        while address != int(ida_idaapi.BADADDR) and address < end:
+            addresses.append(address)
+            nxt = ida_bytes.next_head(address, end)
+            if nxt in (None, int(ida_idaapi.BADADDR)) or int(nxt) <= address:
+                break
+            address = int(nxt)
+    else:
+        addresses.append(int(ea))
+
+    out: list[dict[str, Any]] = []
+    for address in addresses:
+        for slot in range(8):
+            operand = ida_bytes.get_forced_operand(address, slot)
+            if operand:
+                out.append({"ea": address, "slot": slot, "operand": str(operand)})
+    return out
+
+
+@op("set_hint", writes=True)
+def set_hint(db: Any, ea: int, slot: int, operand: str) -> dict[str, Any]:
+    """Force the display of one operand (``aha``/``ahc`` subset)."""
+    import ida_bytes
+
+    if slot < 0:
+        helpers.fail(protocol.BAD_ARGS, "operand slot must be non-negative")
+    if not ida_bytes.set_forced_operand(ea, slot, operand):
+        helpers.fail(protocol.IDA_ERROR, f"cannot force operand {slot} at 0x{ea:x}")
+    return {"ea": ea, "slot": slot, "operand": operand}
+
+
+@op("clear_hint", writes=True)
+def clear_hint(db: Any, ea: int) -> dict[str, Any]:
+    """Remove forced operands at ``ea`` (``ah-``)."""
+    import ida_bytes
+
+    cleared = 0
+    for slot in range(8):
+        if ida_bytes.is_forced_operand(ea, slot):
+            ida_bytes.set_forced_operand(ea, slot, "")
+            cleared += 1
+    return {"ea": ea, "cleared": cleared}
+
+
 @op("create_function", writes=True)
 def create_function(db: Any, ea: int) -> dict[str, Any]:
     """Force a function at ``ea`` (``af``).
