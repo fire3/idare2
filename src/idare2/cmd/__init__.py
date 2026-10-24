@@ -81,6 +81,7 @@ def load_all() -> None:
         analysis,
         extras,
         flag,
+        ic,
         info,
         meta,
         misc,

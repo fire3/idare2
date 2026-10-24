@@ -231,6 +231,43 @@ class FakeRemote:
                 }
                 for address in arguments["addrs"]
             ],
+            "classes": lambda: [
+                {
+                    "classname": "Base",
+                    "addr": 0x2000,
+                    "lang": "c++",
+                    "index": 0,
+                    "methods": [
+                        {
+                            "name": "f(int)",
+                            "flag": "method.Base.f(int)",
+                            "rawname": "_ZN4Base1fEi",
+                            "lang": "c++",
+                            "addr": 0x2000,
+                            "slot": 0,
+                        },
+                        {
+                            "name": "~Base()",
+                            "flag": "method.Base.~Base()",
+                            "rawname": "_ZN4BaseD1Ev",
+                            "lang": "c++",
+                            "addr": 0x2010,
+                            "flags": ["destructor"],
+                            "slot": 1,
+                        },
+                    ],
+                    "fields": [
+                        {"name": "b", "type": "int", "offset": 4, "size": 4},
+                    ],
+                }
+            ],
+            "class_at": lambda: {
+                "classname": "Base",
+                "method": "f(int)",
+                "addr": arguments["ea"],
+                "rawname": "_ZN4Base1fEi",
+                "lang": "c++",
+            },
             "relocations": lambda: [
                 {
                     "vaddr": 0xF9128,
@@ -2692,7 +2729,54 @@ def test_unknown_cl_suffixes_fail_loudly(command: str) -> None:
     assert "unsupported line-info command" in str(session.last_error)
 
 
-@pytest.mark.parametrize("command", ["ic", "iic"])
+def test_ic_lists_classes_methods_and_fields() -> None:
+    session, _remote = make_session()
+    lines = session.run("ic")
+    assert "c++ class 0 Base" in lines[0]
+    assert "f(int)" in lines[1]
+    assert lines[2].startswith("0x00002010") and "D" in lines[2]
+
+    payload = json.loads("\n".join(session.run("icj")))
+    assert payload[0]["classname"] == "Base"
+    assert payload[0]["methods"][0]["addr"] == 0x2000
+    assert payload[0]["fields"][0]["name"] == "b"
+
+
+def test_ic_quiet_address_and_command_forms() -> None:
+    session, _remote = make_session()
+    assert session.run("icqq") == ["Base"]
+    assert session.run("iclc") == ["1"]
+    lines = session.run("icl")
+    assert lines == ["0x2000 0x2010"]
+    assert session.run("ics") == [
+        "0x2000 [Base] f(int)",
+        "0x2010 [Base] ~Base()",
+    ]
+    star = session.run("ic*")
+    assert star[0] == "fs classes"
+    assert star[-1] == "fs-"
+    assert any("class.Base" in line for line in star)
+    assert session.run("ic. @ 0x2000") == ["Base::f(int)"]
+
+
+@pytest.mark.parametrize("command", ["icz", "ic+ Foo", "ic- Base", "icc"])
+def test_unknown_or_unsupported_ic_forms_fail_loudly(command: str) -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run(command)
+    assert session.failed, command
+    assert isinstance(session.last_error, UsageError)
+    assert "class command" in str(session.last_error)
+    assert not remote.operations
+
+
+def test_ic_forms_do_not_fall_into_iic() -> None:
+    session, _remote = make_session()
+    assert session.run("icq")[0].endswith("Base")
+
+
+@pytest.mark.parametrize("command", ["iic"])
 def test_unimplemented_info_commands_do_not_fall_through(command: str) -> None:
     session, _remote = make_session()
     assert session.run(command) == []

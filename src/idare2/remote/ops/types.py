@@ -82,6 +82,139 @@ def _cc_name(cc: int) -> str | None:
     return _CC_NAMES.get(cc)
 
 
+@op("classes")
+def classes(db: Any) -> list[dict[str, Any]]:
+    """Classes reconstructed from IDA UDTs and demangled C++ functions (``ic``).
+
+    IDA has no C++ class list: DWARF/PDB/RTTI lands in the type system as UDTs.
+    A UDT is treated as a class when it carries a vtable pointer (``_vptr.*``),
+    a base class, or a vftable member; methods are the functions whose
+    demangled name starts with ``<class>::``.
+    """
+    import ida_typeinf
+
+    til = ida_typeinf.get_idati()
+    limit = ida_typeinf.get_ordinal_limit(til)
+    found: dict[str, dict[str, Any]] = {}
+    for ordinal in range(1, limit):
+        tinfo = ida_typeinf.tinfo_t()
+        if not tinfo.get_numbered_type(til, ordinal) or not tinfo.is_udt():
+            continue
+        name = tinfo.get_type_name() or ""
+        if not name:
+            continue
+        udt = ida_typeinf.udt_type_data_t()
+        if not tinfo.get_udt_details(udt):
+            continue
+        members = list(udt)
+        is_class = any(
+            member.is_baseclass()
+            or member.is_vftable()
+            or (member.name or "").startswith(("_vptr.", "__vftable", "vftable"))
+            for member in members
+        )
+        if not is_class:
+            continue
+        fields = [
+            {
+                "name": member.name,
+                "type": _text(member.type),
+                "offset": int(member.offset),
+                "size": int(member.size),
+            }
+            for member in members
+            if not member.is_baseclass()
+            and not member.is_vftable()
+            and not (member.name or "").startswith("_vptr.")
+        ]
+        try:
+            vftable = int(ida_typeinf.get_vftable_ea(ordinal))
+        except Exception:
+            vftable = 0
+        found[name] = {
+            "classname": name,
+            "addr": vftable,
+            "lang": "c++",
+            "index": len(found),
+            "methods": [],
+            "fields": fields,
+            "_ordinal": ordinal,
+        }
+
+    if not found:
+        return []
+
+    for ea, mangled in db.names.get_all():
+        demangled = ""
+        try:
+            demangled = db.names.demangle_name(mangled) or ""
+        except Exception:
+            demangled = ""
+        if "::" not in demangled:
+            continue
+        classname = demangled.split("::", 1)[0].strip()
+        entry = found.get(classname)
+        if entry is None:
+            continue
+        method = demangled.split("::", 1)[1].strip()
+        flags: list[str] = []
+        if method.startswith(f"~{classname}"):
+            display = f"~{classname}()"
+            flags.append("destructor")
+        elif method.startswith(classname):
+            display = f"{classname}()"
+            flags.append("constructor")
+        else:
+            display = method
+        method_row: dict[str, Any] = {
+            "name": display,
+            "flag": mangled,
+            "rawname": mangled,
+            "lang": "c++",
+            "addr": int(ea),
+        }
+        if flags:
+            method_row["flags"] = flags
+        entry["methods"].append(method_row)
+
+    out = []
+    for entry in found.values():
+        entry["methods"].sort(key=lambda row: (row["addr"], row["name"]))
+        for slot, method in enumerate(entry["methods"]):
+            method["flag"] = f"method.{entry['classname']}.{method['name']}"
+            method["slot"] = slot
+        if not entry["addr"] and entry["methods"]:
+            # IDA does not mark a vftable here; use the first method so the
+            # class still has a usable address (documented divergence).
+            entry["addr"] = int(entry["methods"][0]["addr"])
+        entry.pop("_ordinal", None)
+        out.append(entry)
+    return out
+
+
+@op("class_at")
+def class_at(db: Any, ea: int) -> dict[str, Any] | None:
+    """The class/method owning the function at ``ea`` (``ic.``)."""
+    func = db.functions.get_at(ea)
+    if func is None:
+        return None
+    name = db.functions.get_name(func) or ""
+    try:
+        demangled = db.names.demangle_name(name) or ""
+    except Exception:
+        demangled = ""
+    if "::" not in demangled:
+        return None
+    classname, method = demangled.split("::", 1)
+    return {
+        "classname": classname.strip(),
+        "method": method.strip(),
+        "addr": int(func.start_ea),
+        "rawname": name,
+        "lang": "c++",
+    }
+
+
 @op("function_signature")
 def function_signature(db: Any, ea: int) -> dict[str, Any]:
     """One function prototype in r2's ``tfj`` shape (``tf``).
