@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from idare2.cmd import command, numeric_args, with_more
@@ -43,6 +44,7 @@ INFO_DETAIL = [
     ("ig", "[h]", "guess the program size"),
     ("iE", "", "exports"),
     ("iM", "", "main address"),
+    ("CL", "[j*.] [addr]", "source-line information"),
 ]
 
 HEADER_DETAIL = [
@@ -93,8 +95,7 @@ LISTING_DETAIL = {
     "iM": [("iM", "", "main address")],
 }
 
-SECTION_DETAIL = [
-    ("iS", "[algo]", "ELF sections; an algorithm name adds a hash column"),
+SECTION_DETAIL = [    ("iS", "[algo]", "ELF sections; an algorithm name adds a hash column"),
     ("iSj", "[algo]", "sections as JSON"),
     ("iSS", "", "memory maps from the ELF program headers"),
     ("iSSj", "", "memory maps as JSON"),
@@ -116,6 +117,92 @@ SECTION_TOKENS = frozenset(
         "iSm", "iSmc", "iSmj",
     }
 )
+
+CL_DETAIL = [
+    ("CL", "", "all address/source-line mappings"),
+    ("CLj", "", "the mappings as JSON"),
+    ("CL*", "", "the mappings as r2 commands"),
+    ("CL.", "", "the mapping at the current seek"),
+    ("CLf", "[addr]", "source file name at the current seek"),
+    ("CLu", "", "source files used by the debug info"),
+    ("CLuj", "", "source files as JSON"),
+    ("CLL", "[addr]", "source text at the current seek"),
+    ("CLLb", "", "source text for the current basic block"),
+    ("CLLf", "", "source text across the current function"),
+]
+
+CL_TOKENS = frozenset(
+    {"CL", "CLj", "CL*", "CL.", "CLf", "CLu", "CLuj", "CLL", "CLLb", "CLLf"}
+)
+
+
+def _line_row(row: dict[str, Any]) -> list[str]:
+    return [
+        f"file: {row['file']}",
+        f"line: {row['line']}",
+        f"colu: {row['column']}",
+        f"addr: 0x{int(row['addr']):08x}",
+    ]
+
+
+def _lines(session: Session, token: str, statement: Statement) -> list[str]:
+    """``CL``/``CLf``/``CLu``/``CLL`` -- source-line metadata."""
+    argument = statement.args.strip()
+    target = session.resolve(argument) if argument else session.seek
+
+    if token in ("CLu", "CLuj"):
+        files = session.remote.call("line_units")
+        return [to_json(files)] if token == "CLuj" else list(files)
+
+    if token == "CLf":
+        rows = session.remote.call("line_info", ea=target)
+        return [Path(str(rows[0]["file"])).name] if rows else []
+
+    if token == "CL.":
+        rows = session.remote.call("line_info", ea=target)
+        if not rows:
+            return []
+        lines: list[str] = []
+        for row in rows:
+            lines.extend(_line_row(row))
+        return lines
+
+    if token == "CLL":
+        rows = session.remote.call("line_source", addrs=[target])
+        return [f"0x{int(row['addr']):08x}  {row['text']}" for row in rows]
+    if token == "CLLb":
+        block = session.remote.call("block_info", ea=target)
+        addrs = _range_instructions(
+            session, int(block["start"]), int(block["end"])
+        )
+        rows = session.remote.call("line_source", addrs=addrs)
+        return [f"0x{int(row['addr']):08x}  {row['text']}" for row in rows]
+    if token == "CLLf":
+        func = session.remote.call("function_info", ea=target)
+        addrs = _range_instructions(session, int(func["ea"]), int(func["end"]))
+        rows = session.remote.call("line_source", addrs=addrs)
+        return [f"0x{int(row['addr']):08x}  {row['text']}" for row in rows]
+
+    rows = session.remote.call("line_info")
+    if token == "CLj":
+        return [to_json(rows)]
+    if token == "CL*":
+        return [
+            f"'CL 0x{int(row['addr']):08x} {row['file']}:{row['line']}"
+            for row in rows
+        ]
+    lines = []
+    for row in rows:
+        lines.extend(_line_row(row))
+    return lines
+
+
+def _range_instructions(session: Session, start: int, end: int) -> list[int]:
+    """Instruction heads in ``[start, end)`` for the CLL block/function forms."""
+    payload = session.remote.call(
+        "disasm", ea=start, count=max(end - start, 1), mode="bytes"
+    )
+    return [int(line["ea"]) for line in payload.get("lines", [])]
 
 
 def _sections(
@@ -248,6 +335,23 @@ def _file_hashes(session: Session, *, as_json: bool) -> list[str]:
     if as_json:
         return [to_json(payload)]
     return [f"{name} {value}" for name, value in payload.items()]
+
+
+@command(
+    "CL",
+    usage="[j*.] [addr]",
+    summary="source-line information",
+    detail=CL_DETAIL,
+    json_suffix=True,
+    suffixes=frozenset({"", "j", "*", ".", "f", "u", "uj", "L", "Lb", "Lf"}),
+    suffix_label="line-info command",
+    suffix_help="CL?",
+)
+def line_info(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    if token not in CL_TOKENS:
+        raise UsageError(f"unsupported line-info command '{token}' (see CL?)")
+    return _lines(session, token, statement)
 
 
 @command(

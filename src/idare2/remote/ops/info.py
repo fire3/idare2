@@ -308,6 +308,100 @@ def sections(db: Any, hash_name: str | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+@op("line_info")
+def line_info(
+    db: Any,
+    ea: int | None = None,
+    start: int | None = None,
+    end: int | None = None,
+) -> list[dict[str, Any]]:
+    """Address/source-line rows (``CL``/``CLf``/``CLL*``).
+
+    IDA stores the filename and line number per address; ``ea`` asks for one
+    address, ``start``/``end`` for a range, and neither asks for the whole
+    database.
+    """
+    import ida_bytes
+    import ida_ida
+    import ida_idaapi
+    import ida_lines
+    import ida_nalt
+
+    bad = ida_idaapi.BADADDR
+
+    def row(address: int) -> dict[str, Any] | None:
+        line = int(ida_nalt.get_source_linnum(address))
+        if line in (0, 0xFFFFFFFF, -1, bad):
+            return None
+        path = ida_lines.get_sourcefile(address)
+        if not path:
+            return None
+        return {"addr": int(address), "file": str(path), "line": line, "column": 0}
+
+    if ea is not None:
+        found = row(int(ea))
+        return [found] if found else []
+
+    if start is None:
+        start = int(ida_ida.inf_get_min_ea())
+    if end is None:
+        end = int(ida_ida.inf_get_max_ea())
+    out: list[dict[str, Any]] = []
+    address = int(start)
+    while address != bad and address < int(end):
+        found = row(address)
+        if found is not None:
+            out.append(found)
+        nxt = ida_bytes.next_head(address, int(end))
+        if nxt in (None, bad) or int(nxt) <= address:
+            break
+        address = int(nxt)
+    return out
+
+
+@op("line_units")
+def line_units(db: Any) -> list[str]:
+    """Distinct source files known to the database (``CLu``)."""
+    import ida_lines
+
+    info = ida_lines.sourcefile_info_t()
+    files: list[str] = []
+    for index in range(ida_lines.get_sourcefiles_qty()):
+        if not ida_lines.getn_sourcefile(info, index):
+            continue
+        name = str(info.filename or "")
+        if name and name not in files:
+            files.append(name)
+    return files
+
+
+@op("line_source")
+def line_source(db: Any, addrs: list[int]) -> list[dict[str, Any]]:
+    """Source text for the given addresses (``CLL`` family).
+
+    Reads the file IDA recorded; a missing file or line yields an empty text
+    rather than an error so ``CLL`` still shows the addresses.
+    """
+    rows: list[dict[str, Any]] = []
+    cache: dict[tuple[str, int], str] = {}
+    for address in addrs:
+        rows.extend(line_info(db, ea=int(address)))
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        key = (row["file"], row["line"])
+        if key not in cache:
+            try:
+                with open(row["file"], encoding="utf-8", errors="replace") as handle:
+                    lines = handle.readlines()
+                cache[key] = (
+                    lines[row["line"] - 1].rstrip("\n") if 0 < row["line"] <= len(lines) else ""
+                )
+            except OSError:
+                cache[key] = ""
+        out.append({**row, "text": cache[key]})
+    return out
+
+
 @op("section_headers")
 def section_headers(db: Any) -> list[dict[str, Any]]:
     """Raw section-header fields for ``iSh``."""

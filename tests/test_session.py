@@ -205,6 +205,32 @@ class FakeRemote:
                     "string": "first",
                 },
             ],
+            "line_units": lambda: ["/src/a.c", "/src/b.c"],
+            "line_info": lambda: (
+                [
+                    {
+                        "addr": arguments["ea"],
+                        "file": "/src/a.c",
+                        "line": 12,
+                        "column": 0,
+                    }
+                ]
+                if "ea" in arguments
+                else [
+                    {"addr": 0x1000, "file": "/src/a.c", "line": 12, "column": 0},
+                    {"addr": 0x1004, "file": "/src/a.c", "line": 13, "column": 0},
+                ]
+            ),
+            "line_source": lambda: [
+                {
+                    "addr": address,
+                    "file": "/src/a.c",
+                    "line": 12,
+                    "column": 0,
+                    "text": "x = 1;",
+                }
+                for address in arguments["addrs"]
+            ],
             "relocations": lambda: [
                 {
                     "vaddr": 0xF9128,
@@ -2626,6 +2652,44 @@ def test_izz_scans_the_whole_file_and_passes_config() -> None:
     assert arguments["max_length"] == session.config.get_int("bin.str.max")
     payload = json.loads("\n".join(session.run("izzj")))
     assert payload[0]["string"] == "first"
+
+
+def test_cl_reports_lines_files_and_source() -> None:
+    session, remote = make_session()
+    assert session.run("CLu") == ["/src/a.c", "/src/b.c"]
+    assert json.loads("\n".join(session.run("CLuj"))) == ["/src/a.c", "/src/b.c"]
+    assert session.run("CLf @ 0x1004") == ["a.c"]
+    assert session.run("CL. @ 0x1004") == [
+        "file: /src/a.c", "line: 12", "colu: 0", "addr: 0x00001004",
+    ]
+    assert session.run("CLL @ 0x1004") == ["0x00001004  x = 1;"]
+    lines = session.run("CLLf @ 0x1000")
+    assert lines and lines[0] == "0x00001000  x = 1;"
+    assert "disasm" in remote.operations
+
+
+def test_cl_all_and_star_formats() -> None:
+    session, _remote = make_session()
+    lines = session.run("CL")
+    assert lines[:4] == [
+        "file: /src/a.c", "line: 12", "colu: 0", "addr: 0x00001000",
+    ]
+    assert session.run("CL*")[:2] == [
+        "'CL 0x00001000 /src/a.c:12",
+        "'CL 0x00001004 /src/a.c:13",
+    ]
+    rows = json.loads("\n".join(session.run("CLj")))
+    assert rows[0] == {"addr": 0x1000, "file": "/src/a.c", "line": 12, "column": 0}
+
+
+@pytest.mark.parametrize("command", ["CLz", "CLd", "CLq"])
+def test_unknown_cl_suffixes_fail_loudly(command: str) -> None:
+    session, _remote = make_session()
+    session.failed = False
+    session.run(command)
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported line-info command" in str(session.last_error)
 
 
 @pytest.mark.parametrize("command", ["ic", "iic"])

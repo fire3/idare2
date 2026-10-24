@@ -94,6 +94,22 @@ def test_iI(session) -> None:
     assert any(line.startswith("bits") for line in lines)
 
 
+def test_cl_exposes_source_file_information(session) -> None:
+    """``CLu``/``CLf`` use the lines IDA imported from DWARF.
+
+    The checked-in database has source-file ranges but no per-address line
+    numbers, so ``CLu`` is the reliable assertion here; ``CLj`` may be empty.
+    """
+    session.failed = False
+    files = session.run("CLu")
+    if not files:
+        pytest.skip("the database has no source-file ranges")
+    assert any(path.endswith(".c") for path in files)
+    payload = json.loads("\n".join(session.run("CLj")))
+    assert isinstance(payload, list)
+    assert not session.failed
+
+
 def test_it_hashes_the_input_file(session) -> None:
     """``itj`` hashes the input when reachable, otherwise uses the loader.
 
