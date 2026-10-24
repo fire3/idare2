@@ -1474,6 +1474,22 @@ def test_blocksize() -> None:
     assert session.blocksize == 79
 
 
+def test_blocksize_r2_spellings_and_unknown_suffixes() -> None:
+    session, _remote = make_session()
+    assert session.run("b*") == ["b 256"]
+    assert json.loads(session.run("bj")[0]) == {"blocksize": 256}
+    session.run("b=64")
+    assert session.blocksize == 64
+    assert session.run("b*") == ["b 64"]
+
+    for command in ("bz", "bf x", "bg x", "bm 1M", "b64:AA"):
+        session.failed = False
+        session.run(command)
+        assert session.failed, command
+        assert isinstance(session.last_error, UsageError)
+        assert "unsupported blocksize modifier" in str(session.last_error)
+
+
 def test_plain_iterators_apply_the_item_seek() -> None:
     """Each ``@@`` item runs with its own seek; the original is restored after."""
     session, _remote = make_session()

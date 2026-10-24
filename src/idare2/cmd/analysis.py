@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from idare2.session import Session
 
 ANALYSIS_DETAIL = [
+    ("a", "", "file information (idare2 maps r2's analysis info here)"),
+    ("ai", "", "file information (r2's address-info form is not available)"),
     ("aa", "", "wait for IDA's automatic analysis to settle"),
     ("aaa", "", "the same, plus analysis of unrecognised regions"),
     ("af", "", "create a function at the current address"),

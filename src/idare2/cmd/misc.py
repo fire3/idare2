@@ -310,7 +310,17 @@ def quit_(session: Session, statement: Statement) -> list[str]:
     raise QuitRequested(code)
 
 
-@command("b", usage="[n]", summary="block size", json_suffix=True)
+BLOCK_DETAIL = [
+    ("b", "[n]", "show or set the block size"),
+    ("b+", "[n]", "increase the block size"),
+    ("b-", "[n]", "decrease the block size"),
+    ("b=", "[n]", "set the block size (r2 spelling)"),
+    ("b*", "", "print the block size as an r2 command"),
+    ("bj", "", "block size as JSON"),
+]
+
+
+@command("b", usage="[n]", summary="block size", detail=BLOCK_DETAIL, json_suffix=True)
 def blocksize(session: Session, statement: Statement) -> list[str]:
     # r2 lets the argument be glued to the command (`b+16`, `b-16`), so the
     # suffix may carry the amount as well as the sign.
@@ -318,6 +328,14 @@ def blocksize(session: Session, statement: Statement) -> list[str]:
     argument = statement.args.strip()
     if suffix == "j":
         return [f'{{"blocksize":{session.blocksize}}}']
+    if suffix == "*":
+        return [f"b {session.blocksize}"]
+    if suffix.startswith("="):
+        value = suffix[1:].strip() or argument
+        if not value:
+            raise UsageError("b= needs a block size")
+        session.blocksize = max(session.eval(value), 1)
+        return []
     if suffix.startswith(("+", "-")):
         glued = suffix[1:].strip()
         amount = glued or argument
@@ -327,6 +345,8 @@ def blocksize(session: Session, statement: Statement) -> list[str]:
         else:
             session.blocksize += delta
         return []
+    if suffix:
+        raise UsageError(f"unsupported blocksize modifier '{suffix}' (see b?)")
     if argument:
         session.blocksize = max(session.eval(argument), 1)
         return []
