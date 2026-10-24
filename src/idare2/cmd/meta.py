@@ -46,7 +46,21 @@ COMMENT_DETAIL = [
 _SIZES = {"1": "byte", "2": "word", "4": "dword", "8": "qword"}
 
 
-@command("C", usage="[Cd]", summary="comments and metadata", detail=COMMENT_DETAIL, json_suffix=True)
+@command(
+    "C",
+    usage="[Cd]",
+    summary="comments and metadata",
+    detail=COMMENT_DETAIL,
+    json_suffix=True,
+    suffixes=frozenset(
+        {
+            "", "j", "*", ".", "C", "C*", "C.", "C-", "Cr", "Cu",
+            "-", "d", "d.", "h", "h-", "s", "s.", "s.j", "s-", "s*",
+        }
+    ),
+    suffix_label="metadata command",
+    suffix_help="C?",
+)
 def metadata(session: Session, statement: Statement) -> list[str]:
     suffix = statement.cmd[1:]
     argument = statement.args.strip()

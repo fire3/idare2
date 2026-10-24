@@ -74,7 +74,15 @@ FUNCTION_DETAIL = [
 ]
 
 
-@command("a", usage="[a]", summary="analysis", detail=ANALYSIS_DETAIL)
+@command(
+    "a",
+    usage="[a]",
+    summary="analysis",
+    detail=ANALYSIS_DETAIL,
+    suffixes=frozenset({"", "a", "aa", "aaa", "i"}),
+    suffix_label="analysis command",
+    suffix_help="a?",
+)
 def analysis(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
     if token in ("aa", "aaa", "aaaa"):

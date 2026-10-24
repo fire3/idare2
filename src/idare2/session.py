@@ -258,7 +258,15 @@ class Session:
         found = cmd.lookup(statement.cmd)
         if found is None:
             raise _unknown(statement.cmd)
-        command, _remainder = found
+        command, remainder = found
+        # A prefix match must never silently fall back to the base command.
+        # Commands that opt into an explicit suffix set get their leftovers
+        # rejected here, before any handler or remote call.
+        if not command.accepts_remainder(remainder):
+            hint = f" (see {command.suffix_help})" if command.suffix_help else ""
+            raise UsageError(
+                f"unsupported {command.suffix_label} '{remainder}'{hint}"
+            )
         # `f? name` is a query, not a help request -- but only for commands that
         # opted in, so `pd? foo` keeps printing the pd table, and a bare `f?`
         # still does too.

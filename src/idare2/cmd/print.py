@@ -144,6 +144,13 @@ DISASM_IMPLEMENTED = frozenset(
     }
 )
 
+#: Leftover characters the registry accepts for ``p[dDiI]``.  Anything outside
+#: this set is rejected before the handler (and therefore before any remote
+#: call), so a new r2 modifier cannot silently render as plain ``pd``.
+DISASM_SUFFIXES = frozenset(
+    token[2:] for token in DISASM_IMPLEMENTED | DISASM_UNSUPPORTED
+)
+
 
 @command(
     "p[dDiI]",
@@ -151,6 +158,9 @@ DISASM_IMPLEMENTED = frozenset(
     summary="print disassembly",
     detail=DISASM_DETAIL,
     json_suffix=True,
+    suffixes=DISASM_SUFFIXES,
+    suffix_label="print modifier",
+    suffix_help="pd?",
 )
 def print_disasm(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
@@ -202,11 +212,11 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
         return _comment_lines(payload, session, target)
     if token == "pd,":
         return _disasm_table(payload, session, target)
-    if token == "pd":
-        lines = fmt_disasm.format_disasm(payload, session)
-        return with_more(lines, meta)
 
-    raise AssertionError(f"unhandled disassembly token {token!r}")
+    # pd/pdf/pdb/pdr/pdr./pD/pdcc: the standard listing (the payload already
+    # carries the requested mode).
+    lines = fmt_disasm.format_disasm(payload, session)
+    return with_more(lines, meta)
 
 
 def _instruction_json(payload: dict[str, Any]) -> str:
@@ -312,6 +322,9 @@ def _decompile(session: Session, target: int, count: int | None, offset: int) ->
     usage="[asm]",
     summary="assemble an instruction",
     detail=ASSEMBLY_DETAIL,
+    suffixes=frozenset({""}),
+    suffix_label="print modifier",
+    suffix_help="pa?",
 )
 def print_assembly(session: Session, statement: Statement) -> list[str]:
     """``pa`` -- the reverse of ``pd``, matching r2's hexpair output."""
@@ -643,7 +656,16 @@ X_DETAIL = [
 _X_ALIASES = {"x": "px", "x8": "px", "xw": "pxw", "xq": "pxq"}
 
 
-@command("x", usage="[n]", summary="print memory (alias of px)", detail=X_DETAIL, json_suffix=True)
+@command(
+    "x",
+    usage="[n]",
+    summary="print memory (alias of px)",
+    detail=X_DETAIL,
+    json_suffix=True,
+    suffixes=frozenset({"", "8", "w", "q", "j"}),
+    suffix_label="print modifier",
+    suffix_help="px?",
+)
 def print_x(session: Session, statement: Statement) -> list[str]:
     """The r2 ``x`` family: ``x``/``x8`` = ``px``, ``xw``/``xq`` = ``pxw``/``pxq``.
 
@@ -679,7 +701,15 @@ EQUAL_DETAIL = [
 ]
 
 
-@command("p=", usage="[d] [len]", summary="block statistics", detail=EQUAL_DETAIL)
+@command(
+    "p=",
+    usage="[d] [len]",
+    summary="block statistics",
+    detail=EQUAL_DETAIL,
+    suffixes=frozenset({"", "d"}),
+    suffix_label="print modifier",
+    suffix_help="p=?",
+)
 def print_equal(session: Session, statement: Statement) -> list[str]:
     """``p=d`` -- r2's per-block dictionary statistics.
 
@@ -856,7 +886,16 @@ AO_DETAIL = [
 _AO_ORDER = ("address", "opcode", "disasm", "mnemonic", "bytes", "size", "sign", "type", "family")
 
 
-@command("a[oO]", usage="[n]", summary="instruction details", detail=AO_DETAIL, json_suffix=True)
+@command(
+    "a[oO]",
+    usage="[n]",
+    summary="instruction details",
+    detail=AO_DETAIL,
+    json_suffix=True,
+    suffixes=frozenset({"", "j"}),
+    suffix_label="print modifier",
+    suffix_help="ao?",
+)
 def print_op_info(session: Session, statement: Statement) -> list[str]:
     """``ao``/``aoj`` -- one instruction at the seek.
 
@@ -896,7 +935,15 @@ def print_op_info(session: Session, statement: Statement) -> list[str]:
     return lines
 
 
-@command("pt", usage="[dhnb.] [len]", summary="print timestamps", detail=PT_DETAIL)
+@command(
+    "pt",
+    usage="[dhnb.] [len]",
+    summary="print timestamps",
+    detail=PT_DETAIL,
+    suffixes=frozenset({"", "d", "h", "n", "b", "."}),
+    suffix_label="print modifier",
+    suffix_help="pt?",
+)
 def print_timestamp(session: Session, statement: Statement) -> list[str]:
     """``pt``/``ptd``/``pth``/``ptn``/``ptb`` -- r2's timestamp decoders."""
     import time as _time
@@ -948,7 +995,15 @@ PU_DETAIL = [
 ]
 
 
-@command("pu", usage="[w] [len]", summary="URL-encode bytes", detail=PU_DETAIL)
+@command(
+    "pu",
+    usage="[w] [len]",
+    summary="URL-encode bytes",
+    detail=PU_DETAIL,
+    suffixes=frozenset({"", "w"}),
+    suffix_label="print modifier",
+    suffix_help="pu?",
+)
 def print_urlencoded(session: Session, statement: Statement) -> list[str]:
     """``pu``/``puw`` -- ``%xx`` for every byte (``puw``: every second byte)."""
     token = statement.cmd

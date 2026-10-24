@@ -99,3 +99,32 @@ def test_registered_patterns_are_unique() -> None:
 def test_duplicate_registration_fails_loudly() -> None:
     with pytest.raises(ValueError, match=r"duplicate command pattern 'p\[dDiI\]'"):
         cmd.command("p[dDiI]")(lambda session, statement: [])
+
+
+def test_declared_suffix_sets_reject_unknown_leftovers() -> None:
+    """A command that opts into registry validation cannot silently fall back."""
+    declared = [command for command in cmd.all_commands() if command.suffixes is not None]
+    assert declared, "expected at least the print and info families to opt in"
+    for command in declared:
+        assert command.suffix_help, f"{command.pattern} must point at its help"
+        assert not command.accepts_remainder("ZZZ"), command.pattern
+        assert command.accepts_remainder(""), command.pattern
+
+
+def test_suffix_prefixes_cover_glued_blocksize_forms() -> None:
+    found = cmd.lookup("b")
+    assert found is not None
+    command = found[0]
+    assert command.accepts_remainder("+16")
+    assert command.accepts_remainder("-16")
+    assert command.accepts_remainder("=64")
+    assert not command.accepts_remainder("z")
+
+
+def test_print_suffix_set_covers_implemented_and_explicitly_unsupported() -> None:
+    found = cmd.lookup("pd")
+    assert found is not None
+    command = found[0]
+    for token in ("", "j", "f", "fj", "b", "r", "i", "d", "C", "J", ",", "s", "--"):
+        assert command.accepts_remainder(token), token
+    assert not command.accepts_remainder("zz")

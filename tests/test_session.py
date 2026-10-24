@@ -709,6 +709,18 @@ def test_unknown_x_forms_fail_loudly(command: str) -> None:
     assert "read_bytes" not in remote.operations
 
 
+def test_registry_rejects_unknown_suffix_before_the_handler_runs() -> None:
+    """The opt-in suffix set is checked in `Session.invoke`, not the handler."""
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run("xzz 4 @ 0x1000")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported print modifier" in str(session.last_error)
+    assert not remote.operations
+
+
 def test_p_equal_dict_statistics_match_r2() -> None:
     session, remote = make_session()
     remote.read_data = bytes([0, 1, 2, 3, 0xA8, 0xA8, 5, 7])
@@ -770,6 +782,14 @@ def test_pd_projections_and_json_forms() -> None:
     formatted = json.loads("\n".join(session.run("pdJ 1 @ 0x1000")))
     assert formatted[0]["addr"] == 0x1000
     assert formatted[0]["text"] == "MOV R11, #0"
+
+
+def test_pd_modes_render_the_default_listing() -> None:
+    session, _remote = make_session()
+    baseline = session.run("pd 1 @ 0x1000")
+    for command in ("pdf @ 0x1000", "pdb @ 0x1000", "pdr @ 0x1000",
+                    "pdr. @ 0x1000", "pD 1 @ 0x1000"):
+        assert session.run(command) == baseline, command
 
 
 def test_pd_table_uses_the_columns_ida_can_fill() -> None:

@@ -41,9 +41,29 @@ class Command:
     query_suffix: bool = False
     #: The command has a ``j`` form, so ``-j`` may default it to JSON.
     json_suffix: bool = False
+    #: Remaining characters the handler accepts after the pattern.  ``None``
+    #: means "the handler validates its own suffixes" (legacy behaviour); an
+    #: explicit set makes :meth:`Session.invoke` reject anything else before
+    #: the handler runs, which is what prevents a prefix from silently falling
+    #: back to a different command.
+    suffixes: frozenset[str] | None = None
+    #: Suffix prefixes accepted in addition to :attr:`suffixes` (``b+16``).
+    suffix_prefixes: tuple[str, ...] = ()
+    #: Wording for the registry-level suffix error, e.g. "print modifier".
+    suffix_label: str = "command"
+    #: Help token for that error, e.g. ``"pd?"``.
+    suffix_help: str = ""
 
     def __post_init__(self) -> None:
         self._literal = _literal_count(self.pattern)
+
+    def accepts_remainder(self, remainder: str) -> bool:
+        """Whether the handler is allowed to see this leftover suffix."""
+        if not remainder or self.suffixes is None:
+            return True
+        if remainder in self.suffixes:
+            return True
+        return any(remainder.startswith(prefix) for prefix in self.suffix_prefixes)
 
 
 REGISTRY: list[Command] = []
@@ -83,6 +103,10 @@ def command(
     detail: list[tuple[str, str, str]] | None = None,
     query_suffix: bool = False,
     json_suffix: bool = False,
+    suffixes: frozenset[str] | set[str] | None = None,
+    suffix_prefixes: tuple[str, ...] = (),
+    suffix_label: str = "command",
+    suffix_help: str = "",
 ):
     """Register a command implementation."""
 
@@ -107,6 +131,10 @@ def command(
                 detail=list(detail or []),
                 query_suffix=query_suffix,
                 json_suffix=json_suffix,
+                suffixes=None if suffixes is None else frozenset(suffixes),
+                suffix_prefixes=suffix_prefixes,
+                suffix_label=suffix_label,
+                suffix_help=suffix_help,
             )
         )
         return function

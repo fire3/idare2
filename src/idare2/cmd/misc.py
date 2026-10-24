@@ -320,7 +320,17 @@ BLOCK_DETAIL = [
 ]
 
 
-@command("b", usage="[n]", summary="block size", detail=BLOCK_DETAIL, json_suffix=True)
+@command(
+    "b",
+    usage="[n]",
+    summary="block size",
+    detail=BLOCK_DETAIL,
+    json_suffix=True,
+    suffixes=frozenset({"", "j", "*"}),
+    suffix_prefixes=("+", "-", "="),
+    suffix_label="blocksize modifier",
+    suffix_help="b?",
+)
 def blocksize(session: Session, statement: Statement) -> list[str]:
     # r2 lets the argument be glued to the command (`b+16`, `b-16`), so the
     # suffix may carry the amount as well as the sign.

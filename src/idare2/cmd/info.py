@@ -81,7 +81,16 @@ LISTING_TOKENS = frozenset(
 )
 
 
-@command("i", usage="[j]", summary="file information", detail=INFO_DETAIL, json_suffix=True)
+@command(
+    "i",
+    usage="[j]",
+    summary="file information",
+    detail=INFO_DETAIL,
+    json_suffix=True,
+    suffixes=frozenset({"", "I", "j", "t", "tj"}),
+    suffix_label="information command",
+    suffix_help="i?",
+)
 def file_info(session: Session, statement: Statement) -> list[str]:
     if statement.cmd not in FILE_TOKENS:
         raise UsageError(f"unsupported information command '{statement.cmd}' (see i?)")
@@ -117,6 +126,9 @@ def _file_hashes(session: Session, *, as_json: bool) -> list[str]:
     usage="[pat]",
     summary="list segments, symbols, imports, strings",
     json_suffix=True,
+    suffixes=frozenset({"", "j"}),
+    suffix_label="information command",
+    suffix_help="i?",
 )
 def listing(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
@@ -178,6 +190,9 @@ def listing(session: Session, statement: Statement) -> list[str]:
     summary="ELF file header",
     detail=HEADER_DETAIL,
     json_suffix=True,
+    suffixes=frozenset({"", "j", "q", "*"}),
+    suffix_label="information command",
+    suffix_help="ih?",
 )
 def header(session: Session, statement: Statement) -> list[str]:
     """``ih``/``iH`` -- the ELF file header, read from the original input.
@@ -220,6 +235,9 @@ def header(session: Session, statement: Statement) -> list[str]:
     summary="demangle a symbol",
     detail=[("iD", "[lang] sym", "demangle a symbol (default language from bin.lang)")],
     json_suffix=True,
+    suffixes=frozenset({"", "j"}),
+    suffix_label="information command",
+    suffix_help="i?",
 )
 def demangle_symbol(session: Session, statement: Statement) -> list[str]:
     """``iD [lang] sym`` -- demangle one symbol.
@@ -267,6 +285,9 @@ def demangle_symbol(session: Session, statement: Statement) -> list[str]:
     summary="list the architectures found in the file",
     detail=[("ia", "", "architectures found in the file"), ("iaj", "", "architectures as JSON")],
     json_suffix=True,
+    suffixes=frozenset({"", "j"}),
+    suffix_label="information command",
+    suffix_help="i?",
 )
 def architectures(session: Session, statement: Statement) -> list[str]:
     """``ia``/``iaj`` -- the file's arch(es).
@@ -303,6 +324,9 @@ def architectures(session: Session, statement: Statement) -> list[str]:
         ("ilq", "", "needed libraries, names only"),
     ],
     json_suffix=True,
+    suffixes=frozenset({"", "j", "q"}),
+    suffix_label="information command",
+    suffix_help="i?",
 )
 def libraries(session: Session, statement: Statement) -> list[str]:
     """``il``/``ilj`` -- ``DT_NEEDED`` entries, one per line like r2."""
