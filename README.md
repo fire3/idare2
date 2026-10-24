@@ -154,18 +154,18 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Area | Commands |
 |---|---|
 | Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
-| Disassembly | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdl` `pdq` `pdj` `pdc` |
+| Disassembly | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdi` `pdl` `pdq` `pdj` `pdC` `pdJ` `pd,` `pdc` `pC` `pA` |
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
-| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `pr` `pc` `p6` `pj` `p=` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `pv` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
-| Information | `i` `iI` `ij` `it` `itj` `iD` `ia` `iaj` `il` `ilj` `ilq` `iS` `ii` `is` `iz` `ir` `ih` `iH` `ie` `iE` `iM` |
-| Analysis | `aa` `aaa` `af` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `agf` `agfj` `agfd` |
+| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `pp*` `po*` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
+| Information | `i` `iI` `ij` `it` `itj` `iD` `ia` `iaj` `il` `ilj` `ilq` `iS` `iSj` `iSS` `iS.` `iSh` `iSm` `ii` `is` `iz` `izz` `izzj` `ir` `ih` `iH` `ie` `iee` `ies` `iE` `iM` `iC` `iV` `iv` `iT` `ig` `ic` `icj` `icq` `icl` `ics` `ic*` `CL` `CLu` `CLf` `CLL` |
+| Analysis | `aa` `aaa` `af` `aF` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `a8` `ad` `adk` `ah` `an` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
 | Metadata | `C` `Cj` `C*` `C.` `CC` `CCr` `CCu` `CC*` `CC.` `CC-` `C-` `Cd` `Cd.` `Ch` `Ch-` `Cs` `Cs.` `Cs.j` `Cs-` `Cs*` |
 | Types | `t` `tj` `t*` `ts` `tu` `tp` `tpv` `tpx` `tc` `td` `tt` `tt-` `t-` `te` `tf` `tfj` `tfc` `tn` `tn-` `to` `dt` |
 | Flags | `f` `f*` `f,` `f-` `f?` `fq` `fn` `fnj` `fN` `fr` `fx` |
 | Sessions | `S` `Ps` `Po` `P-` `Pj` `P` `y` `yy` `yx` `yt` `yf` `cc` `c1` |
-| Other | `?` `b` `e` `q` `L` `_` |
+| Other | `?` `b` `e` `q` `L` `_` `%` `T` `*` |
 
 Most information commands support a `j` suffix for JSON output.
 
@@ -193,6 +193,12 @@ Most information commands support a `j` suffix for JSON output.
 - `agf` prints a compact ASCII function graph, `agfj`/`agj` return r2-shaped
   graph JSON, and `agfd` emits Graphviz DOT. `agg`/`aggd` are accepted aliases
   for the current function's DOT.
+- `iS` lists ELF sections (an algorithm name adds a hash column), `iSS` lists
+  program-header memory maps, and `izz` scans the whole input file, including
+  non-loaded debug sections. `CL*` exposes the DWARF source-line data IDA
+  imported; `ic` reconstructs classes from IDA's UDTs and C++ symbols.
+- Command prefixes validate their suffixes: an unknown `pd`/`i`/`b`/... suffix
+  is a usage error instead of silently running the base command.
 
 ## Development
 
