@@ -143,3 +143,15 @@ def test_empty_redirect_is_rejected() -> None:
 
 def test_split_args_honours_quotes() -> None:
     assert parser.split_args('foo "bar baz" qux') == ["foo", "bar baz", "qux"]
+
+
+def test_leading_quotes_keep_the_payload_literal() -> None:
+    single = parse_one("'?e hello @ world")
+    assert single.cmd == "'"
+    assert single.args == "?e hello @ world"
+    assert single.tmpseek is None
+
+    double = parse_one('"?e x;y"')
+    assert double.cmd == '"'
+    assert double.args == '?e x;y"'
+    assert [s.cmd for s in parser.parse('"?e x;y"')] == ['"']
