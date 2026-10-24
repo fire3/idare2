@@ -21,6 +21,10 @@ INFO_DETAIL = [
     ("it", "", "file hashes"),
     ("itj", "", "file hashes as JSON"),
     ("iD", "[lang] sym", "demangle a symbol"),
+    ("iC", "", "signature info (empty for ELF)"),
+    ("iV", "", "version information (empty for ELF)"),
+    ("iv", "", "file version info (empty for ELF)"),
+    ("iT", "", "file signature (empty for ELF)"),
     ("ia", "", "architectures found in the file"),
     ("iaj", "", "architectures as JSON"),
     ("il", "", "needed libraries"),
@@ -369,6 +373,36 @@ def section_info(session: Session, statement: Statement) -> list[str]:
     if token not in SECTION_TOKENS:
         raise UsageError(f"unsupported information command '{token}' (see iS?)")
     return _sections(session, token, statement, token.endswith("j"))
+
+
+@command(
+    "i[CVTv]",
+    usage="[j]",
+    summary="signature, version and file-version information",
+    detail=[
+        ("iC", "[j]", "signature info (Mach-O entitlements; empty for ELF)"),
+        ("iV", "[j]", "ELF version information (empty without version sections)"),
+        ("iv", "[j]", "file version info"),
+        ("iT", "[j]", "file signature"),
+    ],
+    json_suffix=True,
+    suffixes=frozenset({"", "j"}),
+    suffix_label="information command",
+    suffix_help="i?",
+)
+def version_info(session: Session, statement: Statement) -> list[str]:
+    """``iC``/``iV``/``iv``/``iT`` -- empty on ELF, as r2 reports them.
+
+    These describe PE/Mach-O files.  r2 still prints the empty shape for
+    ``iCj``/``iTj`` (``{}``) and the two version arrays for ``iVj``/``ivj``,
+    so the JSON forms match even when there is nothing to report.
+    """
+    token = statement.cmd
+    if token.endswith("j"):
+        if token.startswith(("iV", "iv")):
+            return [to_json([{"versym": [], "verneed": []}])]
+        return [to_json({})]
+    return []
 
 
 @command(

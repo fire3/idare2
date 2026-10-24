@@ -383,6 +383,20 @@ def test_constructors_match_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def test_version_info_shapes_match_r2(session, r2) -> None:
+    """iC/iV/iv/iT are empty on ELF, but r2 keeps the JSON wrappers."""
+    for command in ("iC", "iV", "iv", "iT"):
+        assert session.run(command) == r2(command), command
+    for command in ("iCj", "iTj"):
+        assert json.loads("\n".join(session.run(command))) == json.loads(
+            "\n".join(r2(command))
+        ), command
+    for command in ("iVj", "ivj"):
+        assert json.loads("\n".join(session.run(command))) == json.loads(
+            "\n".join(r2(command))
+        ), command
+
+
 def test_pattern_generators_match_r2(session, r2) -> None:
     """``pp*`` is generated client-side; the bytes must be identical."""
     for command in (

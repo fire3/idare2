@@ -2939,6 +2939,16 @@ def test_unknown_cl_suffixes_fail_loudly(command: str) -> None:
     assert "unsupported line-info command" in str(session.last_error)
 
 
+def test_version_info_commands_match_r2_shapes() -> None:
+    session, _remote = make_session()
+    for command in ("iC", "iV", "iv", "iT"):
+        assert session.run(command) == []
+    assert json.loads(session.run("iCj")[0]) == {}
+    assert json.loads(session.run("iTj")[0]) == {}
+    assert json.loads(session.run("iVj")[0]) == [{"versym": [], "verneed": []}]
+    assert json.loads(session.run("ivj")[0]) == [{"versym": [], "verneed": []}]
+
+
 def test_ic_lists_classes_methods_and_fields() -> None:
     session, _remote = make_session()
     lines = session.run("ic")
