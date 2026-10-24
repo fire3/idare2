@@ -77,6 +77,11 @@ KEYS: tuple[Key, ...] = (
     Key("bin.hashlimit", 10 * 1024 * 1024, INT, "hash only inputs up to this size", suffixes=True),
     #: Default language for `iD sym` when only one argument is given.
     Key("bin.lang", "c", STR, "default demangler language for `iD sym`"),
+    # -- strings -----------------------------------------------------------
+    Key("bin.str.min", 4, INT, "minimum length for iz/izz strings", minimum=1),
+    Key("bin.str.max", 512, INT, "maximum length for iz/izz strings", minimum=1),
+    Key("bin.str.align", 0, INT, "only report strings at this alignment (0 = any)", minimum=0),
+    Key("bin.str.enc", "guess", STR, "izz encoding: guess, ascii, utf8, wide"),
     Key("cfg.bigendian", False, BOOL, "big-endian mode (reflects the database)", readonly=True),
     Key("cfg.debug", False, BOOL, "debugger mode (idare2 has none)", readonly=True),
     Key("cfg.editor", "", STR, "editor for `-` and `CC!` (defaults to $EDITOR)"),

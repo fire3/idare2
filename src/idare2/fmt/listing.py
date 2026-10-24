@@ -230,7 +230,7 @@ def format_strings(strings: list[dict[str, Any]], session: Any) -> list[str]:
     headers = ("nth", "paddr", "vaddr", "len", "size", "section", "type", "string")
     rows = []
     for index, item in enumerate(strings):
-        vaddr = int(item["ea"])
+        vaddr = int(item.get("ea", item.get("vaddr", 0)))
         rows.append(
             [
                 str(index),
@@ -238,9 +238,9 @@ def format_strings(strings: list[dict[str, Any]], session: Any) -> list[str]:
                 fmt_addr(vaddr, width),
                 str(item.get("length", 0)),
                 str(item.get("size", 0)),
-                item.get("section", "") or "unknown",
-                "ascii",
-                item["text"],
+                item.get("section", ""),
+                item.get("type") or "ascii",
+                item.get("text", item.get("string", "")),
             ]
         )
     return table(headers, rows)

@@ -387,6 +387,23 @@ def test_guess_size_matches_r2(session, r2) -> None:
     assert session.run("ig") == r2("ig")
 
 
+def test_izz_covers_the_whole_file_like_r2(session, r2) -> None:
+    """``izz`` scans non-loaded sections too (``.debug_*``); counts may differ
+    slightly because the detector is an independent implementation, so compare
+    the agreed rows rather than demanding an exact list."""
+    ours = json.loads("\n".join(session.run("izzj")))
+    theirs = json.loads("\n".join(r2("izzj")))
+    assert {row["section"] for row in ours} >= {".debug_str", ".debug_info"}
+    key = lambda row: (row["paddr"], row["string"], row["type"])  # noqa: E731
+    ours_keys = {key(row) for row in ours}
+    theirs_keys = {key(row) for row in theirs}
+    shared = ours_keys & theirs_keys
+    assert len(shared) >= 0.98 * min(len(ours_keys), len(theirs_keys))
+    assert any(
+        row["vaddr"] == 0xC8C48 and row["string"] == "action.c" for row in ours
+    )
+
+
 def test_segment_table_shape(session, r2) -> None:
     """``iS`` must agree on the code segment's virtual address and size.
 

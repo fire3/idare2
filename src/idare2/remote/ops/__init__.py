@@ -22,6 +22,7 @@ def load_all() -> None:
         memory,
         search,
         session,
+        strings,
         types,
         write,
     )

@@ -193,6 +193,18 @@ class FakeRemote:
                 {"ea": 0x4000, "size": 6, "text": "first"},
                 {"ea": 0x4100, "size": 12, "text": "second"},
             ],
+            "all_strings": lambda: [
+                {
+                    "vaddr": 0x4000,
+                    "paddr": 0x3000,
+                    "ordinal": 0,
+                    "size": 6,
+                    "length": 5,
+                    "section": ".rodata",
+                    "type": "ascii",
+                    "string": "first",
+                },
+            ],
             "relocations": lambda: [
                 {
                     "vaddr": 0xF9128,
@@ -2602,7 +2614,21 @@ def test_invalid_base64_write_is_a_usage_error(command: str) -> None:
     assert "patch_bytes" not in remote.operations
 
 
-@pytest.mark.parametrize("command", ["ic", "iic", "izz"])
+def test_izz_scans_the_whole_file_and_passes_config() -> None:
+    session, remote = make_session()
+    session.config.set("bin.str.min", 2)
+    lines = session.run("izz")
+    assert lines[2].split() == [
+        "0", "0x00003000", "0x00004000", "5", "6", ".rodata", "ascii", "first",
+    ]
+    arguments = [args for name, args in remote.calls if name == "all_strings"][-1]
+    assert arguments["min_length"] == 2
+    assert arguments["max_length"] == session.config.get_int("bin.str.max")
+    payload = json.loads("\n".join(session.run("izzj")))
+    assert payload[0]["string"] == "first"
+
+
+@pytest.mark.parametrize("command", ["ic", "iic"])
 def test_unimplemented_info_commands_do_not_fall_through(command: str) -> None:
     session, _remote = make_session()
     assert session.run(command) == []

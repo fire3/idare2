@@ -33,6 +33,7 @@ INFO_DETAIL = [
     ("ii", "[pat]", "imports"),
     ("is", "[pat]", "symbols"),
     ("iz", "[pat]", "strings"),
+    ("izz", "[pat]", "strings in the whole file"),
     ("ir", "", "relocations"),
     ("ih", "", "header fields"),
     ("iH", "", "file header"),
@@ -76,6 +77,8 @@ LISTING_DETAIL = {
     "ii": [("ii", "[pat]", "imports"), ("iij", "[pat]", "imports as JSON")],
     "is": [("is", "[pat]", "symbols"), ("isj", "[pat]", "symbols as JSON")],
     "iz": [("iz", "[pat]", "strings"), ("izj", "[pat]", "strings as JSON")],
+    "izz": [("izz", "[pat]", "strings in the whole file"),
+            ("izzj", "[pat]", "whole-file strings as JSON")],
     "ir": [("ir", "", "relocations"), ("irj", "", "relocations as JSON")],
     "ie": [
         ("ie", "", "entry points"),
@@ -269,7 +272,7 @@ def section_info(session: Session, statement: Statement) -> list[str]:
     usage="[pat]",
     summary="list symbols, imports, entries, strings",
     json_suffix=True,
-    suffixes=frozenset({"", "j", "e", "ej", "s", "sj", "h"}),    suffix_label="information command",
+    suffixes=frozenset({"", "j", "e", "ej", "s", "sj", "h", "z", "zj"}),    suffix_label="information command",
     suffix_help="i?",
 )
 def listing(session: Session, statement: Statement) -> list[str]:
@@ -316,6 +319,17 @@ def listing(session: Session, statement: Statement) -> list[str]:
         rows, meta = session.remote.call_with_meta(
             "symbols", pattern=pattern, offset=offset, count=count
         )
+    elif base == "iz" and token.startswith("izz"):
+        rows, meta = session.remote.call_with_meta(
+            "all_strings",
+            pattern=pattern,
+            offset=offset,
+            count=count,
+            min_length=session.config.get_int("bin.str.min"),
+            max_length=session.config.get_int("bin.str.max"),
+            alignment=session.config.get_int("bin.str.align"),
+            encoding=session.config.get("bin.str.enc"),
+        )
     elif base == "iz":
         rows, meta = session.remote.call_with_meta(
             "strings", pattern=pattern, offset=offset, count=count
@@ -338,6 +352,7 @@ def listing(session: Session, statement: Statement) -> list[str]:
         "ii": fmt_listing.format_imports,
         "is": fmt_listing.format_symbols,
         "iz": fmt_listing.format_strings,
+        "izz": fmt_listing.format_strings,
         "ir": fmt_listing.format_relocations,
         "ie": fmt_listing.format_entries,
         "iE": fmt_listing.format_symbols,

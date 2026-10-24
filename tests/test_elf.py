@@ -418,3 +418,35 @@ def test_non_elf_and_missing_files_return_none(tmp_path: Path) -> None:
     assert load_elf(str(tmp_path / "missing")) is None
     assert load_elf(None) is None
 
+
+def test_all_strings_scanner_guesses_encodings() -> None:
+    """``izz``'s scanner: ASCII, UTF-8, UTF-16LE and UTF-32LE runs."""
+    from idare2.remote.ops.strings import scan_file
+
+    cases = {
+        b"hello\0": "ascii",
+        b"\xc3\xa9\xc3\xa9t\xc3\xa9\0": "utf8",
+        b"h\0i\0j\0\0\0": "utf16le",
+        b"A\0\0\0B\0\0\0\0\0\0\0": "utf32le",
+    }
+    for data, expected in cases.items():
+        rows = scan_file(data, min_length=2, max_length=64)
+        assert rows, data
+        assert rows[0]["type"] == expected, data
+
+
+def test_all_strings_scanner_respects_min_and_alignment() -> None:
+    from idare2.remote.ops.strings import scan_file
+
+    data = b"ab\0abcd\0abcdef\0"
+    rows = scan_file(data, min_length=4, max_length=64)
+    assert [row["string"] for row in rows] == ["abcd", "abcdef"]
+    aligned = scan_file(data, min_length=4, max_length=64, alignment=4)
+    assert [row["string"] for row in aligned] == ["abcdef"]
+
+
+def test_all_strings_scanner_escapes_control_bytes() -> None:
+    from idare2.remote.ops.strings import scan_file
+
+    rows = scan_file(b"a\nb\tc\0", min_length=2, max_length=64)
+    assert rows[0]["string"] == "a\\nb\\tc"
