@@ -52,6 +52,14 @@ MEMORY_DETAIL = [
     ("pxd", "[n]", "signed decimal dump"),
     ("pxu", "[n]", "unsigned decimal dump"),
     ("p8", "[n]", "hexpair list of bytes"),
+    ("p8j", "[n]", "hexpair list of bytes as JSON"),
+    ("p8s", "[n]", "space-separated hex bytes"),
+    ("p8,", "[n]", "comma-separated hexadecimal bytes"),
+    ("p8d", "[n]", "space-separated decimal bytes"),
+    ("p8x", "[n]", "hexpairs split at hex.cols"),
+    ("p8*", "[n]", "r2 `wx+` command for the block"),
+    ("p8b", "", "hexpairs of the current basic block"),
+    ("p8f", "", "hexpairs of the current function"),
     ("pr", "[n]", "raw bytes"),
     ("pc", "[n]", "C array of bytes"),
     ("pcj", "[n]", "C array of bytes as JSON"),
@@ -332,6 +340,9 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
 
         return [os.getcwd()]
 
+    if token.startswith("p8"):
+        return _print_p8(session, token, target, count)
+
     if token.startswith("ps"):
         return _print_string(session, token, target, count)
 
@@ -371,6 +382,49 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
     if token == "px":
         return fmt_memory.format_hexdump(payload, session)
     raise UsageError(f"unsupported print modifier '{token[1:]}' (see p?)")
+
+
+def _print_p8(
+    session: Session, token: str, target: int, count: int | None
+) -> list[str]:
+    """``p8`` and its projections; unknown suffixes fail before any read."""
+    body = token[2:]
+    if body in ("fm", "fmj"):
+        raise UsageError(f"unsupported print modifier '{token[2:]}' (see p8?)")
+    if body not in ("", "j", "s", ",", "d", "x", "*", "b", "f", "fj"):
+        raise UsageError(f"unsupported print modifier '{token[2:]}' (see p8?)")
+
+    if body in ("b", "f", "fj"):
+        if body == "b":
+            payload = session.remote.call("block_info", ea=target)
+        else:
+            payload = session.remote.call("function_info", ea=target)
+        start = int(payload["start"] if body == "b" else payload["ea"])
+        end = int(payload["end"])
+        read = session.remote.call("read_bytes", ea=start, count=end - start)
+    else:
+        read = session.remote.call(
+            "read_bytes", ea=target, count=count or session.blocksize
+        )
+    data = bytes(read.get("data") or b"")
+
+    if body in ("j", "fj"):
+        return [json.dumps(list(data))]
+    if body == "s":
+        return [" ".join(f"{byte:02x}" for byte in data)]
+    if body == ",":
+        return [",".join(f"0x{byte:02x}" for byte in data)]
+    if body == "d":
+        return [" ".join(str(byte) for byte in data) + (" " if data else "")]
+    if body == "x":
+        columns = max(session.config.get_int("hex.cols"), 1)
+        return [
+            data[offset : offset + columns].hex()
+            for offset in range(0, len(data), columns)
+        ]
+    if body == "*":
+        return [f"wx+ {data.hex()}"]
+    return [data.hex()]
 
 
 def _print_string(

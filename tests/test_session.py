@@ -182,6 +182,13 @@ class FakeRemote:
                 {"start": 0x1000, "end": 0x1008, "size": 8, "index": 0},
                 {"start": 0x1008, "end": 0x1018, "size": 16, "index": 1},
             ],
+            "block_info": lambda: {
+                "start": 0x1000,
+                "end": 0x1008,
+                "size": 8,
+                "index": 0,
+                "count": 2,
+            },
             "strings": lambda: [
                 {"ea": 0x4000, "size": 6, "text": "first"},
                 {"ea": 0x4100, "size": 12, "text": "second"},
@@ -1210,6 +1217,40 @@ def test_unimplemented_ps_pv_suffixes_fail_loudly(command: str) -> None:
     assert isinstance(session.last_error, UsageError)
     assert "unsupported print modifier" in str(session.last_error)
     assert not {"read_bytes", "read_string", "read_values"} & set(remote.operations)
+
+
+def test_p8_projections() -> None:
+    session, remote = make_session()
+    assert session.run("p8 2 @ 0x1000") == ["aaaa"]
+    assert json.loads("\n".join(session.run("p8j 4 @ 0x1000"))) == [0xAA] * 4
+    assert session.run("p8s 2 @ 0x1000") == ["aa aa"]
+    assert session.run("p8, 2 @ 0x1000") == ["0xaa,0xaa"]
+    assert session.run("p8d 2 @ 0x1000") == ["170 170 "]
+    assert session.run("p8* 2 @ 0x1000") == ["wx+ aaaa"]
+
+    session.config.set("hex.cols", 2)
+    assert session.run("p8x 4 @ 0x1000") == ["aaaa", "aaaa"]
+
+
+def test_p8_block_and_function_forms_use_their_own_ranges() -> None:
+    session, remote = make_session()
+    assert session.run("p8b @ 0x1000") == ["aa" * 8]
+    assert session.run("p8f @ 0x1000") == ["aa" * 8]
+    assert json.loads("\n".join(session.run("p8fj @ 0x1000"))) == [0xAA] * 8
+    assert ("block_info", {"ea": 0x1000}) in remote.calls
+    assert ("function_info", {"ea": 0x1000}) in remote.calls
+
+
+@pytest.mark.parametrize("command", ["p8fm", "p8fmj", "p8z", "p8q", "p8qj"])
+def test_unimplemented_p8_suffixes_fail_loudly(command: str) -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run(f"{command} @ 0x1000")
+    assert session.failed, command
+    assert isinstance(session.last_error, UsageError)
+    assert "unsupported print modifier" in str(session.last_error)
+    assert not {"read_bytes", "block_info", "function_info"} & set(remote.operations)
 
 
 def test_yank_and_paste() -> None:
