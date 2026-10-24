@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any
 
 from idare2.cmd import command, numeric_args, with_more
 from idare2.errors import UsageError
+from idare2.fmt import addr_width, fmt_addr, human_size, to_json
 from idare2.fmt import listing as fmt_listing
-from idare2.fmt import to_json
 
 if TYPE_CHECKING:
     from idare2.parser import Statement
@@ -25,7 +25,11 @@ INFO_DETAIL = [
     ("il", "", "needed libraries"),
     ("ilj", "", "needed libraries as JSON"),
     ("ilq", "", "needed libraries, names only"),
-    ("iS", "", "segments with permissions"),
+    ("iS", "[algo]", "ELF sections (optionally with a hash column)"),
+    ("iSS", "", "memory maps (ELF program headers)"),
+    ("iS.", "", "the section containing the seek"),
+    ("iSh", "", "section headers"),
+    ("iSm", "", "sections with the names they contain"),
     ("ii", "[pat]", "imports"),
     ("is", "[pat]", "symbols"),
     ("iz", "[pat]", "strings"),
@@ -33,6 +37,9 @@ INFO_DETAIL = [
     ("ih", "", "header fields"),
     ("iH", "", "file header"),
     ("ie", "", "entry points"),
+    ("iee", "", "constructors and destructors"),
+    ("ies", "[pat]", "entry-point symbols"),
+    ("ig", "[h]", "guess the program size"),
     ("iE", "", "exports"),
     ("iM", "", "main address"),
 ]
@@ -66,19 +73,138 @@ _DEMANGLE_ALIASES = {
 FILE_TOKENS = frozenset({"i", "iI", "ij", "it", "itj"})
 
 LISTING_DETAIL = {
-    "iS": [("iS", "", "segments with permissions"), ("iSj", "", "segments as JSON")],
     "ii": [("ii", "[pat]", "imports"), ("iij", "[pat]", "imports as JSON")],
     "is": [("is", "[pat]", "symbols"), ("isj", "[pat]", "symbols as JSON")],
     "iz": [("iz", "[pat]", "strings"), ("izj", "[pat]", "strings as JSON")],
     "ir": [("ir", "", "relocations"), ("irj", "", "relocations as JSON")],
-    "ie": [("ie", "", "entry points"), ("iej", "", "entry points as JSON")],
+    "ie": [
+        ("ie", "", "entry points"),
+        ("iej", "", "entry points as JSON"),
+        ("iee", "", "constructors and destructors"),
+        ("ieej", "", "constructors and destructors as JSON"),
+        ("ies", "[pat]", "entry-point symbols"),
+        ("iesj", "[pat]", "entry-point symbols as JSON"),
+    ],
+    "ig": [("ig", "", "guess the program size"), ("igh", "", "same, human-readable")],
     "iE": [("iE", "", "exports"), ("iEj", "", "exports as JSON")],
     "iM": [("iM", "", "main address")],
 }
 
+SECTION_DETAIL = [
+    ("iS", "[algo]", "ELF sections; an algorithm name adds a hash column"),
+    ("iSj", "[algo]", "sections as JSON"),
+    ("iSS", "", "memory maps from the ELF program headers"),
+    ("iSSj", "", "memory maps as JSON"),
+    ("iS.", "", "the section containing the current seek"),
+    ("iS.j", "", "the current section as JSON"),
+    ("iSh", "[j]", "raw section-header table"),
+    ("iSm", "", "sections with the names they contain"),
+    ("iSmc", "", "section symbol counts"),
+    ("iSmj", "", "section symbols as JSON"),
+]
+
 LISTING_TOKENS = frozenset(
     token for rows in LISTING_DETAIL.values() for token, _args, _description in rows
 )
+
+SECTION_TOKENS = frozenset(
+    {
+        "iS", "iSj", "iSh", "iShj", "iSS", "iSSj", "iS.", "iS.j",
+        "iSm", "iSmc", "iSmj",
+    }
+)
+
+
+def _sections(
+    session: Session, token: str, statement: Statement, as_json: bool
+) -> list[str]:
+    """``iS``/``iSS``/``iS.``/``iSh``/``iSm`` -- the ELF section family."""
+    rest, _count, _offset = numeric_args(session, statement)
+    if token in ("iS", "iSj"):
+        algorithm = rest[0] if rest else None
+        rows = session.remote.call("sections", hash_name=algorithm)
+        if as_json:
+            return [to_json(fmt_listing.section_json(rows))]
+        return fmt_listing.format_sections(rows, session, hash_name=algorithm)
+
+    if token in ("iSS", "iSSj"):
+        rows = session.remote.call("segments_map")
+        if as_json:
+            return [to_json(fmt_listing.section_json(rows))]
+        return fmt_listing.format_sections(rows, session)
+
+    if token in ("iS.", "iS.j"):
+        row = session.remote.call("section_at", ea=session.seek)
+        if row is None:
+            return []
+        row = {**row, "nth": 0}
+        if as_json:
+            return [to_json(fmt_listing.section_json([row]))]
+        return ["Current section"] + fmt_listing.format_sections([row], session)
+
+    if token in ("iSh", "iShj"):
+        rows = session.remote.call("section_headers")
+        if as_json:
+            return [to_json(rows)]
+        headers = ("name", "type", "flags", "addr", "offset", "size",
+                   "link", "info", "addralign", "entsize")
+        body = [
+            [
+                row["name"],
+                str(row["type"]),
+                f"0x{row['flags']:x}",
+                f"0x{row['addr']:x}",
+                f"0x{row['offset']:x}",
+                f"0x{row['size']:x}",
+                str(row["link"]),
+                str(row["info"]),
+                str(row["addralign"]),
+                str(row["entsize"]),
+            ]
+            for row in rows
+        ]
+        return fmt_listing.table(headers, body)
+
+    if token == "iSmj":
+        rows = session.remote.call("section_symbols")
+        return [to_json(rows)]
+    rows = session.remote.call("section_symbols")
+    if token == "iSmc":
+        return _format_section_symbols(rows, session, counts=True)
+    return _format_section_symbols(rows, session, counts=False)
+
+
+def _format_constructors(rows: list[dict[str, Any]], session: Session) -> list[str]:
+    width = addr_width(session.info.get("bits"))
+    body = [
+        [
+            fmt_addr(int(row["paddr"]), width),
+            fmt_addr(int(row["vaddr"]), width),
+            fmt_addr(int(row["phaddr"]), width),
+            fmt_addr(int(row["vhaddr"]), width),
+            str(row["type"]),
+        ]
+        for row in rows
+    ]
+    return fmt_listing.table(("paddr", "vaddr", "phaddr", "vhaddr", "type"), body)
+
+
+def _format_section_symbols(
+    rows: list[dict[str, Any]], session: Session, *, counts: bool
+) -> list[str]:
+    width = addr_width(session.info.get("bits"))
+    lines = []
+    for row in rows:
+        start = fmt_addr(int(row["start"]), width)
+        end = fmt_addr(int(row["end"]), width)
+        label = f"{start}-{end} {human_size(int(row['vsize'])):>9} {row['name']}"
+        if counts:
+            lines.append(f"{label} = {len(row['symbols'])} symbols")
+            continue
+        lines.append(label)
+        for symbol in row["symbols"]:
+            lines.append(f"{'-':>9} {0:>8} {symbol['name']}")
+    return lines
 
 
 @command(
@@ -122,12 +248,28 @@ def _file_hashes(session: Session, *, as_json: bool) -> list[str]:
 
 
 @command(
-    "i[SsEeizMr]",
-    usage="[pat]",
-    summary="list segments, symbols, imports, strings",
+    "iS",
+    usage="[algo]",
+    summary="ELF sections, memory maps and section symbols",
+    detail=SECTION_DETAIL,
     json_suffix=True,
-    suffixes=frozenset({"", "j"}),
+    suffixes=frozenset({"", "j", "h", "hj", "S", "Sj", ".", ".j", "m", "mc", "mj"}),
     suffix_label="information command",
+    suffix_help="iS?",
+)
+def section_info(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    if token not in SECTION_TOKENS:
+        raise UsageError(f"unsupported information command '{token}' (see iS?)")
+    return _sections(session, token, statement, token.endswith("j"))
+
+
+@command(
+    "i[EeizMrsg]",
+    usage="[pat]",
+    summary="list symbols, imports, entries, strings",
+    json_suffix=True,
+    suffixes=frozenset({"", "j", "e", "ej", "s", "sj", "h"}),    suffix_label="information command",
     suffix_help="i?",
 )
 def listing(session: Session, statement: Statement) -> list[str]:
@@ -137,6 +279,28 @@ def listing(session: Session, statement: Statement) -> list[str]:
     base = token[:2]
     as_json = token.endswith("j")
 
+    if token in ("iee", "ieej"):
+        rows = session.remote.call("constructors")
+        if as_json:
+            return [to_json(rows)]
+        return _format_constructors(rows, session)
+    if token in ("ies", "iesj"):
+        rest, _count, _offset = numeric_args(session, statement)
+        rows = session.remote.call(
+            "entry_symbols", pattern=rest[0] if rest else None
+        )
+        if as_json:
+            return [to_json(rows)]
+        width = addr_width(session.info.get("bits"))
+        return [f"{fmt_addr(int(row['ea']), width)} {row['name']}" for row in rows]
+    if token in ("ig", "igh"):
+        payload = session.remote.call("guess_size")
+        size = int(payload.get("size") or 0)
+        return [human_size(size) if token == "igh" else f"0x{size:08x}"]
+
+    if token in SECTION_TOKENS:
+        return _sections(session, token, statement, as_json)
+
     if base == "iM":
         return _main_address(session)
 
@@ -144,9 +308,7 @@ def listing(session: Session, statement: Statement) -> list[str]:
     pattern = rest[0] if rest else None
     meta = None
 
-    if base == "iS":
-        rows = session.remote.call("segments")
-    elif base == "ii":
+    if base == "ii":
         rows, meta = session.remote.call_with_meta(
             "imports", pattern=pattern, offset=offset, count=count
         )
@@ -173,7 +335,6 @@ def listing(session: Session, statement: Statement) -> list[str]:
         return [to_json(rows)]
 
     formatter = {
-        "iS": fmt_listing.format_segments,
         "ii": fmt_listing.format_imports,
         "is": fmt_listing.format_symbols,
         "iz": fmt_listing.format_strings,

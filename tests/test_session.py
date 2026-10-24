@@ -2602,7 +2602,7 @@ def test_invalid_base64_write_is_a_usage_error(command: str) -> None:
     assert "patch_bytes" not in remote.operations
 
 
-@pytest.mark.parametrize("command", ["ic", "iee", "iic", "izz"])
+@pytest.mark.parametrize("command", ["ic", "iic", "izz"])
 def test_unimplemented_info_commands_do_not_fall_through(command: str) -> None:
     session, _remote = make_session()
     assert session.run(command) == []

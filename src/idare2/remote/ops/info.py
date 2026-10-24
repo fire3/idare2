@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import struct
 from collections.abc import Iterator
 from typing import Any
 
@@ -257,6 +258,109 @@ def segments(db: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _require_elf(db: Any) -> ElfFile:
+    elf = _elf_for(db)
+    if elf is None:
+        helpers.fail(
+            protocol.NOT_FOUND,
+            "this listing needs the original ELF input file, which is missing "
+            "or not an ELF",
+        )
+    return elf
+
+
+def _digest(algorithm: str, data: bytes) -> str:
+    import hashlib
+    import zlib
+
+    if algorithm == "crc32":
+        return f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
+    try:
+        digest = hashlib.new(algorithm)
+    except ValueError:
+        helpers.fail(protocol.BAD_ARGS, f"unknown hash algorithm {algorithm!r}")
+    digest.update(data)
+    return digest.hexdigest()
+
+
+@op("sections")
+def sections(db: Any, hash_name: str | None = None) -> list[dict[str, Any]]:
+    """ELF sections for ``iS`` (optionally with a hash column).
+
+    Without the original ELF input there is nothing to hash and no section
+    table; fall back to IDA's segment view so scripts that only need addresses
+    keep working (r2 always has the file, so this is an idare2 extension).
+    """
+    elf = _elf_for(db)
+    if elf is None:
+        rows = segments(db)
+        for row in rows:
+            row.setdefault("flags", 0)
+        return rows
+    rows = elf.section_rows()
+    if hash_name:
+        for row, section in zip(rows, elf.sections, strict=True):
+            row["hash"] = (
+                ""
+                if section.type == 8 or section.size <= 0
+                else _digest(hash_name, elf.section_bytes(section))
+            )
+    return rows
+
+
+@op("section_headers")
+def section_headers(db: Any) -> list[dict[str, Any]]:
+    """Raw section-header fields for ``iSh``."""
+    return _require_elf(db).section_header_rows()
+
+
+@op("segments_map")
+def segments_map(db: Any) -> list[dict[str, Any]]:
+    """Program-header maps for ``iSS``."""
+    return _require_elf(db).segment_rows()
+
+
+@op("section_at")
+def section_at(db: Any, ea: int) -> dict[str, Any] | None:
+    """The section containing ``ea`` (``iS.``)."""
+    elf = _require_elf(db)
+    section = elf.section_at_address(ea)
+    if section is None:
+        return None
+    for row in elf.section_rows():
+        if row["nth"] == section.index:
+            return row
+    return None
+
+
+@op("section_symbols")
+def section_symbols(db: Any) -> list[dict[str, Any]]:
+    """Sections with the names IDA places inside them (``iSm``)."""
+    elf = _require_elf(db)
+    rows = elf.section_rows()
+    symbols = []
+    for ea, name in db.names.get_all():
+        ea = int(ea)
+        if not name:
+            continue
+        section = elf.section_at_address(ea)
+        if section is None or not section.name:
+            continue
+        symbols.append((section.index, ea, name))
+    out = []
+    for row in rows:
+        start = int(row["vaddr"])
+        end = start + int(row["vsize"])
+        owned = [
+            {"name": name, "vaddr": ea}
+            for index, ea, name in symbols
+            if index == row["nth"]
+        ]
+        owned.sort(key=lambda item: item["vaddr"])
+        out.append({**row, "start": start, "end": end, "symbols": owned})
+    return out
+
+
 def _perm(bits: int) -> str:
     """IDA's SEGPERM bits to r2's ``-rwx`` form."""
     read = bool(bits & 4)
@@ -332,6 +436,75 @@ def entries(db: Any, pattern: str | None = None) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+@op("constructors")
+def constructors(db: Any) -> list[dict[str, Any]]:
+    """``.init_array``/``.fini_array`` entries (``iee``)."""
+    elf = _require_elf(db)
+    width = 8 if elf.bits == 64 else 4
+    fmt = elf.endian + ("Q" if width == 8 else "I")
+    labels = {14: "init", 15: "fini", 16: "preinit"}
+    rows: list[dict[str, Any]] = []
+    for section in elf.sections:
+        label = labels.get(section.type)
+        if label is None:
+            continue
+        data = elf.section_bytes(section)
+        for offset in range(0, len(data) - width + 1, width):
+            target = struct.unpack(fmt, data[offset : offset + width])[0]
+            if not target:
+                continue
+            paddr = elf.vaddr_to_paddr(target)
+            rows.append(
+                {
+                    "paddr": paddr if paddr is not None else target,
+                    "vaddr": target,
+                    "phaddr": section.offset + offset,
+                    "vhaddr": section.addr + offset,
+                    "ea": target,
+                    "type": label,
+                }
+            )
+    return rows
+
+
+@op("entry_symbols")
+def entry_symbols(db: Any, pattern: str | None = None) -> list[dict[str, Any]]:
+    """Entry-point symbols (``ies``): IDA entries plus ``main``."""
+    elf = _elf_for(db)
+    predicate = helpers.name_filter(pattern)
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+
+    def add(ea: int, name: str) -> None:
+        if not name or not predicate(name) or (ea, name) in seen:
+            return
+        seen.add((ea, name))
+        paddr = elf.vaddr_to_paddr(ea) if elf is not None else None
+        rows.append({"ea": ea, "paddr": paddr if paddr is not None else ea, "name": name})
+
+    for item in db.entries.get_all():
+        add(int(item.address), item.name or "")
+    for name in ("_start", "main", "entry0"):
+        for ea, symbol_name in db.names.get_all():
+            if symbol_name == name:
+                add(int(ea), name)
+                break
+    rows.sort(key=lambda row: (row["ea"], row["name"]))
+    return rows
+
+
+@op("guess_size")
+def guess_size(db: Any) -> dict[str, Any]:
+    """Guess the program's size (``ig``), as r2 does for load images."""
+    elf = _elf_for(db)
+    if elf is not None:
+        return {"size": elf.file_size}
+    try:
+        return {"size": int(db.filesize)}
+    except Exception:
+        return {"size": 0}
 
 
 @op("exports")

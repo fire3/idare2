@@ -187,6 +187,63 @@ def test_sections_and_file_offsets(elf) -> None:
     assert elf.section_at(0x400300).name == ".bss"
 
 
+def test_section_rows_match_radare2_columns(elf) -> None:
+    rows = {row["name"]: row for row in elf.section_rows()}
+    text = rows[".text"]
+    assert text["nth"] == 1
+    assert text["paddr"] == 0x100
+    assert text["size"] == 0x10
+    assert text["vaddr"] == 0x400100
+    assert text["vsize"] == 0x10
+    assert text["perm"] == "-r-x"
+    assert text["flags"] == 0x6
+    assert text["type"] == "PROGBITS"
+
+    bss = rows[".bss"]
+    assert bss["size"] == 0
+    assert bss["vsize"] == 0x40
+    assert bss["perm"] == "-rw-"
+    assert bss["type"] == "NOBITS"
+
+    assert rows[".dynsym"]["type"] == "DYNSYM"
+    assert rows[".dynstr"]["type"] == "STRTAB"
+    assert rows[".rel.dyn"]["type"] == "REL"
+
+
+def test_section_bytes_skip_nobits(elf) -> None:
+    by_name = {section.name: section for section in elf.sections}
+    text = elf.section_bytes(by_name[".text"])
+    assert len(text) == 0x10
+    assert text.startswith(b"hello\0")
+    assert elf.section_bytes(by_name[".bss"]) == b""
+
+
+def test_section_at_address_handles_nobits(elf) -> None:
+    assert elf.section_at_address(0x400300).name == ".bss"
+    assert elf.section_at_address(0x400100).name == ".text"
+    assert elf.section_at_address(0x1234) is None
+
+
+def test_segment_rows_match_program_headers(elf) -> None:
+    rows = elf.segment_rows()
+    assert [row["name"] for row in rows] == ["LOAD0", "DYNAMIC", "ehdr"]
+    load, dynamic, ehdr = rows
+    assert load["vaddr"] == 0x400000
+    assert load["vsize"] == 0x400
+    assert load["perm"] == "-r-x"
+    assert dynamic["perm"] == "-rw-"
+    assert ehdr["vaddr"] == 0x400000
+
+
+def test_section_headers_keep_raw_fields(elf) -> None:
+    by_name = {row["name"]: row for row in elf.section_header_rows()}
+    rel = by_name[".rel.dyn"]
+    assert rel["type"] == 9
+    assert rel["entsize"] == (16 if elf.bits == 64 else 8)
+    assert rel["addralign"] == 4
+    assert rel["info"] == 0
+
+
 def test_header_fields_match_radare2_layout(elf) -> None:
     """``ih``'s field table: names, offsets, sizes and pf formats from bin_elf."""
     rows = elf.header_rows()
@@ -360,3 +417,4 @@ def test_non_elf_and_missing_files_return_none(tmp_path: Path) -> None:
     assert load_elf(str(plain)) is None
     assert load_elf(str(tmp_path / "missing")) is None
     assert load_elf(None) is None
+

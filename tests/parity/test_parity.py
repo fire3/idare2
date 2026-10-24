@@ -349,6 +349,44 @@ def test_function_graph_blocks_and_edges_overlap(session, r2) -> None:
     )
 
 
+def _table_rows(lines: list[str]) -> list[list[str]]:
+    return [
+        split_columns(line)
+        for line in lines
+        if line.strip() and "―" not in line
+    ]
+
+
+def test_section_table_matches_r2(session, r2) -> None:
+    """``iS`` is the ELF section table, including r2's renamed ARM sections."""
+    ours = _table_rows(session.run("iS"))
+    theirs = _table_rows(r2("iS"))
+    assert ours == theirs
+
+
+def test_section_hashes_match_r2(session, r2) -> None:
+    ours = _table_rows(session.run("iS sha1"))
+    theirs = _table_rows(r2("iS sha1"))
+    assert ours == theirs
+
+
+def test_segment_maps_match_r2(session, r2) -> None:
+    """``iSS`` is the program-header map list (LOAD0/LOAD1/...)."""
+    ours = _table_rows(session.run("iSS"))
+    theirs = _table_rows(r2("iSS"))
+    assert ours == theirs
+
+
+def test_constructors_match_r2(session, r2) -> None:
+    ours = _table_rows(session.run("iee"))
+    theirs = _table_rows(r2("iee"))
+    assert ours == theirs
+
+
+def test_guess_size_matches_r2(session, r2) -> None:
+    assert session.run("ig") == r2("ig")
+
+
 def test_segment_table_shape(session, r2) -> None:
     """``iS`` must agree on the code segment's virtual address and size.
 

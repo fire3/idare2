@@ -95,6 +95,46 @@ def format_segments(segments: list[dict[str, Any]], session: Any) -> list[str]:
     return table(headers, rows)
 
 
+def format_sections(
+    sections: list[dict[str, Any]],
+    session: Any,
+    *,
+    hash_name: str | None = None,
+) -> list[str]:
+    """``iS``/``iSS``/``iSh`` -- ELF sections or memory maps."""
+    width = addr_width(session.info.get("bits"))
+    headers = ["nth", "paddr", "size", "vaddr", "vsize", "perm", "flags"]
+    if hash_name:
+        headers.append(hash_name)
+    headers.extend(["type", "name"])
+    rows = []
+    for section in sections:
+        paddr = section.get("paddr")
+        perm = str(section.get("perm") or "----")
+        if len(perm) == 3:  # IDA's SEGPERM form, used by the non-ELF fallback
+            perm = "-" + perm
+        row = [
+            str(section.get("nth", "")),
+            fmt_addr(int(paddr), width) if paddr is not None else "----------",
+            f"0x{int(section.get('size') or 0):x}",
+            fmt_addr(int(section.get("vaddr") or 0), width),
+            f"0x{int(section.get('vsize') or 0):x}",
+            perm,
+            f"0x{int(section.get('flags') or 0):x}",
+        ]
+        if hash_name:
+            row.append(str(section.get("hash") or ""))
+        row.extend([str(section.get("type") or ""), str(section.get("name") or "")])
+        rows.append(row)
+    return table(headers, rows, right=(2, 4))
+
+
+def section_json(sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ``iSj`` object shape, in r2's key order."""
+    keys = ("name", "size", "vsize", "type", "perm", "flags", "paddr", "vaddr")
+    return [{key: section.get(key) for key in keys} for section in sections]
+
+
 def format_functions(functions: list[dict[str, Any]], session: Any) -> list[str]:
     """``afl`` -- address, basic blocks, size, name."""
     width = addr_width(session.info.get("bits"))

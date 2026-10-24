@@ -31,7 +31,7 @@ def registered() -> None:
         ("sf", "s"),
         ("afl", "a[fF]"),
         ("axt", "a[xX]"),
-            ("iS", "i[SsEeizMr]"),
+        ("iS", "iS"),
         ("ij", "i"),
         ("f", "f"),
         ("q", "q"),

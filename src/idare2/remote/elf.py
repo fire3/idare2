@@ -22,6 +22,10 @@ from typing import Any
 
 PT_LOAD = 1
 PT_DYNAMIC = 2
+PT_INTERP = 3
+PT_PHDR = 6
+PT_ARM_EXIDX = 0x70000001
+PT_GNU_STACK = 0x6474E551
 DT_NEEDED = 1
 DT_STRTAB = 5
 SHT_SYMTAB = 2
@@ -31,7 +35,68 @@ SHT_DYNAMIC = 6
 SHT_NOBITS = 8
 SHT_REL = 9
 SHT_DYNSYM = 11
+SHF_WRITE = 0x1
 SHF_ALLOC = 0x2
+SHF_EXECINSTR = 0x4
+
+#: ``sh_type`` -> radare2's section type column.
+SECTION_TYPES = {
+    0: "NULL",
+    1: "PROGBITS",
+    2: "SYMTAB",
+    3: "STRTAB",
+    4: "RELA",
+    5: "HASH",
+    6: "DYNAMIC",
+    7: "NOTE",
+    8: "NOBITS",
+    9: "REL",
+    10: "SHLIB",
+    11: "DYNSYM",
+    14: "INIT_ARRAY",
+    15: "FINI_ARRAY",
+    16: "PREINIT_ARRAY",
+    17: "GROUP",
+    18: "SYMTAB_SHNDX",
+    0x6FFFFFF6: "GNU_HASH",
+    0x6FFFFFFD: "VERDEF",
+    0x6FFFFFFE: "VERNEED",
+    0x6FFFFFFF: "VERSYM",
+    # r2 leaves these processor-specific ARM types unnamed.
+    0x70000001: "----",
+    0x70000003: "----",
+}
+
+#: ``sh_type``/``p_type`` -> the fallback name when the section has none.
+SECTION_NAMES_BY_TYPE = {
+    11: ".dynsym",
+    14: ".init_array",
+    15: ".fini_array",
+    0x70000001: ".ARM.exidx",
+    0x6FFFFFF6: ".gnu.hash",
+    0x6FFFFFFF: ".gnu.version",
+    0x6FFFFFFD: ".gnu.version_d",
+    0x6FFFFFFE: ".gnu.version_r",
+}
+
+#: ``p_type`` -> the map name radare2 uses for non-LOAD segments.
+_PROGRAM_NAMES = {
+    PT_PHDR: "PHDR",
+    PT_INTERP: "INTERP",
+    PT_DYNAMIC: "DYNAMIC",
+    PT_GNU_STACK: "GNU_STACK",
+    PT_ARM_EXIDX: "EXIDX",
+}
+
+
+def _PHDR_PERM(flags: int) -> str:
+    """Program-header flags to r2's ``-rwx`` string."""
+    return (
+        "-"
+        + ("r" if flags & 0x4 else "-")
+        + ("w" if flags & 0x2 else "-")
+        + ("x" if flags & 0x1 else "-")
+    )
 
 SHN_UNDEF = 0
 SHN_ABS = 0xFFF1
@@ -224,6 +289,70 @@ class Section:
     size: int
     link: int
     entsize: int
+    #: ``sh_info`` and ``sh_addralign`` (``iSh``).
+    info: int = 0
+    addralign: int = 0
+    #: ``p_type`` when this is an ``.ARM.exidx`` section, else ``None``.
+    exec_marker: int | None = None
+
+    def perm(self) -> str:
+        """r2's 4-column perm string for ELF sections (``-r--``)."""
+        read = bool(self.flags & SHF_ALLOC) or self.type == SHT_NOBITS
+        write = bool(self.flags & SHF_WRITE)
+        execute = bool(self.flags & SHF_EXECINSTR)
+        return (
+            "-"
+            + ("r" if read else "-")
+            + ("w" if write else "-")
+            + ("x" if execute else "-")
+        )
+
+    def type_name(self) -> str:
+        return SECTION_TYPES.get(self.type, "")
+
+    def r2_name(self) -> str:
+        """The name radare2's ELF plugin reports for this section.
+
+        r2 does not always use ``sh_name``: ``.ARM.exidx``, ``.dynsym`` and
+        the array sections are renamed from ``sh_type``.
+        """
+        by_type = SECTION_NAMES_BY_TYPE.get(self.type)
+        if by_type:
+            return by_type
+        return self.name or SECTION_NAMES_BY_TYPE.get(self.type, "")
+
+    def vsize(self) -> int:
+        return self.size
+
+
+@dataclass(frozen=True)
+class SectionHeader:
+    """One entry of the ELF section-header table (``iSh``)."""
+
+    name: str
+    type: int
+    flags: int
+    addr: int
+    offset: int
+    size: int
+    link: int
+    info: int
+    addralign: int
+    entsize: int
+
+
+@dataclass(frozen=True)
+class SectionInfo:
+    """r2's ``Elf_(sections)`` columns that come straight from the header."""
+
+    paddr: int
+    vaddr: int
+    size: int
+    vsize: int
+    perm: str
+    flags: int
+    type: int
+    name: str
 
 
 @dataclass(frozen=True)
@@ -446,6 +575,11 @@ class ElfFile:
                     size=values[5],
                     link=values[6],
                     entsize=values[9],
+                    info=values[7],
+                    addralign=values[8],
+                    exec_marker=(
+                        PT_ARM_EXIDX if values[1] == 0x70000001 else None
+                    ),
                 )
             )
         return out
@@ -671,6 +805,166 @@ class ElfFile:
             if section.addr <= vaddr < section.addr + section.size:
                 return section
         return None
+
+    # -- iS / iSS ---------------------------------------------------------
+
+    def _file_handle(self) -> Any:
+        return open(self.path, "rb")
+
+    def _file_size(self, section: Section) -> int:
+        """Bytes present in the file, as r2 reports ``size`` for an image."""
+        if section.type == SHT_NOBITS:
+            return 0
+        if section.flags & SHF_ALLOC:
+            for program in self.programs:
+                if program.type != PT_LOAD:
+                    continue
+                if program.offset <= section.offset < program.offset + program.filesz:
+                    remaining = program.filesz - (section.offset - program.offset)
+                    return min(section.size, max(remaining, 0))
+        return section.size
+
+    def _vsize(self, section: Section) -> int:
+        """r2's image size: NOBITS keeps ``sh_size``, PROGBITS uses filesz."""
+        if section.type == SHT_NOBITS:
+            return section.size
+        return self._file_size(section)
+
+    def _paddr(self, section: Section) -> int:
+        if section.type == SHT_NOBITS or not (section.flags & SHF_ALLOC):
+            return section.offset
+        for program in self.programs:
+            if program.type != PT_LOAD:
+                continue
+            if program.vaddr <= section.addr < program.vaddr + program.memsz:
+                return program.offset + (section.addr - program.vaddr)
+        return section.offset
+
+    def section_rows(self) -> list[dict[str, Any]]:
+        """One row per section for ``iS`` (including the NULL header)."""
+        rows: list[dict[str, Any]] = []
+        for section in self.sections:
+            rows.append(
+                {
+                    "nth": section.index,
+                    "paddr": self._paddr(section),
+                    "size": self._file_size(section),
+                    "vaddr": section.addr,
+                    "vsize": self._vsize(section),
+                    "perm": section.perm(),
+                    "flags": section.flags,
+                    "type": section.type_name(),
+                    "name": section.r2_name(),
+                    "class": "",
+                }
+            )
+        return rows
+
+    def section_bytes(self, section: Section) -> bytes:
+        """The section's on-disk bytes (NOBITS returns an empty string)."""
+        if section.type == SHT_NOBITS or section.size <= 0:
+            return b""
+        if not (section.flags & SHF_ALLOC):
+            with self._file_handle() as handle:
+                handle.seek(section.offset)
+                return handle.read(section.size)
+        for program in self.programs:
+            if program.type != PT_LOAD:
+                continue
+            if program.offset <= section.offset < program.offset + program.filesz:
+                length = min(section.size, program.filesz - (section.offset - program.offset))
+                with self._file_handle() as handle:
+                    handle.seek(section.offset)
+                    return handle.read(max(length, 0))
+        with self._file_handle() as handle:
+            handle.seek(section.offset)
+            return handle.read(section.size)
+
+    def section_at_address(self, vaddr: int) -> Section | None:
+        """The section containing a virtual address, including size-0 NOBITS.
+
+        ``section_at`` skips empty ranges; ``iS.``/``iSw`` also need to find a
+        zero-sized NOBITS section that starts exactly at the seek.
+        """
+        for section in self.sections:
+            if section.type == SHT_NOBITS:
+                if section.addr <= vaddr <= section.addr + section.size:
+                    return section
+            elif section.addr <= vaddr < section.addr + section.size:
+                return section
+        return None
+
+    def section_header_rows(self) -> list[dict[str, Any]]:
+        """Raw ``iSh`` rows: every field of every section header."""
+        rows: list[dict[str, Any]] = []
+        for section in self.sections:
+            rows.append(
+                {
+                    "name": section.name,
+                    "type": section.type,
+                    "flags": section.flags,
+                    "addr": section.addr,
+                    "offset": section.offset,
+                    "size": section.size,
+                    "link": section.link,
+                    "info": section.info,
+                    "addralign": section.addralign,
+                    "entsize": section.entsize,
+                }
+            )
+        return rows
+
+    def segment_rows(self) -> list[dict[str, Any]]:
+        """Memory maps for ``iSS`` (r2's ``Elf_(maps)``)."""
+        rows: list[dict[str, Any]] = []
+        load_count = 0
+        for program in self.programs:
+            if program.type == PT_LOAD:
+                name = f"LOAD{load_count}"
+                load_count += 1
+            else:
+                name = _PROGRAM_NAMES.get(program.type, f"PT_{program.type:x}")
+            rows.append(
+                {
+                    "nth": len(rows),
+                    "paddr": program.offset,
+                    "size": program.filesz,
+                    "vaddr": program.vaddr,
+                    "vsize": program.memsz,
+                    "perm": _PHDR_PERM(program.flags),
+                    "flags": 0,
+                    "type": "MAP",
+                    "name": name,
+                    "class": "",
+                }
+            )
+        # The ELF header itself is not a program header, but r2 maps it.
+        rows.append(
+            {
+                "nth": len(rows),
+                "paddr": 0,
+                "size": self.header.ehsize,
+                "vaddr": self.baddr,
+                "vsize": self.header.ehsize,
+                "perm": "-rw-",
+                "flags": 0,
+                "type": "MAP",
+                "name": "ehdr",
+                "class": "",
+            }
+        )
+        return rows
+
+    def section_for_symbol(self, table: str, value: int) -> str:
+        """Section name for a symbol table entry (``iSm``).
+
+        IDA does not expose the ELF ``st_shndx`` for most entries, so the
+        section is inferred from the value instead of trusting the index.
+        """
+        section = self.section_at_address(value) if value else None
+        if section is not None and section.name:
+            return section.name
+        return ""
 
     def locate(self, vaddr: int) -> tuple[int, str]:
         """``(paddr, section)`` for a string address."""
