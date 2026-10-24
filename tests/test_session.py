@@ -1481,6 +1481,83 @@ def test_unimplemented_p8_suffixes_fail_loudly(command: str) -> None:
     assert not {"read_bytes", "block_info", "function_info"} & set(remote.operations)
 
 
+def test_environment_commands() -> None:
+    session, _remote = make_session()
+    session.env["FOO"] = "bar"
+    assert session.run("%FOO") == ["bar"]
+    assert session.run("%FOO=baz") == []
+    assert session.run("%FOO") == ["baz"]
+    assert "FOO=baz" in session.run("%")
+    assert "%FOO=baz" in session.run("%*")
+    assert json.loads(session.run("%j")[0])["FOO"] == "baz"
+    session.failed = False
+    session.run("%MISSING")
+    assert session.failed
+
+
+def test_question_timing_and_terminal_escapes() -> None:
+    session, _remote = make_session()
+    lines = session.run("?t ?e hi")
+    assert lines[0] == "hi"
+    assert float(lines[1]) >= 0.0
+    assert session.run("?et hello") == ["\x1b]0;hello\x07"]
+    assert session.run("?eb") == ["[]"]
+
+
+def test_question_conditional_runs_one_branch() -> None:
+    session, _remote = make_session()
+    assert session.run("?(1){?e yes}{?e no}") == ["no"]
+    assert session.run("?(0){?e yes}{?e no}") == ["yes"]
+    assert session.run("?(0){?e only}") == ["only"]
+    assert session.run("?(1){?e only}") == []
+
+
+def test_text_log_commands() -> None:
+    session, _remote = make_session()
+    assert session.run("T hello") == []
+    assert session.run("T world") == []
+    assert session.run("T") == ["1 hello", "2 world"]
+    assert session.run("Tl") == ["02"]
+    assert session.run("Tm") == ["hello", "world"]
+    assert json.loads(session.run("Tj")[0]) == [
+        {"id": 1, "msg": "hello"},
+        {"id": 2, "msg": "world"},
+    ]
+    assert session.run("T*")[0].startswith("T base64:")
+    assert session.run("T- 2") == []
+    assert session.run("T") == ["2 world"]
+    assert session.run("T-") == []
+    assert session.run("T") == []
+
+
+def test_quote_commands_keep_the_payload_verbatim() -> None:
+    session, _remote = make_session()
+    assert session.run("'?e hello @ world") == ["hello @ world"]
+    assert session.run('"?e x;y"') == ["x;y"]
+
+
+def test_pointer_read_and_write() -> None:
+    session, remote = make_session()
+    assert session.run("*0x1000") == ["0x11223344"]
+    assert session.run("*0x1000=0x41424344") == []
+    patches = [args for name, args in remote.calls if name == "patch_bytes"]
+    assert patches[-1] == {"ea": 0x1000, "data": "44434241"}
+
+    session.readonly = True
+    session.failed = False
+    session.run("*0x1000=0")
+    assert session.failed
+    assert isinstance(session.last_error, ReadOnlyError)
+
+
+@pytest.mark.parametrize("command", ["*", "%MISSING", "Tz"])
+def test_unknown_meta_forms_fail_loudly(command: str) -> None:
+    session, _remote = make_session()
+    session.failed = False
+    session.run(command)
+    assert session.failed, command
+
+
 def test_yank_and_paste() -> None:
     session, remote = make_session()
     session.run("y 4")

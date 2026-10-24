@@ -1,7 +1,9 @@
-"""``?``, ``q``, ``b``, ``e``, ``L`` and the ``$`` variables."""
+"""``?``, ``q``, ``b``, ``e``, ``L``, ``%``, ``T`` and the ``$`` variables."""
 
 from __future__ import annotations
 
+import base64
+import json
 from typing import TYPE_CHECKING
 
 from idare2 import cmd as cmd_module
@@ -9,6 +11,7 @@ from idare2.cmd import command
 from idare2.errors import QuitRequested, UsageError
 from idare2.fmt import addr_width
 from idare2.fmt import listing as fmt_listing
+from idare2.parser import Statement
 
 if TYPE_CHECKING:
     from idare2.parser import Statement
@@ -25,6 +28,10 @@ QUESTION_DETAIL = [
     ("?o", "num", "octal representation"),
     ("?u", "num", "human-readable size"),
     ("?j", "expr", "the value as JSON"),
+    ("?t", "cmd", "run a command and print the elapsed seconds"),
+    ("?eb", "", "r2 progress bar (empty)"),
+    ("?et", "title", "set the terminal title"),
+    ("?(cond)", "{a}{b}", "run a or b depending on cond"),
     ("?e", "msg", "echo a message"),
     ("?h", "str", "radare2-compatible 32-bit DJB hash"),
     ("?l", "str", "string length"),
@@ -63,6 +70,22 @@ def question(session: Session, statement: Statement) -> list[str]:
         return GREP_HELP.rstrip("\n").splitlines()
     if suffix == "|":
         return _PIPE_HELP
+
+    if suffix == "t":
+        # Session.run_statement timed the dispatch; the argument is a nested
+        # command whose output comes first (r2 prints the seconds last).
+        duration = session.last_timing or 0.0
+        if not argument:
+            raise UsageError("?t needs a command")
+        return [*session.run_branch(argument), f"{duration:.6f}"]
+    if suffix == "et":
+        # Terminal-title escape, byte-for-byte like r2.
+        return [f"\x1b]0;{argument}\x07"]
+    if suffix == "eb":
+        return ["[]"]
+    if statement.cmd.startswith("?("):
+        joined = statement.cmd[1:] + (f" {statement.args}" if statement.args else "")
+        return _conditional(session, joined)
 
     if suffix == "V":
         return _version_lines()
@@ -301,6 +324,33 @@ _PIPE_HELP = [
 ]
 
 
+def _conditional(session: Session, argument: str) -> list[str]:
+    """``?(cond){then}{else}`` -- r2 runs the false branch on zero."""
+    text = argument.strip()
+    if not text.startswith("("):
+        raise UsageError("?(cond) needs a parenthesised expression")
+    close = text.find(")")
+    if close < 0:
+        raise UsageError("?(cond) is missing ')'")
+    value = session.eval(text[1:close])
+    rest = text[close + 1 :].strip()
+    branches: list[str] = []
+    while rest.startswith("{"):
+        end = rest.find("}")
+        if end < 0:
+            raise UsageError("?(cond) is missing '}'")
+        branches.append(rest[1:end])
+        rest = rest[end + 1 :].strip()
+    if rest:
+        raise UsageError("?(cond) has trailing text")
+    if not branches:
+        raise UsageError("?(cond) needs a branch")
+    selected = (
+        (branches[1] if len(branches) > 1 else "") if value else branches[0]
+    )
+    return session.run_branch(selected) if selected.strip() else []
+
+
 @command("q", usage="[ret]", summary="quit")
 def quit_(session: Session, statement: Statement) -> list[str]:
     code = 0
@@ -361,6 +411,140 @@ def blocksize(session: Session, statement: Statement) -> list[str]:
         session.blocksize = max(session.eval(argument), 1)
         return []
     return [str(session.blocksize)]
+
+
+@command("%", usage="[name[=value]]", summary="environment variables")
+def environment(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    if token == "%":
+        return [f"{key}={value}" for key, value in session.env.items()]
+    if token == "%j":
+        return [json.dumps(session.env)]
+    if token == "%*":
+        return [f"%{key}={value}" for key, value in session.env.items()]
+    suffix = token[1:]
+    if not suffix:
+        return [f"{key}={value}" for key, value in session.env.items()]
+    if "=" in suffix:
+        name, _, value = suffix.partition("=")
+        session.env[name] = value
+        return []
+    if suffix in session.env:
+        return [session.env[suffix]]
+    raise UsageError(f"no environment variable {suffix!r}")
+
+
+T_DETAIL = [
+    ("T", "", "list log messages"),
+    ("T message", "", "append a message"),
+    ("T <id>", "", "list messages starting at id"),
+    ("Tl", "", "last message id"),
+    ("Tj", "", "messages as JSON"),
+    ("Tm", "", "messages without ids"),
+    ("T*", "", "messages as r2 commands"),
+    ("T-", "", "clear the log"),
+    ("T- <id>", "", "delete messages before id"),
+]
+
+
+@command(
+    "T",
+    usage="[-][ num|msg]",
+    summary="text log",
+    detail=T_DETAIL,
+    suffixes=frozenset({"", "l", "j", "m", "*", "-"}),
+    suffix_label="log command",
+    suffix_help="T?",
+)
+def text_log(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    argument = statement.args.strip()
+    entries = session.text_log
+
+    if token == "T-":
+        if argument:
+            try:
+                before = int(argument, 0)
+            except ValueError:
+                raise UsageError("T- needs a numeric id") from None
+            session.text_log = [row for row in entries if int(row["id"]) >= before]
+        else:
+            session.text_log = []
+        return []
+    if token == "Tl":
+        return [f"{int(entries[-1]['id']):02d}" if entries else "00"]
+    if token == "Tj":
+        return [json.dumps(entries)]
+    if token == "Tm":
+        return [str(row["msg"]) for row in entries]
+    if token == "T*":
+        return [
+            f"T base64:{base64.b64encode(str(row['msg']).encode()).decode()}"
+            for row in entries
+        ]
+
+    if argument:
+        if argument.isdigit():
+            start = int(argument)
+            return [f"{row['id']} {row['msg']}" for row in entries if int(row["id"]) >= start]
+        session.log(argument)
+        return []
+    return [f"{row['id']} {row['msg']}" for row in entries]
+
+
+def _run_literal(session: Session, text: str) -> list[str]:
+    """Run ``text`` as one command without peeling ``@``/``~``/``;``."""
+    from idare2.parser import Statement
+
+    text = text.strip()
+    if not text:
+        return []
+    parts = text.split(None, 1)
+    statement = Statement(
+        raw=text,
+        cmd=parts[0],
+        args=parts[1] if len(parts) > 1 else "",
+    )
+    return session.run_statement(statement)
+
+
+@command("'", usage="[cmd]", summary="run a command without evaluating special characters")
+def quote_command(session: Session, statement: Statement) -> list[str]:
+    text = statement.args
+    if text.endswith("'"):
+        text = text[:-1]
+    return _run_literal(session, text)
+
+
+@command('"', usage="[text]", summary="run a quoted command literally")
+def quote_literal(session: Session, statement: Statement) -> list[str]:
+    text = statement.args
+    if text.endswith('"'):
+        text = text[:-1]
+    return _run_literal(session, text)
+
+
+@command("*", usage="<addr>[=value]", summary="read or write a pointer")
+def pointer(session: Session, statement: Statement) -> list[str]:
+    token = statement.cmd
+    body = token[1:]
+    if not body:
+        raise UsageError("* needs an address")
+    if "=" in body:
+        address_text, _, value_text = body.partition("=")
+        target = session.resolve(address_text)
+        value = session.eval(value_text)
+        cmd_module.require_write(session, "'*'")
+        width = 8 if session.info.get("bits") == 64 else 4
+        byteorder = "big" if session.info.get("endian") == "big" else "little"
+        data = (value & ((1 << (width * 8)) - 1)).to_bytes(width, byteorder)
+        session.remote.call("patch_bytes", ea=target, data=data.hex())
+        session.invalidate_segments()
+        return []
+    target = session.resolve(body)
+    width = 8 if session.info.get("bits") == 64 else 4
+    payload = session.remote.call("read_value", ea=target, width=width)
+    return [f"0x{int(payload['value']):x}"]
 
 
 @command("e", usage="[key[=value]]", summary="configuration")

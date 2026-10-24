@@ -17,8 +17,10 @@ compose uniformly across all commands.
 from __future__ import annotations
 
 import fnmatch
+import os
 import re
 import sys
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -96,6 +98,12 @@ class Session:
         self.last_error: Idare2Error | None = None
         self._warned: set[str] = set()
         self._comments: dict[int, str] = {}
+        #: Environment for `%NAME` (seeded from the process, like r2).
+        self.env: dict[str, str] = dict(os.environ)
+        #: Text-log entries for `T` (r2's message log).
+        self.text_log: list[dict[str, Any]] = []
+        #: Last duration measured by `?t`.
+        self.last_timing: float | None = None
         # Command modules register themselves on import; doing it here means a
         # Session is usable on its own, without going through the CLI.
         cmd.load_all()
@@ -233,14 +241,41 @@ class Session:
         self.last_output = out
         return out
 
+    def run_branch(self, text: str) -> list[str]:
+        """Run a command string as part of another command (``?t``, ``?(c)``).
+
+        Errors follow the same contract as :meth:`run`: report, mark the
+        session failed, keep going.  The session's ``last_output`` is left to
+        the outer statement.
+        """
+        produced: list[str] = []
+        for statement in parser.parse(text):
+            try:
+                produced.extend(self.run_statement(statement))
+            except Idare2Error as exc:
+                self.failed = True
+                self.last_error = exc
+                self.stderr(self.colors.error(f"ERROR: {exc}"))
+        return produced
+
+    def log(self, message: str) -> int:
+        """Append to the text log (``T message``) and return its id."""
+        entry = {"id": len(self.text_log) + 1, "msg": message}
+        self.text_log.append(entry)
+        return entry["id"]
+
     def run_statement(self, statement: Statement) -> list[str]:
         if statement.shell:
             return pipe.run_shell(statement.args)
 
+        timed = statement.cmd == "?t"
+        started = time.perf_counter() if timed else 0.0
         lines: list[str] = []
         for _ in range(max(statement.repeat, 1)):
             with self._temporary(statement):
                 lines = self.dispatch(statement)
+        if timed:
+            self.last_timing = time.perf_counter() - started
         return self.postprocess(lines, statement)
 
     def dispatch(self, statement: Statement) -> list[str]:

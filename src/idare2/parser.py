@@ -159,6 +159,19 @@ def parse_statement(raw: str) -> Statement:
     if not text:
         return stmt
 
+    # 0. r2's quote commands: the rest of the statement is payload, not
+    #    syntax.  `"?e a;b"` prints `a;b`, and `'?e hello @ world`
+    #    executes `?e hello @ world` without peeling @/~ etc.  Handle these
+    #    before every modifier so braces/semicolons inside the payload stay.
+    if text.startswith('"'):
+        stmt.cmd = '"'
+        stmt.args = text[1:]
+        return stmt
+    if text.startswith("'"):
+        stmt.cmd = "'"
+        stmt.args = text[1:]
+        return stmt
+
     # 1. redirection -- rightmost top-level '>'
     index = _rfind_top(text, ">")
     if index >= 0:
