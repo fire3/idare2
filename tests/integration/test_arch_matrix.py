@@ -177,6 +177,11 @@ def test_arch_matrix(spec: ArchSpec, tmp_path: Path) -> None:
         # 2. Disassembly: the byte columns are exactly the frozen sample.
         lines = db.run(f"pd 4 @ 0x{ENTRY:x}")
         assert lines, "pd produced no lines"
+        if re.match(r"^[┌│└] \d+: ", lines[0]):
+            # The listing starts inside an existing function, so the first
+            # line is the function-box header, not an instruction.
+            lines = lines[1:]
+        assert lines, "pd produced only a function header"
         decoded = []
         for line in lines:
             match = _ADDRESS_BYTES.match(line)
