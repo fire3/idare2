@@ -74,7 +74,24 @@ COMMON_ARCHES = [
     ArchSpec("ppc64be", "ppc", 64, "big", "38000001", "ppc.so"),
 ]
 
-ARCHES = COMMON_ARCHES
+#: The full 22 configurations (the "19 machines" of the audit, plus the
+#: little/big-endian splits of MIPS, PowerPC and RISC-V).
+ARCHES = [
+    *COMMON_ARCHES,
+    ArchSpec("ppc64le", "ppc", 64, "little", "01000038", "ppc.so"),
+    ArchSpec("riscv32le", "riscv", 32, "little", "13001000", "riscv.so"),
+    # Big-endian RISC-V needs a first halfword whose low bits are 11: the
+    # decoder otherwise treats the high half as a compressed instruction and
+    # `af` cannot start a function there.  `addi x0,x3,1` has that shape.
+    ArchSpec("riscv32be", "riscv", 32, "big", "00130013", "riscv.so"),
+    ArchSpec("riscv64le", "riscv", 64, "little", "13001000", "riscv.so"),
+    ArchSpec("riscv64be", "riscv", 64, "big", "00130013", "riscv.so"),
+    ArchSpec("s390x", "s390x", 64, "big", "0700", "s390.so"),
+    ArchSpec("m68k", "68000", 32, "big", "4e71", "mc68k.so"),
+    ArchSpec("sparc", "sparcb", 32, "big", "01000000", "sparc.so"),
+    ArchSpec("sparc64", "sparcb", 64, "big", "01000000", "sparc.so"),
+    ArchSpec("sh4", "sh4", 32, "little", "0900", "sh3.so"),
+]
 
 
 def sample_bytes(spec: ArchSpec) -> bytes:
