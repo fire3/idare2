@@ -98,19 +98,26 @@ idare2 -qc 'aflj' firmware.bin
 
 ### Raw binaries
 
-Specify the processor, bitness, and load address when importing a binary without
-an ELF or PE header:
+Specify the processor, bitness, byte order, and load address when importing a
+binary without an ELF or PE header:
 
 ```bash
 idare2 -a arm -b 32 -B 0x1000 firmware.bin
+idare2 -a mipsb -b 32 --endian big -B 0x1000 firmware.bin
 ```
 
-- `-a` is an IDA processor hint.
+- `-a` is an IDA processor name, for example `metapc`, `arm:ARMv7`,
+  `arm:ARMv8`, `armb`, `mipsl`, `mipsb`, `ppc`, `riscv`, `s390x`, `68000`,
+  `sparcb`, or `sh4`.
 - `-b` must be `16`, `32`, or `64`.
+- `--endian big|little` overrides the byte order the raw loader would pick for
+  that processor.
 - `-B` is the load base and must be non-negative and 16-byte aligned.
 
 These options apply when a new IDB is created. When `-B` is set, it also becomes
 the initial entry point; otherwise idare2 uses the first valid address.
+`tests/integration/test_arch_matrix.py` exercises these hints on 22
+configurations (the 19 supported machines, including both byte orders).
 
 ### Existing databases and IDA GUI
 
@@ -206,11 +213,14 @@ Most information commands support a `j` suffix for JSON output.
 uv run pytest
 uv run pytest -m real_ida
 uv run pytest -m parity
+uv run pytest -m arch_matrix      # raw-binary import/disassembly matrix
+uv run tools/arch_matrix.py       # the same, one row per CPU
 uv run ruff check .
 ```
 
 The test suite covers offline unit tests, real IDB integration, radare2 output
-parity, and synthetic targets across 19 architectures.
+parity, and the architecture matrix in `tests/integration/test_arch_matrix.py`
+(22 configurations covering the 19 supported machines).
 
 ## License
 
