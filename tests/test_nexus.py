@@ -112,3 +112,42 @@ def test_hints_are_not_requested_for_an_attached_record() -> None:
 
     target = Target(record_id="1234-abcd", processor="arm", bits=32)
     assert not nexus._import_hints_requested(target)
+
+
+def test_endian_alone_requests_import_hints() -> None:
+    """A raw binary can need only the byte order; analysis must still wait."""
+    import idare2.nexus as nexus
+
+    target = Target(path="/nonexistent-on-purpose", endian="big")
+    assert nexus._import_hints_requested(target)
+    assert not nexus._import_hints_requested(Target(path="/nonexistent-on-purpose"))
+
+
+def test_apply_import_hints_forwards_the_byte_order(monkeypatch) -> None:
+    import idare2.nexus as nexus
+    import idare2.rpc as rpc
+
+    calls = []
+
+    class _Remote:
+        def __init__(self, handle, timeout):
+            pass
+
+        def call(self, name, **kwargs):
+            calls.append((name, kwargs))
+
+    monkeypatch.setattr(rpc, "Remote", _Remote)
+    nexus._apply_import_hints(
+        object(), Target(path="/nonexistent-on-purpose", bits=32, endian="big")
+    )
+    assert calls == [
+        ("apply_import_hints", {"bits": 32, "entry": None, "big_endian": True})
+    ]
+
+    calls.clear()
+    nexus._apply_import_hints(
+        object(), Target(path="/nonexistent-on-purpose", endian="little")
+    )
+    assert calls == [
+        ("apply_import_hints", {"bits": None, "entry": None, "big_endian": False})
+    ]

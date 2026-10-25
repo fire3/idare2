@@ -46,6 +46,9 @@ class Target:
     #: Import hints, applied only when Nexus has to create the database.
     processor: str | None = None
     bits: int | None = None
+    #: ``big``/``little`` for raw binaries.  Nexus has no open option for byte
+    #: order, so apply_import_hints sets it before analysis.
+    endian: str | None = None
     image_base: int | None = None
     auto_analysis: bool = True
     save_on_close: bool = False
@@ -285,7 +288,12 @@ def connect(target: Target, *, timeout: float, linger: float, wait: str = "wait"
 def _import_hints_requested(target: Target) -> bool:
     return bool(
         not target.record_id
-        and (target.processor or target.bits is not None or target.image_base is not None)
+        and (
+            target.processor
+            or target.bits is not None
+            or target.endian is not None
+            or target.image_base is not None
+        )
     )
 
 
@@ -307,5 +315,8 @@ def _apply_import_hints(handle: Any, target: Target) -> None:
     from idare2.rpc import Remote
 
     Remote(handle, timeout=60).call(
-        "apply_import_hints", bits=target.bits, entry=target.image_base
+        "apply_import_hints",
+        bits=target.bits,
+        entry=target.image_base,
+        big_endian=None if target.endian is None else target.endian == "big",
     )

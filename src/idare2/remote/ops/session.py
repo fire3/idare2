@@ -40,7 +40,10 @@ def open_summary(db: Any) -> dict[str, Any]:
 
 @op("apply_import_hints", writes=True)
 def apply_import_hints(
-    db: Any, bits: int | None = None, entry: int | None = None
+    db: Any,
+    bits: int | None = None,
+    entry: int | None = None,
+    big_endian: bool | None = None,
 ) -> dict[str, Any]:
     """Apply raw-binary import hints before autoanalysis starts.
 
@@ -49,18 +52,27 @@ def apply_import_hints(
     loader has guessed the width is supported through ida_segment, but it
     deletes instructions, so idare2 opens hinted databases with analysis paused
     and calls this operation before draining it.
-    """
-    import ida_auto
-    import ida_ida
-    import ida_segment
 
+    Byte order has the same problem: the raw loader picks a per-processor
+    default (little for riscv/sh4, big for ppc/mipsb), and Nexus has no open
+    option for it.  ``ida_ida.inf_set_be()`` switches the database before the
+    entry point is marked as code, so the bytes are decoded with the requested
+    endianness rather than being fixed up afterwards.
+    """
     if not helpers._is_binary(db):
         return {"applied": False, "reason": "not a raw binary"}
     if bits is not None and bits not in (16, 32, 64):
         helpers.fail(protocol.BAD_ARGS, f"bits must be 16, 32 or 64, not {bits}")
+    if big_endian is not None and not isinstance(big_endian, bool):
+        helpers.fail(protocol.BAD_ARGS, "big_endian must be true or false")
+
+    import ida_auto
+    import ida_ida
 
     segments = list(db.segments.get_all())
     if bits is not None:
+        import ida_segment
+
         ida_ida.inf_set_app_bitness(bits)
         # ida_segment wants the encoded addressing mode (0/1/2), while
         # inf_set_app_bitness() wants the actual width (16/32/64).
@@ -71,6 +83,12 @@ def apply_import_hints(
                     protocol.IDA_ERROR,
                     f"IDA refused to set segment 0x{int(segment.start_ea):x} to {bits}-bit",
                 )
+    if big_endian is not None:
+        # inf_set_be() returns False both when the value is already correct and
+        # when the processor cannot represent it, so the return value cannot be
+        # used to detect refusal.  The callers assert inf_is_be() through `iI`;
+        # call it after the addressing mode so the width change cannot reset it.
+        ida_ida.inf_set_be(big_endian)
 
     start = entry if entry is not None else helpers.start_ip(db)
     if start is not None and not ida_ida.inf_set_start_ip(start):
@@ -80,7 +98,12 @@ def apply_import_hints(
         # created. Queue the entry point again so the analysis that connect()
         # drains immediately afterwards starts from a code address.
         ida_auto.auto_mark(start, ida_auto.AU_CODE)
-    return {"applied": True, "bits": bits, "start_ip": start}
+    return {
+        "applied": True,
+        "bits": bits,
+        "big_endian": big_endian,
+        "start_ip": start,
+    }
 
 
 def _hexrays_available(ida_hexrays: Any) -> bool:

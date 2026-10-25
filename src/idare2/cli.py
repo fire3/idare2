@@ -53,6 +53,7 @@ Targeting
 Behaviour
   -A, -AA                 wait for analysis (deep with -AA)
   -a <arch> -b <bits>     import hints for a database Nexus has to create
+  --endian big|little     byte order for a raw binary (default: little)
   -B <baddr>, -m <addr>   load base address
   -n                      do not start autoanalysis
   -N                      skip the user rc file
@@ -227,6 +228,7 @@ def _target_from(options: argv_parser.Options) -> Target:
         backend=options.backend,
         processor=options.arch,
         bits=_parse_bits(options.bits) if options.bits else None,
+        endian=options.endian,
         image_base=_parse_base(options.base) if options.base else None,
         auto_analysis=not options.no_analysis,
         save_on_close=bool(options.save_on_close),

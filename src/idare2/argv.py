@@ -64,6 +64,7 @@ LONG_WITH_VALUE = frozenset(
         "timeout",
         "startup-timeout",
         "color",
+        "endian",
     }
 )
 LONG_BOOLEAN = frozenset(
@@ -102,6 +103,9 @@ class Options:
     arch: str | None = None
     bits: str | None = None
     base: str | None = None
+    #: Raw-binary import hint: ``big`` or ``little``.  Spelled ``--endian``
+    #: because ``-e`` is r2's config-eval flag (and already is here).
+    endian: str | None = None
     no_analysis: bool = False
 
     attach: str | None = None
@@ -191,6 +195,10 @@ def _apply_long_value(options: Options, name: str, value: str) -> None:
         options.startup_timeout = _float(value, "--startup-timeout")
     elif name == "color":
         options.color = _int(value, "--color")
+    elif name == "endian":
+        if value not in ("big", "little"):
+            raise UsageError("--endian must be big or little")
+        options.endian = value
 
 
 def _apply_long_flag(options: Options, name: str) -> None:

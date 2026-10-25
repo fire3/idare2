@@ -61,6 +61,20 @@ def test_import_hints() -> None:
     assert (options.arch, options.bits, options.base) == ("arm", "32", "0x8000")
 
 
+def test_endian_import_hint() -> None:
+    options = argv.parse(["--endian", "big", "-a", "mips", "firmware.bin"])
+    assert options.endian == "big"
+    target = cli._target_from(options)
+    assert target.endian == "big"
+    assert argv.parse(["firmware.bin"]).endian is None
+
+
+@pytest.mark.parametrize("value", ["BE", "native", "both"])
+def test_invalid_endian_is_a_usage_error(value: str) -> None:
+    with pytest.raises(UsageError, match="--endian must be big or little"):
+        argv.parse([f"--endian={value}"])
+
+
 def test_import_hints_become_typed_target_fields() -> None:
     target = cli._target_from(
         argv.parse(["-a", "arm", "-b", "32", "-B", "0x8000", "firmware.bin"])

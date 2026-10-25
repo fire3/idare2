@@ -252,6 +252,7 @@ def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None
     calls = []
     ida_ida = SimpleNamespace(
         inf_set_app_bitness=lambda bits: calls.append(("bits", bits)),
+        inf_set_be=lambda value: calls.append(("be", value)) or True,
         inf_set_start_ip=lambda ea: calls.append(("entry", ea)) or True,
     )
     ida_segment = SimpleNamespace(
@@ -272,13 +273,70 @@ def test_apply_import_hints_uses_encoded_segment_addressing(monkeypatch) -> None
         db, "apply_import_hints", {"bits": 32, "entry": 0x1000}
     )
     assert protocol.is_ok(envelope), envelope
-    assert envelope["result"] == {"applied": True, "bits": 32, "start_ip": 0x1000}
+    assert envelope["result"] == {
+        "applied": True,
+        "bits": 32,
+        "big_endian": None,
+        "start_ip": 0x1000,
+    }
     assert calls == [
         ("bits", 32),
         ("segment", 0x1000, 1),
         ("entry", 0x1000),
         ("mark", 0x1000, 1),
     ]
+
+
+def test_apply_import_hints_sets_byte_order_before_marking_code(monkeypatch) -> None:
+    """inf_set_be must land between the width change and the AU_CODE mark."""
+    import sys
+
+    calls = []
+    ida_ida = SimpleNamespace(
+        inf_set_be=lambda value: calls.append(("be", value)) or True,
+        inf_set_start_ip=lambda ea: calls.append(("entry", ea)) or True,
+    )
+    ida_auto = SimpleNamespace(
+        AU_CODE=1, auto_mark=lambda ea, kind: calls.append(("mark", ea, kind))
+    )
+    monkeypatch.setitem(sys.modules, "ida_ida", ida_ida)
+    monkeypatch.setitem(sys.modules, "ida_idaapi", SimpleNamespace(BADADDR=0xFFFFFFFFFFFFFFFF))
+    monkeypatch.setitem(sys.modules, "ida_auto", ida_auto)
+    db = SimpleNamespace(
+        format="Binary file",
+        start_ip=0x1000,
+        segments=SimpleNamespace(get_all=lambda: []),
+    )
+
+    envelope = dispatch.invoke(db, "apply_import_hints", {"big_endian": True})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {
+        "applied": True,
+        "bits": None,
+        "big_endian": True,
+        "start_ip": 0x1000,
+    }
+    assert calls == [("be", True), ("entry", 0x1000), ("mark", 0x1000, 1)]
+
+
+def test_apply_import_hints_rejects_a_non_boolean_byte_order(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "ida_ida", SimpleNamespace())
+    db = SimpleNamespace(format="Binary file", segments=SimpleNamespace(get_all=list))
+    envelope = dispatch.invoke(db, "apply_import_hints", {"big_endian": 1})
+    assert not protocol.is_ok(envelope), envelope
+    assert envelope["error"]["code"] == protocol.BAD_ARGS
+
+
+def test_apply_import_hints_is_a_no_op_for_loaded_files(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "ida_ida", SimpleNamespace())
+    db = SimpleNamespace(format="ELF64")
+    envelope = dispatch.invoke(db, "apply_import_hints", {"big_endian": True})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == {"applied": False, "reason": "not a raw binary"}
 
 
 def test_deep_analyze_plans_the_whole_range(monkeypatch) -> None:
