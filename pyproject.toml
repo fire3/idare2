@@ -36,10 +36,11 @@ packages = ["src/idare2"]
 testpaths = ["tests"]
 # The default run is offline and fast.  The IDA-backed suites are opt-in
 # because they need an installed IDA and take a minute.
-addopts = "-ra -m 'not real_ida and not parity'"
+addopts = "-ra -m 'not real_ida and not parity and not arch_matrix'"
 markers = [
     "real_ida: requires an installed IDA with idalib configured",
     "parity: requires radare2 in PATH for r2/idare2 output comparison",
+    "arch_matrix: imports one raw binary per CPU; requires IDA processor modules",
 ]
 
 [tool.ruff]
