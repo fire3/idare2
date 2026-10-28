@@ -960,7 +960,6 @@ def test_pd_table_uses_the_columns_ida_can_fill() -> None:
     "command",
     [
         "pds 1",
-        "pd-- 1",
         "pdk 1",
         "pda 1",
         "pde 1",
@@ -991,13 +990,26 @@ def test_unimplemented_pd_suffixes_fail_loudly(command: str) -> None:
     assert "disasm" not in remote.operations
 
 
-def test_pd_rejects_negative_counts_instead_of_disassembling_everything() -> None:
+def test_pd_negative_count_is_backward_disassembly() -> None:
+    session, remote = make_session()
+    session.run("pd -3 @ 0x1000")
+    assert not session.failed
+    assert _last_call(remote, "disasm")["before"] == 3
+    assert _last_call(remote, "disasm")["count"] == 0
+
+
+def test_pd_context_requests_both_sides() -> None:
+    session, remote = make_session()
+    session.run("pd-- 3 @ 0x1000")
+    assert not session.failed
+    assert _last_call(remote, "disasm")["before"] == 3
+    assert _last_call(remote, "disasm")["count"] == 3
+
+
+def test_pd_context_without_a_count_prints_nothing() -> None:
     session, remote = make_session()
     remote.calls.clear()
-    session.failed = False
-    session.run("pd -1")
-    assert session.failed
-    assert isinstance(session.last_error, UsageError)
+    assert session.run("pd-- @ 0x1000") == []
     assert "disasm" not in remote.operations
 
 

@@ -842,3 +842,93 @@ def test_string_row_skips_an_unrenderable_literal() -> None:
         contents = None
 
     assert _string_row(NoContents(), None, RODATA) is None
+
+
+# --- backward disassembly -------------------------------------------------
+
+
+class _Insn:
+    def __init__(self, ea: int, size: int = 4) -> None:
+        self.ea = ea
+        self.size = size
+
+
+class _Instructions:
+    def __init__(self, addresses: list[int]) -> None:
+        self.addresses = addresses
+        self.by_address = {ea: _Insn(ea) for ea in addresses}
+
+    def get_at(self, ea: int):
+        return self.by_address.get(ea)
+
+    def get_previous(self, ea: int):
+        earlier = [address for address in self.addresses if address < ea]
+        return self.by_address[earlier[-1]] if earlier else None
+
+    def get_disassembly(self, insn) -> str:
+        return "nop"
+
+    def is_call_instruction(self, insn) -> bool:
+        return False
+
+    def is_jump(self, insn) -> bool:
+        return False
+
+    def call_targets(self, insn):
+        return []
+
+    def jump_targets(self, insn):
+        return []
+
+
+class _Bytes:
+    def __init__(self, addresses: list[int]) -> None:
+        self.addresses = addresses
+
+    def get_bytes_at(self, ea: int, size: int) -> bytes:
+        return b"\x90" * size
+
+    def get_next_head(self, ea: int, limit: int):
+        later = [address for address in self.addresses if address > ea]
+        return later[0] if later else None
+
+
+class _Comments:
+    def get_at(self, ea: int):
+        return None
+
+
+def _disasm_db(addresses: list[int]):
+    return SimpleNamespace(
+        functions=SimpleNamespace(get_at=lambda ea: None),
+        instructions=_Instructions(addresses),
+        bytes=_Bytes(addresses),
+        comments=_Comments(),
+        maximum_ea=max(addresses) + 4,
+        minimum_ea=min(addresses),
+    )
+
+
+def _disasm_addresses(result: dict) -> list[int]:
+    return [int(line["ea"]) for line in result["lines"]]
+
+
+def test_disasm_backward_returns_instructions_in_ascending_order() -> None:
+    db = _disasm_db([0x1000, 0x1004, 0x1008, 0x100C, 0x1010, 0x1014])
+    envelope = dispatch.invoke(db, "disasm", {"ea": 0x1010, "count": 0, "before": 3})
+    assert protocol.is_ok(envelope), envelope
+    assert _disasm_addresses(envelope["result"]) == [0x1004, 0x1008, 0x100C]
+
+
+def test_disasm_context_combines_both_sides() -> None:
+    db = _disasm_db([0x1000, 0x1004, 0x1008, 0x100C, 0x1010, 0x1014])
+    envelope = dispatch.invoke(db, "disasm", {"ea": 0x1010, "count": 2, "before": 2})
+    assert protocol.is_ok(envelope), envelope
+    assert _disasm_addresses(envelope["result"]) == [0x1008, 0x100C, 0x1010, 0x1014]
+
+
+def test_disasm_backward_stops_at_the_first_instruction() -> None:
+    db = _disasm_db([0x1000, 0x1004, 0x1008])
+    envelope = dispatch.invoke(db, "disasm", {"ea": 0x1004, "count": 0, "before": 9})
+    assert protocol.is_ok(envelope), envelope
+    assert _disasm_addresses(envelope["result"]) == [0x1000]
