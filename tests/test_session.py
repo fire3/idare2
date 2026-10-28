@@ -261,13 +261,17 @@ class FakeRemote:
                     ],
                 }
             ],
-            "class_at": lambda: {
-                "classname": "Base",
-                "method": "f(int)",
-                "addr": arguments["ea"],
-                "rawname": "_ZN4Base1fEi",
-                "lang": "c++",
-            },
+            "class_at": lambda: (
+                {}
+                if arguments["ea"] == 0x9999
+                else {
+                    "classname": "Base",
+                    "method": "f(int)",
+                    "addr": arguments["ea"],
+                    "rawname": "_ZN4Base1fEi",
+                    "lang": "c++",
+                }
+            ),
             "create_function": lambda: {"ea": arguments["ea"], "name": "main"},
             "analyze_bytes": lambda: {
                 "ea": arguments["ea"],
@@ -960,8 +964,6 @@ def test_pd_table_uses_the_columns_ida_can_fill() -> None:
     "command",
     [
         "pds 1",
-        "pd-- 1",
-        "pdk 1",
         "pda 1",
         "pde 1",
         "pdu 1",
@@ -991,13 +993,26 @@ def test_unimplemented_pd_suffixes_fail_loudly(command: str) -> None:
     assert "disasm" not in remote.operations
 
 
-def test_pd_rejects_negative_counts_instead_of_disassembling_everything() -> None:
+def test_pd_negative_count_is_backward_disassembly() -> None:
+    session, remote = make_session()
+    session.run("pd -3 @ 0x1000")
+    assert not session.failed
+    assert _last_call(remote, "disasm")["before"] == 3
+    assert _last_call(remote, "disasm")["count"] == 0
+
+
+def test_pd_context_requests_both_sides() -> None:
+    session, remote = make_session()
+    session.run("pd-- 3 @ 0x1000")
+    assert not session.failed
+    assert _last_call(remote, "disasm")["before"] == 3
+    assert _last_call(remote, "disasm")["count"] == 3
+
+
+def test_pd_context_without_a_count_prints_nothing() -> None:
     session, remote = make_session()
     remote.calls.clear()
-    session.failed = False
-    session.run("pd -1")
-    assert session.failed
-    assert isinstance(session.last_error, UsageError)
+    assert session.run("pd-- @ 0x1000") == []
     assert "disasm" not in remote.operations
 
 
@@ -2476,7 +2491,7 @@ def test_aflq_lists_addresses_only() -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["afl*", "aflm", "afll", "afln", "afls", "aflt", "afl,", "aflc", "aflp", "afl+", "afl="],
+    ["afl*", "aflm", "afll", "afls", "aflt", "afl,", "aflp", "afl="],
 )
 def test_unimplemented_afl_modifiers_fail_loudly(command: str) -> None:
     """Regression: these used to print the ordinary `afl` table."""
@@ -3210,3 +3225,106 @@ def test_text_search_context_is_clamped_to_the_mapped_segment() -> None:
     assert lines == [f'0x00001004 hit0_0 "{"." * 20}"']
     reads = [arguments for name, arguments in remote.calls if name == "read_bytes"]
     assert reads[-1] == {"ea": 0x1000, "count": 0x14}
+
+
+# --- px value dumps use byte lengths, not cell counts --------------------
+
+
+def _last_call(remote, operation: str):
+    matches = [arguments for name, arguments in remote.calls if name == operation]
+    assert matches, operation
+    return matches[-1]
+
+
+@pytest.mark.parametrize(
+    ("command", "width", "count"),
+    [
+        ("pxw 8 @ 0x1000", 4, 2),
+        ("pxw 12 @ 0x1000", 4, 3),
+        ("pxq 8 @ 0x1000", 8, 1),
+        ("pxq 16 @ 0x1000", 8, 2),
+        ("pxd 8 @ 0x1000", 4, 2),
+        ("pxu 12 @ 0x1000", 4, 3),
+    ],
+)
+def test_px_value_dumps_treat_the_argument_as_bytes(
+    command: str, width: int, count: int
+) -> None:
+    session, remote = make_session()
+    session.run(command)
+    assert _last_call(remote, "read_values") == {
+        "ea": 0x1000,
+        "count": count,
+        "width": width,
+    }
+
+
+def test_px_value_dumps_default_to_the_block_size() -> None:
+    session, remote = make_session()
+    session.blocksize = 16
+    session.run("pxw @ 0x1000")
+    assert _last_call(remote, "read_values")["count"] == 4
+    remote.calls.clear()
+    session.run("pxq @ 0x1000")
+    assert _last_call(remote, "read_values")["count"] == 2
+
+
+def test_px_defaults_to_the_block_size() -> None:
+    session, remote = make_session()
+    session.blocksize = 16
+    session.run("px @ 0x1000")
+    assert _last_call(remote, "read_bytes")["count"] == 16
+
+
+# --- pdk: class method disassembly --------------------------------------
+
+
+def test_pdk_disassembles_every_method_of_the_class() -> None:
+    session, remote = make_session()
+    lines = session.run("pdk @ 0x2000")
+    assert len(lines) == 2
+    calls = [arguments for name, arguments in remote.calls if name == "disasm"]
+    assert [call["ea"] for call in calls] == [0x2000, 0x2010]
+    assert all(call["mode"] == "function" for call in calls)
+
+
+def test_pdk_without_a_class_fails_loudly() -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run("pdk @ 0x9999")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "no class" in str(session.last_error)
+    assert "disasm" not in remote.operations
+
+
+# --- low-cost afl modifiers ----------------------------------------------
+
+
+def test_aflc_counts_functions() -> None:
+    session, _remote = make_session()
+    assert session.run("aflc") == ["2"]
+
+
+def test_afl_plus_sums_function_sizes() -> None:
+    session, _remote = make_session()
+    assert session.run("afl+") == ["24"]
+
+
+def test_afln_prints_rename_commands() -> None:
+    session, _remote = make_session()
+    assert session.run("afln") == [
+        "'@0x00001000'afn main",
+        "'@0x00002000'afn helper",
+    ]
+
+
+def test_negative_counts_are_only_accepted_by_pd() -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run("pdi -1 @ 0x1000")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "disasm" not in remote.operations

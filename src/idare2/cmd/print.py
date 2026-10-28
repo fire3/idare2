@@ -20,12 +20,14 @@ if TYPE_CHECKING:
     from idare2.session import Session
 
 DISASM_DETAIL = [
-    ("pd", "[n]", "disassemble N instructions"),
+    ("pd", "[n]", "disassemble N instructions; a negative count walks backwards"),
     ("pD", "[n]", "disassemble N bytes"),
+    ("pd--", "[n]", "context: N instructions before and N from the current address"),
     ("pdj", "[n]", "disassemble to json"),
     ("pdf", "", "disassemble the whole function"),
     ("pdfj", "", "disassemble the whole function to json"),
     ("pdb", "", "disassemble the current basic block"),
+    ("pdk", "", "disassemble every method of the class at the seek"),
     ("pdr", "", "recursive disassembly across the function graph"),
     ("pi", "[n]", "print N instructions without the address and byte columns"),
     ("pdi", "[n]", "like pi, with address and bytes"),
@@ -291,11 +293,11 @@ ASSEMBLY_DETAIL = [
 ]
 
 MEMORY_DETAIL = [
-    ("px", "[n]", "hexdump of N bytes"),
-    ("pxw", "[n]", "hexdump as 32-bit words"),
-    ("pxq", "[n]", "hexdump as 64-bit words"),
-    ("pxd", "[n]", "signed decimal dump"),
-    ("pxu", "[n]", "unsigned decimal dump"),
+    ("px", "[n]", "hexdump of N bytes (default: block size)"),
+    ("pxw", "[n]", "32-bit word dump of N bytes (default: block size)"),
+    ("pxq", "[n]", "64-bit word dump of N bytes (default: block size)"),
+    ("pxd", "[n]", "signed decimal dump of N bytes (default: block size)"),
+    ("pxu", "[n]", "unsigned decimal dump of N bytes (default: block size)"),
     ("p8", "[n]", "hexpair list of bytes"),
     ("p8j", "[n]", "hexpair list of bytes as JSON"),
     ("p8s", "[n]", "space-separated hex bytes"),
@@ -352,8 +354,6 @@ PF_DETAIL = [
 DISASM_UNSUPPORTED = frozenset(
     {
         "pds",     # referenced-name summary
-        "pd--",    # context disassembly (needs backwards iteration)
-        "pdk",     # class methods (depends on ic)
         "pda",     # every possible opcode
         "pde",     # execution-flow following
         "pdu",     # until-condition
@@ -383,7 +383,7 @@ _BLOCK_TOKENS = frozenset({"pdb", "pib"})
 #: call so an unknown suffix can never silently execute another projection.
 DISASM_IMPLEMENTED = frozenset(
     {
-        "pd", "pD", "pdj", "pdf", "pdfj", "pdb", "pdr", "pdr.",
+        "pd", "pD", "pdj", "pd--", "pdk", "pdf", "pdfj", "pdb", "pdr", "pdr.",
         "pi", "pI", "pib", "pif", "pir", "pij",
         "pdi", "pid", "pdl", "pdc", "pdcc", "pdq", "pdC", "pdJ", "pd,",
     }
@@ -413,9 +413,20 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
         raise UsageError(f"unsupported print modifier '{token[2:]}' (see pd?)")
 
     rest, count, offset = numeric_args(session, statement)
+    before = 0
     if count is not None and count < 0:
-        raise UsageError("negative counts (backward disassembly) are not supported yet")
+        if token != "pd":
+            raise UsageError("negative counts (backward disassembly) are only supported by pd")
+        before, count = -count, 0
+    if token == "pd--":
+        before = count or 0
+        count = before
+        if before == 0:
+            return []
     target = session.resolve(rest[0]) if rest else session.seek
+
+    if token == "pdk":
+        return _class_methods(session, target)
 
     if token in ("pdc", "pdcc"):
         return _decompile(session, target, count, offset)
@@ -428,9 +439,10 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
     elif token == "pD":
         mode = "bytes"
 
-    payload, meta = session.remote.call_with_meta(
-        "disasm", ea=target, count=count, offset=offset, mode=mode
-    )
+    arguments = {"ea": target, "count": count, "offset": offset, "mode": mode}
+    if before:
+        arguments["before"] = before
+    payload, meta = session.remote.call_with_meta("disasm", **arguments)
     session.prime_comments(
         {int(line["ea"]): line.get("comment") or "" for line in payload.get("lines", [])}
     )
@@ -462,6 +474,32 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
     # carries the requested mode).
     lines = fmt_disasm.format_disasm(payload, session)
     return with_more(lines, meta)
+
+
+def _class_methods(session: Session, target: int) -> list[str]:
+    """``pdk`` -- disassemble every method of the class at ``target``."""
+    at = session.remote.call("class_at", ea=target)
+    if not at:
+        raise UsageError(f"no class at {session.format_addr(target)}")
+    classname = str(at.get("classname") or "")
+    methods: list[int] = []
+    if classname:
+        for entry in session.remote.call("classes"):
+            if entry.get("classname") == classname:
+                methods = [int(method["addr"]) for method in entry.get("methods") or []]
+                break
+    if not methods and at.get("addr"):
+        methods = [int(at["addr"])]
+    if not methods:
+        raise UsageError(f"no methods for class '{classname or '?'}'")
+
+    lines: list[str] = []
+    for address in sorted(set(methods)):
+        payload, meta = session.remote.call_with_meta(
+            "disasm", ea=address, count=None, offset=0, mode="function"
+        )
+        lines.extend(with_more(fmt_disasm.format_disasm(payload, session), meta))
+    return lines
 
 
 def _instruction_json(payload: dict[str, Any]) -> str:
@@ -610,23 +648,21 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
     if token.startswith("px") and token not in ("px", "pxw", "pxq", "pxd", "pxu"):
         raise UsageError(f"unsupported print modifier '{token[2:]}' (see px?)")
 
-    if token in ("pxd", "pxu"):
-        size = _value_width(token, width)
-        cells = count or 16
+    if token in ("pxd", "pxu", "pxw", "pxq"):
+        step = 8 if token == "pxq" else 4
+        length = count if count is not None else session.blocksize
+        if length < 0:
+            raise UsageError(f"{token} needs a non-negative byte count")
+        length -= length % step
+        if length == 0:
+            return []
         payload = session.remote.call(
-            "read_values", ea=target, count=cells, width=size
+            "read_values", ea=target, count=length // step, width=step
         )
-        return fmt_memory.format_values(
-            payload, session, fmt="signed" if token == "pxd" else "unsigned"
-        )
+        kind = {"pxd": "signed", "pxu": "unsigned"}.get(token, "hex")
+        return fmt_memory.format_values(payload, session, fmt=kind)
 
-    if token in ("pxw", "pxq"):
-        size = 4 if token == "pxw" else 8
-        cells = count or (16 if size == 4 else 8)
-        payload = session.remote.call("read_values", ea=target, count=cells, width=size)
-        return fmt_memory.format_values(payload, session)
-
-    size = count or (session.blocksize if token == "pr" else 64)
+    size = count or (session.blocksize if token in ("pr", "px") else 64)
     payload = session.remote.call("read_bytes", ea=target, count=size)
 
     if token == "p8":
@@ -1363,13 +1399,6 @@ def _python_pack(raw: bytes) -> list[str]:
             body += "])"
         lines.append(body)
     return lines
-
-
-def _value_width(token: str, bits: Any) -> int:
-    suffix = token[-1] if token[-1].isdigit() else ""
-    if suffix:
-        return int(suffix)
-    return 8 if bits == 64 else 4
 
 
 #: What bare ``ph`` advertises.  Deliberately the CPython-guaranteed set rather

@@ -93,23 +93,107 @@ def _row(
     return out.rstrip()
 
 
+_VALUE_DECIMAL_WIDTH = {1: 4, 2: 7, 4: 13, 8: 23}
+
+
 def format_values(payload: dict[str, Any], session: Any, *, fmt: str = "hex") -> list[str]:
-    """Render a ``read_values`` result (``pxw``/``pxq``/``pxd``/``pxu``)."""
-    width = addr_width(session.info.get("bits"))
-    values = payload.get("values") or []
-    step = int(payload.get("width", 4))
+    """Render a ``read_values`` result like r2's value dumps.
+
+    r2 does not print one value per line: it prints ``hex.cols`` bytes per row,
+    pads the value block when a row is short, and starts the ASCII column at a
+    fixed offset.  The padding rules are copied from ``r_print_hexdump`` in
+    radare2's ``libr/util/print.c``.
+    """
+    step = int(payload.get("width") or 0)
+    if step not in _VALUE_DECIMAL_WIDTH:
+        raise ValueError(f"unsupported value width {step}")
+    values = [int(value) for value in payload.get("values") or []]
+    if not values:
+        return []
+    mask = (1 << (step * 8)) - 1
+    order = "big" if payload.get("big_endian") else "little"
+    raw = b"".join((value & mask).to_bytes(step, order) for value in values)
+
+    cols = session.config.get_int("hex.cols")
+    cols = max(step, (cols // step) * step)
+    address_width = addr_width(session.info.get("bits"))
+    show_header = session.config.get_bool("hex.header")
+    show_offset = session.config.get_bool("hex.offset")
+    show_ascii = session.config.get_bool("hex.ascii")
     ea = int(payload["ea"])
-    rows = []
-    for index, value in enumerate(values):
-        address = fmt_addr(ea + index * step, width)
-        if fmt == "hex":
-            text = f"0x{value:0{step * 2}x}"
-        elif fmt == "unsigned":
-            text = str(value)
-        else:
-            text = str(_signed(value, step))
-        rows.append(f"{address}  {text}")
+
+    rows: list[str] = []
+    if fmt != "hex" and show_header:
+        rows.append(_value_header(ea, cols, address_width, show_offset, show_ascii))
+
+    for offset in range(0, len(raw), cols):
+        chunk = raw[offset : offset + cols]
+        row_values = values[offset // step : (offset + len(chunk)) // step]
+        rows.append(
+            _value_row(
+                ea + offset,
+                chunk,
+                row_values,
+                step,
+                cols,
+                fmt,
+                address_width,
+                show_offset,
+                show_ascii,
+            )
+        )
     return rows
+
+
+def _value_header(
+    ea: int, cols: int, address_width: int, show_offset: bool, show_ascii: bool
+) -> str:
+    out = "- offset -".ljust(address_width + 6) if show_offset else ""
+    for index in range(cols):
+        if index:
+            out += "  " if index % 2 else "   "
+        out += f"{(ea + index) & 0xF:X}"
+    if show_ascii:
+        out += "  " + "".join(f"{(ea + index) & 0xF:X}" for index in range(cols))
+    return out.rstrip()
+
+
+def _value_row(
+    ea: int,
+    chunk: bytes,
+    values: list[int],
+    step: int,
+    cols: int,
+    fmt: str,
+    address_width: int,
+    show_offset: bool,
+    show_ascii: bool,
+) -> str:
+    out = (fmt_addr(ea, address_width) + " ") if show_offset else ""
+    out += " "
+    for value in values:
+        if fmt == "hex":
+            out += f"0x{value:0{step * 2}x}" + ("  " if step == 8 else " ")
+        else:
+            number = _signed(value, step) if fmt == "signed" else value
+            out += f"{number:>{_VALUE_DECIMAL_WIDTH[step]}} "
+    for index in range(len(chunk), cols):
+        out += _value_padding(fmt, step, index)
+    if show_ascii:
+        out += " "
+        out += "".join(chr(byte) if byte in PRINTABLE else "." for byte in chunk)
+    return out.rstrip()
+
+
+def _value_padding(fmt: str, step: int, index: int) -> str:
+    """Whitespace r2 emits for a byte missing from a short row."""
+    if fmt == "hex" and step == 4:
+        return "  " if index % 4 == 0 else "   "
+    if fmt == "hex":
+        return "  " if index % 2 == 0 else "   "
+    if fmt == "signed":
+        return "  " if index % 2 == 0 else "     "
+    return "  " if index % 2 == 0 else "   "
 
 
 def _signed(value: int, width: int) -> int:

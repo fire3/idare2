@@ -367,6 +367,45 @@ def test_pd_renders(session) -> None:
     assert any("MOV" in line or "mov" in line for line in lines)
 
 
+def _instruction_addresses(lines: list[str]) -> list[int]:
+    import re
+
+    out: list[int] = []
+    for line in lines:
+        match = re.search(r"0x[0-9a-fA-F]+", line)
+        if match:
+            out.append(int(match.group(), 16))
+    return out
+
+
+def test_pd_backward_and_context(session) -> None:
+    forward = _instruction_addresses(session.run("pd 6 @ 0x00016bb4"))
+    assert len(forward) >= 6
+    pivot = forward[3]
+
+    backward = _instruction_addresses(session.run(f"pd -3 @ 0x{pivot:x}"))
+    assert backward == forward[:3]
+
+    context = _instruction_addresses(session.run(f"pd-- 3 @ 0x{pivot:x}"))
+    assert context == forward[:6]
+
+
+def test_px_value_dumps_use_r2_rows(session) -> None:
+    words = session.run("pxw 16 @ 0x10000")
+    assert len(words) == 1
+    assert words[0].startswith("0x00010000  0x")
+
+    signed = session.run("pxd 16 @ 0x10000")
+    assert signed[0].startswith("- offset -")
+    assert len(signed) == 2
+
+
+def test_afl_count_sum_and_names(session) -> None:
+    assert int(session.run("aflc")[0]) == len(session.run("aflq"))
+    assert int(session.run("afl+")[0]) > 0
+    assert session.run("afln")[0].startswith("'@0x")
+
+
 def test_pa_assembles_without_writing(session) -> None:
     """`pa` is the reverse of `pd`; it must work in a read-only session."""
     arch = str(session.info.get("architecture") or "")

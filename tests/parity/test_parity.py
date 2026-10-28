@@ -194,19 +194,43 @@ def test_assembled_search_matches_r2(session, r2) -> None:
 
 
 def test_x_alias_matches_r2(session, r2) -> None:
-    """``x`` and ``xj`` must agree with r2 byte for byte.
-
-    ``xw``/``xq`` alias our ``pxw``/``pxq``, whose one-value-per-line layout
-    still differs from r2's row-wise words dump (tracked in PROGRESS), so the
-    alias itself is covered by the offline tests instead.
-    """
+    """``x``, ``xw``, ``xq`` and ``xj`` must agree with r2."""
     address = 0x10000
-    ours = px_rows(session.run(f"x 64 @ 0x{address:x}"))
-    theirs = px_rows(r2(f"x 64 @ 0x{address:x}"))
-    assert ours and ours == theirs
+    for command in ("x 64", "xw 64", "xq 64"):
+        ours = px_rows(session.run(f"{command} @ 0x{address:x}"))
+        theirs = px_rows(r2(f"{command} @ 0x{address:x}"))
+        assert ours and ours == theirs, command
     assert json.loads("\n".join(session.run(f"xj 16 @ 0x{address:x}"))) == json.loads(
         "\n".join(r2(f"xj 16 @ 0x{address:x}"))
     )
+
+
+@pytest.mark.parametrize("command", ["pxw 64", "pxq 64", "pxd 64", "pxu 64"])
+def test_value_dumps_match_r2(session, r2, command: str) -> None:
+    """The word/decimal dumps share r2's row layout and byte-count semantics."""
+    address = 0x10000
+    ours = session.run(f"{command} @ 0x{address:x}")
+    theirs = r2(f"{command} @ 0x{address:x}")
+    assert ours
+    assert ours == theirs
+
+
+def test_backward_disassembly_matches_r2(session, r2) -> None:
+    """``pd -N`` walks the same instruction boundaries as r2."""
+    address = 0x15E50
+    ours = [item[0] for item in pd_records(session.run(f"pd -6 @ 0x{address:x}"))]
+    theirs = [item[0] for item in pd_records(r2(f"pd -6 @ 0x{address:x}"))]
+    assert ours
+    assert ours == theirs
+
+
+def test_context_disassembly_matches_r2(session, r2) -> None:
+    """``pd-- N`` prints N before plus N from the current address."""
+    address = 0x15E50
+    ours = [item[0] for item in pd_records(session.run(f"pd-- 6 @ 0x{address:x}"))]
+    theirs = [item[0] for item in pd_records(r2(f"pd-- 6 @ 0x{address:x}"))]
+    assert ours
+    assert ours == theirs
 
 
 def test_hexdump_rows_match(session, r2) -> None:

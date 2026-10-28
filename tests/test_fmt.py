@@ -411,3 +411,132 @@ def test_graph_dot_escapes_labels_and_colours_edges(session: FakeSession) -> Non
     assert 'URL="ma\\"in/0x00001000"' in text
     assert '"0x00001000" -> "0x00001010" [color="#13a10e"]' in text
     assert '"0x00001000" -> "0x00001008" [color="#c50f1f"]' in text
+
+
+# --- pxw / pxq / pxd / pxu: r2 6.2.5 row layout -------------------------
+#
+# Captured from r2 6.2.5 on /bin/true at 0x1000:
+#   00000000 00000000 c89f0000 00000000
+# The expected strings below are byte-for-byte copies, so a layout regression
+# fails against the real tool rather than against our own assumptions.
+
+
+def _values_payload(raw: bytes, width: int, *, ea: int = 0x1000, big_endian: bool = False):
+    order = "big" if big_endian else "little"
+    values = [
+        int.from_bytes(raw[offset : offset + width], order)
+        for offset in range(0, len(raw), width)
+    ]
+    return {
+        "ea": ea,
+        "width": width,
+        "count": len(values),
+        "big_endian": big_endian,
+        "values": values,
+    }
+
+
+RAW16 = bytes.fromhex("00000000" "00000000" "c89f0000" "00000000")
+
+
+def test_pxw_matches_r2_row_layout(session: FakeSession) -> None:
+    out = fmt_memory.format_values(_values_payload(RAW16, 4), session)
+    assert out == [
+        "0x00001000  0x00000000 0x00000000 0x00009fc8 0x00000000  ................"
+    ]
+
+
+def test_pxq_matches_r2_row_layout(session: FakeSession) -> None:
+    out = fmt_memory.format_values(_values_payload(RAW16, 8), session)
+    assert out == [
+        "0x00001000  0x0000000000000000  0x0000000000009fc8   ................"
+    ]
+
+
+def test_pxd_matches_r2_row_layout(session: FakeSession) -> None:
+    out = fmt_memory.format_values(_values_payload(RAW16, 4), session, fmt="signed")
+    assert out == [
+        "- offset -    0  1   2  3   4  5   6  7   8  9   A  B   C  D   E  F  "
+        "0123456789ABCDEF",
+        "0x00001000              0             0         40904             0  "
+        "................",
+    ]
+
+
+def test_pxu_matches_r2_row_layout(session: FakeSession) -> None:
+    out = fmt_memory.format_values(_values_payload(RAW16, 4), session, fmt="unsigned")
+    assert out == [
+        "- offset -    0  1   2  3   4  5   6  7   8  9   A  B   C  D   E  F  "
+        "0123456789ABCDEF",
+        "0x00001000              0             0         40904             0  "
+        "................",
+    ]
+
+
+def test_value_dumps_pad_partial_rows_like_r2(session: FakeSession) -> None:
+    raw8 = RAW16[:8]
+    assert fmt_memory.format_values(_values_payload(raw8, 4), session) == [
+        "0x00001000  0x00000000 0x00000000                        ........"
+    ]
+    assert fmt_memory.format_values(_values_payload(raw8, 8), session) == [
+        "0x00001000  0x0000000000000000                       ........"
+    ]
+    assert fmt_memory.format_values(
+        _values_payload(raw8, 4), session, fmt="signed"
+    ) == [
+        "- offset -    0  1   2  3   4  5   6  7   8  9   A  B   C  D   E  F  "
+        "0123456789ABCDEF",
+        "0x00001000              0             0                              "
+        "........",
+    ]
+    assert fmt_memory.format_values(
+        _values_payload(raw8, 4), session, fmt="unsigned"
+    ) == [
+        "- offset -    0  1   2  3   4  5   6  7   8  9   A  B   C  D   E  F  "
+        "0123456789ABCDEF",
+        "0x00001000              0             0                      ........",
+    ]
+
+
+def test_value_dumps_honour_hex_cols(session: FakeSession) -> None:
+    session.config.set("hex.cols", 8)
+    assert fmt_memory.format_values(_values_payload(RAW16, 4), session) == [
+        "0x00001000  0x00000000 0x00000000  ........",
+        "0x00001008  0x00009fc8 0x00000000  ........",
+    ]
+    assert fmt_memory.format_values(_values_payload(RAW16, 8), session) == [
+        "0x00001000  0x0000000000000000   ........",
+        "0x00001008  0x0000000000009fc8   ........",
+    ]
+    assert fmt_memory.format_values(
+        _values_payload(RAW16, 4), session, fmt="signed"
+    ) == [
+        "- offset -    0  1   2  3   4  5   6  7  01234567",
+        "0x00001000              0             0  ........",
+        "0x00001008          40904             0  ........",
+    ]
+
+
+def test_value_dump_ascii_is_reconstructed_from_endian_values(session: FakeSession) -> None:
+    payload = _values_payload(bytes.fromhex("41424344"), 4, big_endian=True)
+    out = fmt_memory.format_values(payload, session)
+    assert out == ["0x00001000  0x41424344" + " " * 35 + "ABCD"]
+
+
+def test_value_dump_rejects_zero_width(session: FakeSession) -> None:
+    with pytest.raises(ValueError):
+        fmt_memory.format_values(
+            {"ea": 0x1000, "width": 0, "values": [], "big_endian": False}, session
+        )
+
+
+def test_pxd_is_signed_and_pxu_is_unsigned(session: FakeSession) -> None:
+    raw = bytes.fromhex("ffffffff")
+    signed = fmt_memory.format_values(
+        _values_payload(raw, 4), session, fmt="signed"
+    )
+    unsigned = fmt_memory.format_values(
+        _values_payload(raw, 4), session, fmt="unsigned"
+    )
+    assert "-1" in signed[1]
+    assert "4294967295" in unsigned[1]
