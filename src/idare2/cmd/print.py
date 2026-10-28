@@ -610,23 +610,21 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
     if token.startswith("px") and token not in ("px", "pxw", "pxq", "pxd", "pxu"):
         raise UsageError(f"unsupported print modifier '{token[2:]}' (see px?)")
 
-    if token in ("pxd", "pxu"):
-        size = _value_width(token, width)
-        cells = count or 16
+    if token in ("pxd", "pxu", "pxw", "pxq"):
+        step = 8 if token == "pxq" else 4
+        length = count if count is not None else session.blocksize
+        if length < 0:
+            raise UsageError(f"{token} needs a non-negative byte count")
+        length -= length % step
+        if length == 0:
+            return []
         payload = session.remote.call(
-            "read_values", ea=target, count=cells, width=size
+            "read_values", ea=target, count=length // step, width=step
         )
-        return fmt_memory.format_values(
-            payload, session, fmt="signed" if token == "pxd" else "unsigned"
-        )
+        kind = {"pxd": "signed", "pxu": "unsigned"}.get(token, "hex")
+        return fmt_memory.format_values(payload, session, fmt=kind)
 
-    if token in ("pxw", "pxq"):
-        size = 4 if token == "pxw" else 8
-        cells = count or (16 if size == 4 else 8)
-        payload = session.remote.call("read_values", ea=target, count=cells, width=size)
-        return fmt_memory.format_values(payload, session)
-
-    size = count or (session.blocksize if token == "pr" else 64)
+    size = count or (session.blocksize if token in ("pr", "px") else 64)
     payload = session.remote.call("read_bytes", ea=target, count=size)
 
     if token == "p8":
@@ -1363,13 +1361,6 @@ def _python_pack(raw: bytes) -> list[str]:
             body += "])"
         lines.append(body)
     return lines
-
-
-def _value_width(token: str, bits: Any) -> int:
-    suffix = token[-1] if token[-1].isdigit() else ""
-    if suffix:
-        return int(suffix)
-    return 8 if bits == 64 else 4
 
 
 #: What bare ``ph`` advertises.  Deliberately the CPython-guaranteed set rather

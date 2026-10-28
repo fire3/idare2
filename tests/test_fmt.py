@@ -520,7 +520,7 @@ def test_value_dumps_honour_hex_cols(session: FakeSession) -> None:
 def test_value_dump_ascii_is_reconstructed_from_endian_values(session: FakeSession) -> None:
     payload = _values_payload(bytes.fromhex("41424344"), 4, big_endian=True)
     out = fmt_memory.format_values(payload, session)
-    assert out == ["0x00001000  0x41424344  ABCD"]
+    assert out == ["0x00001000  0x41424344" + " " * 35 + "ABCD"]
 
 
 def test_value_dump_rejects_zero_width(session: FakeSession) -> None:
