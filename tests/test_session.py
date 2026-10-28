@@ -261,13 +261,17 @@ class FakeRemote:
                     ],
                 }
             ],
-            "class_at": lambda: {
-                "classname": "Base",
-                "method": "f(int)",
-                "addr": arguments["ea"],
-                "rawname": "_ZN4Base1fEi",
-                "lang": "c++",
-            },
+            "class_at": lambda: (
+                {}
+                if arguments["ea"] == 0x9999
+                else {
+                    "classname": "Base",
+                    "method": "f(int)",
+                    "addr": arguments["ea"],
+                    "rawname": "_ZN4Base1fEi",
+                    "lang": "c++",
+                }
+            ),
             "create_function": lambda: {"ea": arguments["ea"], "name": "main"},
             "analyze_bytes": lambda: {
                 "ea": arguments["ea"],
@@ -3271,3 +3275,26 @@ def test_px_defaults_to_the_block_size() -> None:
     session.blocksize = 16
     session.run("px @ 0x1000")
     assert _last_call(remote, "read_bytes")["count"] == 16
+
+
+# --- pdk: class method disassembly --------------------------------------
+
+
+def test_pdk_disassembles_every_method_of_the_class() -> None:
+    session, remote = make_session()
+    lines = session.run("pdk @ 0x2000")
+    assert len(lines) == 2
+    calls = [arguments for name, arguments in remote.calls if name == "disasm"]
+    assert [call["ea"] for call in calls] == [0x2000, 0x2010]
+    assert all(call["mode"] == "function" for call in calls)
+
+
+def test_pdk_without_a_class_fails_loudly() -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run("pdk @ 0x9999")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "no class" in str(session.last_error)
+    assert "disasm" not in remote.operations
