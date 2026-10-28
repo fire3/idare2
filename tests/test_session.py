@@ -3318,3 +3318,13 @@ def test_afln_prints_rename_commands() -> None:
         "'@0x00001000'afn main",
         "'@0x00002000'afn helper",
     ]
+
+
+def test_negative_counts_are_only_accepted_by_pd() -> None:
+    session, remote = make_session()
+    remote.calls.clear()
+    session.failed = False
+    session.run("pdi -1 @ 0x1000")
+    assert session.failed
+    assert isinstance(session.last_error, UsageError)
+    assert "disasm" not in remote.operations
