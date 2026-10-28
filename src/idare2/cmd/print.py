@@ -352,7 +352,6 @@ PF_DETAIL = [
 DISASM_UNSUPPORTED = frozenset(
     {
         "pds",     # referenced-name summary
-        "pdk",     # class methods (depends on ic)
         "pda",     # every possible opcode
         "pde",     # execution-flow following
         "pdu",     # until-condition
@@ -382,7 +381,7 @@ _BLOCK_TOKENS = frozenset({"pdb", "pib"})
 #: call so an unknown suffix can never silently execute another projection.
 DISASM_IMPLEMENTED = frozenset(
     {
-        "pd", "pD", "pdj", "pd--", "pdf", "pdfj", "pdb", "pdr", "pdr.",
+        "pd", "pD", "pdj", "pd--", "pdk", "pdf", "pdfj", "pdb", "pdr", "pdr.",
         "pi", "pI", "pib", "pif", "pir", "pij",
         "pdi", "pid", "pdl", "pdc", "pdcc", "pdq", "pdC", "pdJ", "pd,",
     }
@@ -423,6 +422,9 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
         if before == 0:
             return []
     target = session.resolve(rest[0]) if rest else session.seek
+
+    if token == "pdk":
+        return _class_methods(session, target)
 
     if token in ("pdc", "pdcc"):
         return _decompile(session, target, count, offset)
@@ -470,6 +472,32 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
     # carries the requested mode).
     lines = fmt_disasm.format_disasm(payload, session)
     return with_more(lines, meta)
+
+
+def _class_methods(session: Session, target: int) -> list[str]:
+    """``pdk`` -- disassemble every method of the class at ``target``."""
+    at = session.remote.call("class_at", ea=target)
+    if not at:
+        raise UsageError(f"no class at {session.format_addr(target)}")
+    classname = str(at.get("classname") or "")
+    methods: list[int] = []
+    if classname:
+        for entry in session.remote.call("classes"):
+            if entry.get("classname") == classname:
+                methods = [int(method["addr"]) for method in entry.get("methods") or []]
+                break
+    if not methods and at.get("addr"):
+        methods = [int(at["addr"])]
+    if not methods:
+        raise UsageError(f"no methods for class '{classname or '?'}'")
+
+    lines: list[str] = []
+    for address in sorted(set(methods)):
+        payload, meta = session.remote.call_with_meta(
+            "disasm", ea=address, count=None, offset=0, mode="function"
+        )
+        lines.extend(with_more(fmt_disasm.format_disasm(payload, session), meta))
+    return lines
 
 
 def _instruction_json(payload: dict[str, Any]) -> str:

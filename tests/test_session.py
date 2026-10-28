@@ -964,7 +964,6 @@ def test_pd_table_uses_the_columns_ida_can_fill() -> None:
     "command",
     [
         "pds 1",
-        "pdk 1",
         "pda 1",
         "pde 1",
         "pdu 1",
