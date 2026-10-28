@@ -352,7 +352,6 @@ PF_DETAIL = [
 DISASM_UNSUPPORTED = frozenset(
     {
         "pds",     # referenced-name summary
-        "pd--",    # context disassembly (needs backwards iteration)
         "pdk",     # class methods (depends on ic)
         "pda",     # every possible opcode
         "pde",     # execution-flow following
@@ -383,7 +382,7 @@ _BLOCK_TOKENS = frozenset({"pdb", "pib"})
 #: call so an unknown suffix can never silently execute another projection.
 DISASM_IMPLEMENTED = frozenset(
     {
-        "pd", "pD", "pdj", "pdf", "pdfj", "pdb", "pdr", "pdr.",
+        "pd", "pD", "pdj", "pd--", "pdf", "pdfj", "pdb", "pdr", "pdr.",
         "pi", "pI", "pib", "pif", "pir", "pij",
         "pdi", "pid", "pdl", "pdc", "pdcc", "pdq", "pdC", "pdJ", "pd,",
     }
@@ -413,8 +412,16 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
         raise UsageError(f"unsupported print modifier '{token[2:]}' (see pd?)")
 
     rest, count, offset = numeric_args(session, statement)
+    before = 0
     if count is not None and count < 0:
-        raise UsageError("negative counts (backward disassembly) are not supported yet")
+        if token != "pd":
+            raise UsageError("negative counts (backward disassembly) are only supported by pd")
+        before, count = -count, 0
+    if token == "pd--":
+        before = count or 0
+        count = before
+        if before == 0:
+            return []
     target = session.resolve(rest[0]) if rest else session.seek
 
     if token in ("pdc", "pdcc"):
@@ -428,9 +435,10 @@ def print_disasm(session: Session, statement: Statement) -> list[str]:
     elif token == "pD":
         mode = "bytes"
 
-    payload, meta = session.remote.call_with_meta(
-        "disasm", ea=target, count=count, offset=offset, mode=mode
-    )
+    arguments = {"ea": target, "count": count, "offset": offset, "mode": mode}
+    if before:
+        arguments["before"] = before
+    payload, meta = session.remote.call_with_meta("disasm", **arguments)
     session.prime_comments(
         {int(line["ea"]): line.get("comment") or "" for line in payload.get("lines", [])}
     )

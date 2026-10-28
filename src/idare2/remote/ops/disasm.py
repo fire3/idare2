@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from itertools import chain
 from typing import Any
 
 from idare2 import protocol
@@ -75,13 +76,11 @@ def _walk(db: Any, start: int, limit: int, max_count: int | None) -> Iterator[An
     exclusive, and passing it to ``get_next_head`` raises because IDA validates
     the bound.
     """
-    from ida_idaapi import BADADDR
-
     if max_count is not None and max_count < 0:
         max_count = None
     cur: int | None = start
     emitted = 0
-    while cur is not None and cur != BADADDR and cur <= limit:
+    while cur is not None and cur <= limit:
         if max_count is not None and emitted >= max_count:
             return
         if emitted >= HARD_CAP:
@@ -95,6 +94,34 @@ def _walk(db: Any, start: int, limit: int, max_count: int | None) -> Iterator[An
         if nxt is None or int(nxt) <= cur:
             return
         cur = int(nxt)
+
+
+def _walk_back(db: Any, start: int, max_count: int) -> list[Any]:
+    """Instructions immediately before ``start``, oldest first.
+
+    ``db.instructions.get_previous`` is IDA's own backward navigation; the
+    result is reversed so it can be concatenated with the forward walk and
+    rendered in address order, which is what r2's ``pd -N`` does.
+    """
+    if max_count <= 0:
+        return []
+
+    out: list[Any] = []
+    cur = start
+    while len(out) < max_count and len(out) < HARD_CAP:
+        try:
+            insn = db.instructions.get_previous(cur)
+        except Exception:
+            break
+        if insn is None:
+            break
+        address = int(insn.ea)
+        if address < 0 or address >= cur:
+            break
+        out.append(insn)
+        cur = address
+    out.reverse()
+    return out
 
 
 def _signature(db: Any, func: Any) -> str | None:
@@ -120,6 +147,7 @@ def disasm(
     count: int | None = None,
     offset: int = 0,
     mode: str = "count",
+    before: int = 0,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Disassemble around ``ea``.
 
@@ -133,6 +161,9 @@ def disasm(
         the whole containing function (``pdf``).
     ``block``
         the basic block containing ``ea`` (``pdb``).
+
+    ``before`` prepends that many instructions from immediately before ``ea``
+    (``pd -N`` and ``pd-- N``); they are returned in ascending address order.
     """
     func = db.functions.get_at(ea)
     header = None
@@ -162,7 +193,8 @@ def disasm(
     else:
         cap = helpers.FUNC_CAP
         limit = helpers.DISASM_DEFAULT if count is None else count
-        source = _walk(db, ea, _limit(db), limit)
+        backward = _walk_back(db, ea, before) if before else []
+        source = chain(backward, _walk(db, ea, _limit(db), limit))
 
     records, next_offset = helpers.paginate(source, offset, cap)
     lines = [instruction_record(db, insn) for insn in records]
