@@ -2491,7 +2491,7 @@ def test_aflq_lists_addresses_only() -> None:
 
 @pytest.mark.parametrize(
     "command",
-    ["afl*", "aflm", "afll", "afln", "afls", "aflt", "afl,", "aflc", "aflp", "afl+", "afl="],
+    ["afl*", "aflm", "afll", "afls", "aflt", "afl,", "aflp", "afl="],
 )
 def test_unimplemented_afl_modifiers_fail_loudly(command: str) -> None:
     """Regression: these used to print the ordinary `afl` table."""

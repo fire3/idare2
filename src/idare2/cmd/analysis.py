@@ -219,7 +219,7 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
     if token == "afu":
         return _resize(session, statement)
 
-    if token in ("afl", "aflj", "aflq"):
+    if token in ("afl", "aflj", "aflq", "aflc", "afl+", "afln"):
         pattern = rest[0] if rest else None
         payload, meta = session.remote.call_with_meta(
             "functions", pattern=pattern, offset=offset, count=count
@@ -229,6 +229,15 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
         if token == "aflq":
             # r2's quiet form is the address alone, one per line.
             return [f"0x{int(item['ea']):08x}" for item in payload]
+        if token == "aflc":
+            return [str(len(payload))]
+        if token == "afl+":
+            return [str(sum(int(item.get("size") or 0) for item in payload))]
+        if token == "afln":
+            return [
+                f"'@{session.format_addr(int(item['ea']))}'afn {item['name']}"
+                for item in payload
+            ]
         return with_more(fmt_listing.format_functions(payload, session), meta)
 
     # Other `afl` modifiers (afl*, aflm, afll, afln, afls, ...) are not
