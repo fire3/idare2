@@ -3210,3 +3210,52 @@ def test_text_search_context_is_clamped_to_the_mapped_segment() -> None:
     assert lines == [f'0x00001004 hit0_0 "{"." * 20}"']
     reads = [arguments for name, arguments in remote.calls if name == "read_bytes"]
     assert reads[-1] == {"ea": 0x1000, "count": 0x14}
+
+
+# --- px value dumps use byte lengths, not cell counts --------------------
+
+
+def _last_call(remote, operation: str):
+    matches = [arguments for name, arguments in remote.calls if name == operation]
+    assert matches, operation
+    return matches[-1]
+
+
+@pytest.mark.parametrize(
+    ("command", "width", "count"),
+    [
+        ("pxw 8 @ 0x1000", 4, 2),
+        ("pxw 12 @ 0x1000", 4, 3),
+        ("pxq 8 @ 0x1000", 8, 1),
+        ("pxq 16 @ 0x1000", 8, 2),
+        ("pxd 8 @ 0x1000", 4, 2),
+        ("pxu 12 @ 0x1000", 4, 3),
+    ],
+)
+def test_px_value_dumps_treat_the_argument_as_bytes(
+    command: str, width: int, count: int
+) -> None:
+    session, remote = make_session()
+    session.run(command)
+    assert _last_call(remote, "read_values") == {
+        "ea": 0x1000,
+        "count": count,
+        "width": width,
+    }
+
+
+def test_px_value_dumps_default_to_the_block_size() -> None:
+    session, remote = make_session()
+    session.blocksize = 16
+    session.run("pxw @ 0x1000")
+    assert _last_call(remote, "read_values")["count"] == 4
+    remote.calls.clear()
+    session.run("pxq @ 0x1000")
+    assert _last_call(remote, "read_values")["count"] == 2
+
+
+def test_px_defaults_to_the_block_size() -> None:
+    session, remote = make_session()
+    session.blocksize = 16
+    session.run("px @ 0x1000")
+    assert _last_call(remote, "read_bytes")["count"] == 16
