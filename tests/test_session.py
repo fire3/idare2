@@ -3297,3 +3297,24 @@ def test_pdk_without_a_class_fails_loudly() -> None:
     assert isinstance(session.last_error, UsageError)
     assert "no class" in str(session.last_error)
     assert "disasm" not in remote.operations
+
+
+# --- low-cost afl modifiers ----------------------------------------------
+
+
+def test_aflc_counts_functions() -> None:
+    session, _remote = make_session()
+    assert session.run("aflc") == ["2"]
+
+
+def test_afl_plus_sums_function_sizes() -> None:
+    session, _remote = make_session()
+    assert session.run("afl+") == ["24"]
+
+
+def test_afln_prints_rename_commands() -> None:
+    session, _remote = make_session()
+    assert session.run("afln") == [
+        "'@0x00001000'afn main",
+        "'@0x00002000'afn helper",
+    ]
