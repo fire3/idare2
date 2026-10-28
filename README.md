@@ -161,11 +161,11 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Area | Commands |
 |---|---|
 | Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
-| Disassembly | `pd` `pD` `pdf` `pdb` `pdr` `pi` `pdi` `pdl` `pdq` `pdj` `pdC` `pdJ` `pd,` `pdc` `pC` `pA` |
+| Disassembly | `pd` `pd -N` `pd--` `pD` `pdf` `pdb` `pdk` `pdr` `pi` `pdi` `pdl` `pdq` `pdj` `pdC` `pdJ` `pd,` `pdc` `pC` `pA` |
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
 | Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `pp*` `po*` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
 | Information | `i` `iI` `ij` `it` `itj` `iD` `ia` `iaj` `il` `ilj` `ilq` `iS` `iSj` `iSS` `iS.` `iSh` `iSm` `ii` `is` `iz` `izz` `izzj` `ir` `ih` `iH` `ie` `iee` `ies` `iE` `iM` `iC` `iV` `iv` `iT` `ig` `ic` `icj` `icq` `icl` `ics` `ic*` `CL` `CLu` `CLf` `CLL` |
-| Analysis | `aa` `aaa` `af` `aF` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `a8` `ad` `adk` `ah` `an` `agf` `agfj` `agfd` |
+| Analysis | `aa` `aaa` `af` `aF` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `aflc` `afln` `afl+` `a8` `ad` `adk` `ah` `an` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
 | Metadata | `C` `Cj` `C*` `C.` `CC` `CCr` `CCu` `CC*` `CC.` `CC-` `C-` `Cd` `Cd.` `Ch` `Ch-` `Cs` `Cs.` `Cs.j` `Cs-` `Cs*` |
@@ -200,6 +200,7 @@ Most information commands support a `j` suffix for JSON output.
 - `agf` prints a compact ASCII function graph, `agfj`/`agj` return r2-shaped
   graph JSON, and `agfd` emits Graphviz DOT. `agg`/`aggd` are accepted aliases
   for the current function's DOT.
+- `pd -N` disassembles backwards and `pd-- N` prints context (N before and N from the current address). `pdk` disassembles every method of the class at the seek. The `pxw`/`pxq`/`pxd`/`pxu` argument is a byte count, defaulting to the block size, and their row layout matches r2. `aflc`, `afln` and `afl+` count functions, print rename commands and sum sizes.
 - `iS` lists ELF sections (an algorithm name adds a hash column), `iSS` lists
   program-header memory maps, and `izz` scans the whole input file, including
   non-loaded debug sections. `CL*` exposes the DWARF source-line data IDA

@@ -20,12 +20,14 @@ if TYPE_CHECKING:
     from idare2.session import Session
 
 DISASM_DETAIL = [
-    ("pd", "[n]", "disassemble N instructions"),
+    ("pd", "[n]", "disassemble N instructions; a negative count walks backwards"),
     ("pD", "[n]", "disassemble N bytes"),
+    ("pd--", "[n]", "context: N instructions before and N from the current address"),
     ("pdj", "[n]", "disassemble to json"),
     ("pdf", "", "disassemble the whole function"),
     ("pdfj", "", "disassemble the whole function to json"),
     ("pdb", "", "disassemble the current basic block"),
+    ("pdk", "", "disassemble every method of the class at the seek"),
     ("pdr", "", "recursive disassembly across the function graph"),
     ("pi", "[n]", "print N instructions without the address and byte columns"),
     ("pdi", "[n]", "like pi, with address and bytes"),
@@ -291,11 +293,11 @@ ASSEMBLY_DETAIL = [
 ]
 
 MEMORY_DETAIL = [
-    ("px", "[n]", "hexdump of N bytes"),
-    ("pxw", "[n]", "hexdump as 32-bit words"),
-    ("pxq", "[n]", "hexdump as 64-bit words"),
-    ("pxd", "[n]", "signed decimal dump"),
-    ("pxu", "[n]", "unsigned decimal dump"),
+    ("px", "[n]", "hexdump of N bytes (default: block size)"),
+    ("pxw", "[n]", "32-bit word dump of N bytes (default: block size)"),
+    ("pxq", "[n]", "64-bit word dump of N bytes (default: block size)"),
+    ("pxd", "[n]", "signed decimal dump of N bytes (default: block size)"),
+    ("pxu", "[n]", "unsigned decimal dump of N bytes (default: block size)"),
     ("p8", "[n]", "hexpair list of bytes"),
     ("p8j", "[n]", "hexpair list of bytes as JSON"),
     ("p8s", "[n]", "space-separated hex bytes"),

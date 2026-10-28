@@ -528,3 +528,15 @@ def test_value_dump_rejects_zero_width(session: FakeSession) -> None:
         fmt_memory.format_values(
             {"ea": 0x1000, "width": 0, "values": [], "big_endian": False}, session
         )
+
+
+def test_pxd_is_signed_and_pxu_is_unsigned(session: FakeSession) -> None:
+    raw = bytes.fromhex("ffffffff")
+    signed = fmt_memory.format_values(
+        _values_payload(raw, 4), session, fmt="signed"
+    )
+    unsigned = fmt_memory.format_values(
+        _values_payload(raw, 4), session, fmt="unsigned"
+    )
+    assert "-1" in signed[1]
+    assert "4294967295" in unsigned[1]
