@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documented that `pip install ida-nexus` installs the Python library, while
   the IDA GUI plugin is registered through `ida-hcli`.
 - Added minimum setup combinations for plugin-only, idalib-only, and both.
+- Verified the minimal installation: `pip install idare2` plus a configured IDA
+  install path is enough for headless idalib use. The PyPI `idapro` package is
+  the real IDA Library module; the IDA-shipped wheel is optional.
+- Documented IDA license acceptance and the install-path requirements for both
+  `idat` and `idalib` workers.
+
+### Fixed
+
+- Fixed the optional `rasm2` fallback using `-s` (syntax) instead of `-o`
+  (address), which broke `pa`/`wa` on processors without an IDA assembler.
 
 ## [0.1.0] - 2026-11-13
 

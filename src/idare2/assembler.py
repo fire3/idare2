@@ -150,7 +150,7 @@ def _rasm2_assemble(
     # `open_summary` exposes ``bitness``; ``file_info``/the session also expose
     # ``bits``.  Use both, otherwise rasm2 silently defaults to 64 bits.
     bits = int(session.info.get("bitness") or session.info.get("bits") or 0)
-    argv = [executable, "-q", "-a", plugin, "-s", f"0x{ea:x}"]
+    argv = [executable, "-q", "-a", plugin, "-o", f"0x{ea:x}"]
     if bits:
         argv.extend(["-b", str(bits)])
     if session.info.get("endian") == "big":

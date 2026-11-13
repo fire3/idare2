@@ -22,17 +22,18 @@ both clients share the same database.
   and is not bundled with idare2. The current `ida-nexus` runtime rejects older
   kernels.
 - **Python 3.11 or newer.**
-- **A way for IDA Nexus to reach an IDA database:** either the IDA Nexus plugin
-  (recommended) or IDA's idalib bindings.
+- **A configured IDA installation path.** IDA Nexus needs to find `libidalib.so`,
+  `idat`, and the rest of the IDA installation. HCLI-installed IDA configures
+  this automatically; for a manual install, run `py-activate-idalib.py` once or
+  set `IDADIR`.
+- **Optional:** the IDA Nexus plugin for GUI attachment and `idat` headless
+  workers, a Hex-Rays decompiler license for decompilation commands, and
+  radare2's `rasm2` for the `pa`/`wa` assembler fallback.
 
 `idare2` is a pure-Python CLI. It depends on `ida-nexus` and does not import
-`ida_*` modules itself. `pip install idare2` does not install IDA, the IDA Nexus
-plugin, or idalib; those come from your IDA installation.
-
-`pip install ida-nexus` installs the Python library and its `ida-nexus` command,
-but it does **not** register the IDA GUI plugin. The plugin needs the
-`ida-hcli` installer described below. `idare2` already depends on `ida-nexus`,
-so `pip install idare2` pulls the library in automatically.
+`ida_*` modules itself. `pip install idare2` installs the Python side, including
+the official `idapro` IDA Library module; it does not install IDA or the IDA
+Nexus plugin.
 
 ### Does idare2 require idalib?
 
@@ -44,17 +45,18 @@ Not necessarily. IDA Nexus can use three backends:
 | Open a file or IDB headlessly with the IDA Nexus plugin installed | `idat` | No |
 | Open a file or IDB headlessly without the plugin, or with `IDA_NEXUS_IDALIB_ONLY=1` | `idalib` | Yes |
 
-So idalib is the fallback for headless workers when the IDA Nexus plugin is not
-installed. If you install the plugin, you do not need idalib in idare2's Python
-environment.
+With no plugin, IDA Nexus opens a headless idalib worker in idare2's Python
+environment. That path uses the `idapro` module installed by `pip install
+idare2`; you do not have to install the `idapro*.whl` that ships with IDA. If you
+want to pin the exact binding version from your IDA installation, you can
+install that wheel instead.
 
 ### Minimum setups
 
-- **No plugin, headless only:** install idare2 and IDA's idalib bindings in the
-  same environment. This is the smallest setup, but it cannot attach to an IDA
-  GUI.
-- **Plugin, no idalib:** install idare2 and the IDA Nexus plugin. This supports
-  GUI attach and headless `idat` workers.
+- **No plugin, headless only:** `pip install idare2` plus a configured IDA
+  install path. This is the smallest setup, but it cannot attach to an IDA GUI.
+- **Plugin, no idalib:** `pip install idare2` plus the IDA Nexus plugin. This
+  supports GUI attach and headless `idat` workers.
 - **Both:** the plugin is preferred; idalib remains the fallback.
 
 Installing only the `ida-nexus` Python library is enough for `idare2 -v`,
@@ -63,10 +65,44 @@ enough to open a database headlessly on its own.
 
 ## Installation
 
-### Recommended: install the IDA Nexus plugin
+### 1. Prepare IDA
 
-Install the plugin into IDA so GUI databases can be shared and headless workers
-run in IDA's own Python:
+Install IDA Pro 9.4+ and start it once so the license is accepted. Headless
+idalib refuses to run until the license has been accepted.
+
+Then make the IDA install path discoverable:
+
+- If IDA was installed with HCLI, this is automatic.
+- Otherwise run the activation script once:
+
+  ```bash
+  python <IDA>/idalib/python/py-activate-idalib.py -d <IDA>
+  ```
+
+- Or export the path instead:
+
+  ```bash
+  export IDADIR=<IDA>
+  ```
+
+This path is also what lets IDA Nexus find `idat` when the plugin is installed.
+
+### 2. Install idare2
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install idare2
+```
+
+`pip install idare2` installs `ida-nexus`, `ida-domain`, and the official
+`idapro` IDA Library module from PyPI. The `idare2` and `ir2` commands are
+available after activating the environment.
+
+### 3. Optional: install the IDA Nexus plugin
+
+The plugin enables GUI database sharing and makes headless workers run as
+`idat` inside IDA's own Python:
 
 ```bash
 uvx ida-hcli plugin install https://github.com/HexRaysSA/ida-nexus
@@ -81,37 +117,15 @@ ida-hcli plugin install https://github.com/HexRaysSA/ida-nexus
 
 Start or restart IDA after installing the plugin.
 
-Then install idare2 in a Python 3.11+ virtual environment:
+### Optional: pin the IDA-shipped idapro wheel
+
+The PyPI `idapro` module is the real IDA Library Python module and works with a
+configured IDA installation. If your IDA ships a different `idapro*.whl` and you
+want that exact build, install it into the same environment:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install idare2
-```
-
-The `idare2` and `ir2` commands are available after activating the environment.
-
-### Alternative: idalib fallback
-
-If you cannot install the IDA Nexus plugin, install IDA's idalib bindings into
-the **same** Python environment as idare2:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-
-# Install IDA's idalib bindings first.
 pip install <IDA>/idalib/python/idapro*.whl
-python <IDA>/py-activate-idalib.py -d <IDA>
-
-# Then install idare2.
-pip install idare2
 ```
-
-Set `IDA_NEXUS_IDALIB_ONLY=1` if you want to force this backend and prevent
-IDA Nexus from starting `idat` or `ida` workers. The `idapro` distribution on
-PyPI is a typing/stub package; the real idalib bindings are the wheel shipped
-with IDA.
 
 ### Verify the installation
 
@@ -122,8 +136,13 @@ idare2 -L
 
 `idare2 -h` and `idare2 -v` work without an IDA license. `idare2 -L` lists
 databases currently registered with IDA Nexus, including their backend, and an
-empty list is normal before you open a database in IDA or pass a file to
-idare2.
+empty list is normal before you open a database in IDA or pass a file to idare2.
+
+Try a read-only command against a local executable:
+
+```bash
+idare2 -q -c 'iI' <path-to-binary>
+```
 
 ### From source
 
@@ -134,9 +153,9 @@ uv venv --python 3.12
 source .venv/bin/activate
 uv pip install -e '.[test]'
 
-# If you use the idalib fallback, install it into this same environment.
-uv pip install <IDA>/idalib/python/idapro*.whl
-python <IDA>/py-activate-idalib.py -d <IDA>
+# Configure IDA once if you have not already.
+python <IDA>/idalib/python/py-activate-idalib.py -d <IDA>
+# or: export IDADIR=<IDA>
 ```
 
 ## Usage
