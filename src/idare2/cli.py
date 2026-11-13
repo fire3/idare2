@@ -138,12 +138,17 @@ def _version(options: argv_parser.Options) -> int:
         print(f"ida-nexus   unavailable ({type(exc).__name__})")
     print(f"python      {platform.python_version()}")
     try:
+        # idalib must be initialised before the ida_* modules can be imported.
+        # Importing idapro does that and puts IDA's Python directory on
+        # sys.path, so this order matters.
+        import idapro  # noqa: F401, I001
         import ida_kernwin
-        import idapro  # noqa: F401
 
         print(f"ida         {ida_kernwin.get_kernel_version()}")
-    except Exception:
-        print("ida         (not importable from this interpreter)")
+    except Exception as exc:
+        detail = str(exc).strip().splitlines()
+        reason = detail[0] if detail else type(exc).__name__
+        print(f"ida         (not importable: {reason})")
     return EXIT_OK
 
 

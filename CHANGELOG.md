@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Documented how to configure the IDA install path (`IDADIR`, the per-user
+  `ida-config.json`, and `py-activate-idalib.py`), the WSL platform caveat, the
+  `-V` verification output, and the writable-directory requirement for the
+  first database.
+- Clarified that the client process does not load IDA for database work, and
+  removed `po*`/`pp*` from the command overview because they are not
+  implemented.
+
+### Fixed
+
+- `idare2 -V` reported a configured IDA installation as "not importable": it
+  imported `ida_kernwin` before `idapro` had initialised idalib. It now loads
+  `idapro` first and prints the underlying import error when IDA really is
+  unavailable.
+
 ## [0.1.1] - 2026-11-13
 
 ### Changed

@@ -236,3 +236,67 @@ def test_history_without_readline_is_a_noop(monkeypatch) -> None:
     )
     monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError()))
     assert cli._repl(session, _options()) == 0
+
+
+def _fake_ida_imports(monkeypatch, *, idapro_error: str | None = None):
+    """Install import hooks that mimic idalib's import ordering."""
+
+    import importlib.util
+    import sys
+    import types
+
+    class _Loader:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def create_module(self, spec):
+            return types.ModuleType(spec.name)
+
+        def exec_module(self, module):
+            if module.__name__ == "idapro":
+                if idapro_error is not None:
+                    raise ImportError(idapro_error)
+                self.owner.loaded = True
+            else:
+                module.get_kernel_version = lambda: "9.9"
+
+    class _Finder:
+        def __init__(self):
+            self.loaded = False
+
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "idapro":
+                return importlib.util.spec_from_loader(fullname, _Loader(self))
+            if fullname == "ida_kernwin":
+                # The real module cannot be imported until idapro has loaded
+                # libidalib and added IDA's Python directory to sys.path.
+                if not self.loaded:
+                    raise ModuleNotFoundError("No module named 'ida_kernwin'")
+                return importlib.util.spec_from_loader(fullname, _Loader(self))
+            return None
+
+    monkeypatch.delitem(sys.modules, "idapro", raising=False)
+    monkeypatch.delitem(sys.modules, "ida_kernwin", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_Finder(), *sys.meta_path])
+
+
+def test_verbose_version_imports_idapro_before_ida_modules(monkeypatch, capsys) -> None:
+    _fake_ida_imports(monkeypatch)
+
+    assert cli._version(_options("-V")) == 0
+
+    out = capsys.readouterr().out
+    assert "ida         9.9" in out
+    assert "not importable" not in out
+
+
+def test_verbose_version_reports_why_ida_is_unavailable(monkeypatch, capsys) -> None:
+    _fake_ida_imports(
+        monkeypatch,
+        idapro_error="Cannot load IDA library file libidalib.so. Please set IDADIR.",
+    )
+
+    assert cli._version(_options("-V")) == 0
+
+    out = capsys.readouterr().out
+    assert "ida         (not importable: Cannot load IDA library file libidalib.so." in out

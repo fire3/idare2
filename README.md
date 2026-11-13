@@ -16,27 +16,86 @@ both clients share the same database.
 > **Status:** alpha. The command surface is broad, but interfaces may change
 > before 1.0.
 
+## Quick start
+
+```bash
+# Once: teach idapro where IDA lives (skip this if HCLI installed IDA).
+python <IDA>/idalib/python/py-activate-idalib.py -d <IDA>
+
+# Install and check that the IDA binding loads.
+pip install idare2
+idare2 -V
+
+# Inspect a binary, or open it interactively.
+idare2 -q -c 'iI' ./sample
+idare2 ./sample
+```
+
 ## Requirements
 
 - **IDA Pro 9.4 or newer**, with a valid IDA license. IDA is commercial software
-  and is not bundled with idare2. The current `ida-nexus` runtime rejects older
-  kernels.
+  and is not bundled with idare2. IDA Nexus refuses to start on older kernels.
 - **Python 3.11 or newer.**
-- **A configured IDA installation path.** IDA Nexus needs to find `libidalib.so`,
-  `idat`, and the rest of the IDA installation. HCLI-installed IDA configures
-  this automatically; for a manual install, run `py-activate-idalib.py` once or
-  set `IDADIR`.
+- **A configured IDA installation.** `idapro` and IDA Nexus must find the IDA
+  libraries (`libidalib.so` on Linux, `idalib.dll` on Windows), `idat`, and the
+  processor modules. See [Configuring IDA](#configuring-ida).
 - **Optional:** the IDA Nexus plugin for GUI attachment and `idat` headless
   workers, a Hex-Rays decompiler license for decompilation commands, and
   radare2's `rasm2` for the `pa`/`wa` assembler fallback.
 
 Tested with IDA Pro 9.5, `ida-nexus` 0.14.2 / `ida-domain` 0.6.0, `idapro`
-0.0.12, and Python 3.11-3.14.
+0.0.12, and Python 3.11-3.14. `pyproject.toml` requires `ida-nexus>=0.13,<1`;
+the exact versions pip installs depend on what is available at install time.
 
-`idare2` is a pure-Python CLI. It depends on `ida-nexus` and does not import
-`ida_*` modules itself. `pip install idare2` installs the Python side, including
-the official `idapro` IDA Library module; it does not install IDA or the IDA
-Nexus plugin.
+`idare2` is a pure-Python CLI. The client process does not need IDA for
+database work: commands run inside an IDA Nexus worker (or the IDA GUI), and
+only that worker imports the `ida_*` modules. `pip install idare2` installs the
+Python side, including the official `idapro` IDA Library module; it does not
+install IDA or the IDA Nexus plugin.
+
+### Configuring IDA
+
+`idapro` resolves the IDA installation from, in order:
+
+1. the `IDADIR` environment variable;
+2. the `ida-install-dir` entry in IDA's user configuration file:
+   - Linux and macOS: `~/.idapro/ida-config.json`
+   - Windows: `%APPDATA%\Hex-Rays\IDA Pro\ida-config.json`
+   - `IDAUSR` moves that directory; only its first entry is used.
+
+To configure it:
+
+1. Install IDA Pro 9.4+ and start the GUI once so the license is accepted.
+   Headless idalib refuses to run before that.
+2. Make the install path discoverable. An HCLI-installed IDA does this
+   automatically; otherwise run the activation script once:
+
+   ```bash
+   python <IDA>/idalib/python/py-activate-idalib.py -d <IDA>
+   ```
+
+   Or set the path for the current shell instead:
+
+   ```bash
+   export IDADIR=<IDA>        # bash / zsh
+   set IDADIR=<IDA>           # cmd.exe
+   $env:IDADIR = "<IDA>"      # PowerShell
+   ```
+
+3. Check that the binding loads:
+
+   ```bash
+   python -c "import idapro, ida_kernwin; print(ida_kernwin.get_kernel_version())"
+   ```
+
+   This must print your IDA version, for example `9.5`. The configuration is
+   per user, not per virtual environment, so every environment that installs
+   `idare2` can use it.
+
+> **WSL note:** idalib is a native library. A Windows IDA installation cannot be
+> loaded by Linux Python under WSL, and a Linux IDA installation cannot be
+> loaded by Windows Python. Install IDA for the same platform as the Python
+> interpreter, or run idare2 on the other side.
 
 ### Does idare2 require idalib?
 
@@ -52,7 +111,8 @@ With no plugin, IDA Nexus opens a headless idalib worker in idare2's Python
 environment. That path uses the `idapro` module installed by `pip install
 idare2`; you do not have to install the `idapro*.whl` that ships with IDA. If you
 want to pin the exact binding version from your IDA installation, you can
-install that wheel instead.
+install that wheel instead (see [Optional: pin the IDA-shipped idapro
+wheel](#optional-pin-the-ida-shipped-idapro-wheel)).
 
 ### Minimum setups
 
@@ -62,9 +122,10 @@ install that wheel instead.
   supports GUI attach and headless `idat` workers.
 - **Both:** the plugin is preferred; idalib remains the fallback.
 
-Installing only the `ida-nexus` Python library is enough for `idare2 -v`,
-`idare2 -L`, and attaching to a GUI that already has the plugin, but it is not
-enough to open a database headlessly on its own.
+Without the plugin, the Python side installed by `pip install idare2` is enough
+for `idare2 -v`, `idare2 -V`, and `idare2 -L`, and for attaching to a GUI that
+already has the plugin. Opening a database headlessly additionally needs the
+plugin (`idat`) or a configured idalib.
 
 ## Installation
 
@@ -74,25 +135,9 @@ plugin is optional and is only needed for GUI attachment or `idat` workers.
 
 ### 1. Prepare IDA
 
-Install IDA Pro 9.4+ and start it once so the license is accepted. Headless
-idalib refuses to run until the license has been accepted.
-
-Then make the IDA install path discoverable:
-
-- If IDA was installed with HCLI, this is automatic.
-- Otherwise run the activation script once:
-
-  ```bash
-  python <IDA>/idalib/python/py-activate-idalib.py -d <IDA>
-  ```
-
-- Or export the path instead:
-
-  ```bash
-  export IDADIR=<IDA>
-  ```
-
-This path is also what lets IDA Nexus find `idat` when the plugin is installed.
+Install IDA Pro 9.4+, start it once to accept the license, and configure the
+install path. See [Configuring IDA](#configuring-ida) for both steps. This path
+is also what lets IDA Nexus find `idat` when the plugin is installed.
 
 ### 2. Install idare2
 
@@ -137,19 +182,39 @@ pip install <IDA>/idalib/python/idapro*.whl
 ### Verify the installation
 
 ```bash
-idare2 -v
-idare2 -L
+idare2 -v     # idare2 version only
+idare2 -V     # idare2, ida-nexus, ida-domain, Python, and IDA versions
+idare2 -L     # databases currently registered with IDA Nexus
 ```
 
-`idare2 -h` and `idare2 -v` work without an IDA license. `idare2 -L` lists
-databases currently registered with IDA Nexus, including their backend, and an
-empty list is normal before you open a database in IDA or pass a file to idare2.
+`-V` is the diagnostic form. With a configured IDA installation the last line
+reports the IDA kernel version:
+
+```text
+idare2      0.1.1
+ida-nexus   0.13.4
+ida-domain  0.5.1
+python      3.14.6
+ida         9.5
+```
+
+If the `ida` line says `(not importable: ...)`, the parenthesised text explains
+why. See [The `ida` line is not importable](#the-ida-line-is-not-importable).
+`-h`, `-v`, `-V`, and `-L` do not need a database. `-V` does try to load
+idalib, which makes it the quickest end-to-end check of the IDA configuration.
+
+An empty `idare2 -L` list is normal before you open a database in IDA or pass a
+file to idare2.
 
 Try a read-only command against a local executable:
 
 ```bash
-idare2 -q -c 'iI' <path-to-binary>
+cp /bin/ls /tmp/ls-sample
+idare2 -q -c 'iI' /tmp/ls-sample
 ```
+
+IDA writes the IDB next to the input file, so that directory must be writable.
+Use an existing IDB with `--idb`, or copy the sample somewhere writable first.
 
 ### From source
 
@@ -249,7 +314,8 @@ idare2 -a mipsb -b 32 --endian big -B 0x1000 firmware.bin
 These options apply when a new IDB is created. When `-B` is set, it also becomes
 the initial entry point; otherwise idare2 uses the first valid address.
 `tests/integration/test_arch_matrix.py` exercises these hints on 22
-configurations (the 19 supported machines, including both byte orders).
+configurations covering every supported processor, including both byte
+orders.
 
 ### Existing databases and IDA GUI
 
@@ -299,7 +365,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
 | Disassembly | `pd` `pd -N` `pd--` `pD` `pdf` `pdb` `pdk` `pdr` `pi` `pdi` `pdl` `pdq` `pdj` `pdC` `pdJ` `pd,` `pdc` `pC` `pA` |
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
-| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `pp*` `po*` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
+| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
 | Information | `i` `iI` `ij` `it` `itj` `iD` `ia` `iaj` `il` `ilj` `ilq` `iS` `iSj` `iSS` `iS.` `iSh` `iSm` `ii` `is` `iz` `izz` `izzj` `ir` `ih` `iH` `ie` `iee` `ies` `iE` `iM` `iC` `iV` `iv` `iT` `ig` `ic` `icj` `icq` `icl` `ics` `ic*` `CL` `CLu` `CLf` `CLL` |
 | Analysis | `aa` `aaa` `af` `aF` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `aflc` `afln` `afl+` `a8` `ad` `adk` `ah` `an` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
@@ -377,11 +443,12 @@ uv run twine check dist/*
 
 The test suite covers offline unit tests, real IDB integration, radare2 output
 parity, and the architecture matrix in `tests/integration/test_arch_matrix.py`
-(22 configurations covering the 19 supported machines).
+(22 configurations covering every supported processor, including both byte
+orders).
 
 ## Troubleshooting
 
-### `Cannot load IDA library file libidalib.so`
+### `Cannot load IDA library file libidalib.so` (or `idalib.dll`)
 
 `idapro` cannot find your IDA installation. Run the activation script once:
 
@@ -390,6 +457,23 @@ python <IDA>/idalib/python/py-activate-idalib.py -d <IDA>
 ```
 
 or set `IDADIR=<IDA>`.
+
+### The `ida` line is not importable
+
+`idare2 -V` reports `ida (not importable: ...)` when the current Python
+interpreter cannot load the IDA Library module. The text after the colon is the
+underlying error:
+
+- `Cannot load IDA library file libidalib.so` (or `idalib.dll`): the install
+  path is not configured. Run the activation script or set `IDADIR` as
+  described in [Configuring IDA](#configuring-ida).
+- `No module named 'idapro'`: the `idapro` package is missing from this
+  environment. Reinstall with `pip install idare2`.
+- Any other message: make sure `idare2 -V` runs in the same Python environment
+  where you installed idare2.
+
+Attaching to an IDA GUI that already has the plugin does not need idalib, but
+headless idalib workers do.
 
 ### `The ida-nexus plugin is installed but idat was not found`
 
@@ -404,7 +488,10 @@ that acceptance state.
 ### `WorkerStartError: idalib worker ... exited with status 1`
 
 Check the install path and license first. To rule out the plugin path, run with
-`IDA_NEXUS_IDALIB_ONLY=1`.
+`IDA_NEXUS_IDALIB_ONLY=1`. If the worker log says `Failed to open database`, the
+directory containing the input file may not be writable: IDA writes the IDB
+next to the input. Copy the file to a writable directory or use an existing IDB
+with `--idb`.
 
 ### `DatabaseBusyError: an unregistered IDA session owns ...`
 
