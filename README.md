@@ -18,43 +18,107 @@ both clients share the same database.
 
 ## Requirements
 
-- IDA Pro 9.1 or newer, including idalib. IDA is commercial software and is not
-  bundled with idare2.
-- Python 3.11 or newer.
+- **IDA Pro 9.4 or newer**, with a valid IDA license. IDA is commercial software
+  and is not bundled with idare2. The current `ida-nexus` runtime rejects older
+  kernels.
+- **Python 3.11 or newer.**
+- **A way for IDA Nexus to reach an IDA database:** either the IDA Nexus plugin
+  (recommended) or IDA's idalib bindings.
+
+`idare2` is a pure-Python CLI. It depends on `ida-nexus` and does not import
+`ida_*` modules itself. `pip install idare2` does not install IDA, the IDA Nexus
+plugin, or idalib; those come from your IDA installation.
+
+### Does idare2 require idalib?
+
+Not necessarily. IDA Nexus can use three backends:
+
+| How the database is reached | Backend | Requires idalib? |
+|---|---|---|
+| Attach to a database already open in the IDA GUI (plugin required) | `gui` | No |
+| Open a file or IDB headlessly with the IDA Nexus plugin installed | `idat` | No |
+| Open a file or IDB headlessly without the plugin, or with `IDA_NEXUS_IDALIB_ONLY=1` | `idalib` | Yes |
+
+So idalib is the fallback for headless workers when the IDA Nexus plugin is not
+installed. If you install the plugin, you do not need idalib in idare2's Python
+environment.
 
 ## Installation
 
-Install the latest release from PyPI into a virtual environment that also has
-IDA's idalib bindings:
+### Recommended: install the IDA Nexus plugin
+
+Install the plugin into IDA so GUI databases can be shared and headless workers
+run in IDA's own Python:
+
+```bash
+uvx ida-hcli plugin install https://github.com/HexRaysSA/ida-nexus
+```
+
+`uvx` comes with [uv](https://docs.astral.sh/uv/). Without uv:
+
+```bash
+python -m pip install ida-hcli
+ida-hcli plugin install https://github.com/HexRaysSA/ida-nexus
+```
+
+Start or restart IDA after installing the plugin.
+
+Then install idare2 in a Python 3.11+ virtual environment:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install idare2
+```
+
+The `idare2` and `ir2` commands are available after activating the environment.
+
+### Alternative: idalib fallback
+
+If you cannot install the IDA Nexus plugin, install IDA's idalib bindings into
+the **same** Python environment as idare2:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 
-# 1. Install the idalib bindings shipped with IDA Pro.
+# Install IDA's idalib bindings first.
 pip install <IDA>/idalib/python/idapro*.whl
 python <IDA>/py-activate-idalib.py -d <IDA>
 
-# 2. Install idare2 and its dependencies.
+# Then install idare2.
 pip install idare2
 ```
 
-The `idare2` and `ir2` commands are available after activating the virtual
-environment.
+Set `IDA_NEXUS_IDALIB_ONLY=1` if you want to force this backend and prevent
+IDA Nexus from starting `idat` or `ida` workers. The `idapro` distribution on
+PyPI is a typing/stub package; the real idalib bindings are the wheel shipped
+with IDA.
 
-To install the latest development version from source:
+### Verify the installation
+
+```bash
+idare2 -v
+idare2 -L
+```
+
+`idare2 -h` and `idare2 -v` work without an IDA license. `idare2 -L` lists
+databases currently registered with IDA Nexus, including their backend, and an
+empty list is normal before you open a database in IDA or pass a file to
+idare2.
+
+### From source
 
 ```bash
 git clone https://github.com/fire3/idare2.git
 cd idare2
 uv venv --python 3.12
 source .venv/bin/activate
+uv pip install -e '.[test]'
 
-# Install the idalib bindings into the same environment.
+# If you use the idalib fallback, install it into this same environment.
 uv pip install <IDA>/idalib/python/idapro*.whl
 python <IDA>/py-activate-idalib.py -d <IDA>
-
-uv pip install -e '.[test]'
 ```
 
 ## Usage
@@ -144,6 +208,10 @@ the initial entry point; otherwise idare2 uses the first valid address.
 configurations (the 19 supported machines, including both byte orders).
 
 ### Existing databases and IDA GUI
+
+Sharing a database that is already open in the IDA GUI requires the IDA Nexus
+plugin. The idalib fallback can open files and IDBs by path, but it cannot
+attach to a GUI session.
 
 List active databases, open an IDB directly, or attach to a running session:
 

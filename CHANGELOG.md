@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Clarified the minimum IDA version and documented the IDA Nexus plugin and
+  idalib installation paths, including when idalib is actually required.
+
 ## [0.1.0] - 2026-11-13
 
 ### Added
