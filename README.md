@@ -48,6 +48,19 @@ So idalib is the fallback for headless workers when the IDA Nexus plugin is not
 installed. If you install the plugin, you do not need idalib in idare2's Python
 environment.
 
+### Minimum setups
+
+- **No plugin, headless only:** install idare2 and IDA's idalib bindings in the
+  same environment. This is the smallest setup, but it cannot attach to an IDA
+  GUI.
+- **Plugin, no idalib:** install idare2 and the IDA Nexus plugin. This supports
+  GUI attach and headless `idat` workers.
+- **Both:** the plugin is preferred; idalib remains the fallback.
+
+Installing only the `ida-nexus` Python library is enough for `idare2 -v`,
+`idare2 -L`, and attaching to a GUI that already has the plugin, but it is not
+enough to open a database headlessly on its own.
+
 ## Installation
 
 ### Recommended: install the IDA Nexus plugin

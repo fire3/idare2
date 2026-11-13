@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   idalib installation paths, including when idalib is actually required.
 - Documented that `pip install ida-nexus` installs the Python library, while
   the IDA GUI plugin is registered through `ida-hcli`.
+- Added minimum setup combinations for plugin-only, idalib-only, and both.
 
 ## [0.1.0] - 2026-11-13
 
