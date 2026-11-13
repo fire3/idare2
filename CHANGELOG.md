@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Clarified the minimum IDA version and documented the IDA Nexus plugin and
   idalib installation paths, including when idalib is actually required.
+- Documented that `pip install ida-nexus` installs the Python library, while
+  the IDA GUI plugin is registered through `ida-hcli`.
 
 ## [0.1.0] - 2026-11-13
 

@@ -29,6 +29,11 @@ both clients share the same database.
 `ida_*` modules itself. `pip install idare2` does not install IDA, the IDA Nexus
 plugin, or idalib; those come from your IDA installation.
 
+`pip install ida-nexus` installs the Python library and its `ida-nexus` command,
+but it does **not** register the IDA GUI plugin. The plugin needs the
+`ida-hcli` installer described below. `idare2` already depends on `ida-nexus`,
+so `pip install idare2` pulls the library in automatically.
+
 ### Does idare2 require idalib?
 
 Not necessarily. IDA Nexus can use three backends:
