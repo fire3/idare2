@@ -30,6 +30,9 @@ both clients share the same database.
   workers, a Hex-Rays decompiler license for decompilation commands, and
   radare2's `rasm2` for the `pa`/`wa` assembler fallback.
 
+Tested with IDA Pro 9.5, `ida-nexus` 0.14.2 / `ida-domain` 0.6.0, `idapro`
+0.0.12, and Python 3.11-3.14.
+
 `idare2` is a pure-Python CLI. It depends on `ida-nexus` and does not import
 `ida_*` modules itself. `pip install idare2` installs the Python side, including
 the official `idapro` IDA Library module; it does not install IDA or the IDA
@@ -64,6 +67,10 @@ Installing only the `ida-nexus` Python library is enough for `idare2 -v`,
 enough to open a database headlessly on its own.
 
 ## Installation
+
+The shortest headless setup is: install IDA 9.4+, start it once to accept the
+license, run `py-activate-idalib.py -d <IDA>`, then `pip install idare2`. The
+plugin is optional and is only needed for GUI attachment or `idat` workers.
 
 ### 1. Prepare IDA
 
@@ -347,19 +354,19 @@ uv run pytest
 uv run ruff check .
 ```
 
-`uv sync` and `uv run` manage `.venv` exactly, so they can replace the
-`idapro` package that IDA's idalib wheel provides. For the IDA-backed suites,
-install idalib after syncing and disable the implicit sync:
+The IDA-backed suites use the `idapro` module installed by the project
+dependencies. Configure IDA's install path as described in Installation, then:
 
 ```bash
-uv pip install <IDA>/idalib/python/idapro*.whl
-python <IDA>/py-activate-idalib.py -d <IDA>
-
 uv run --no-sync pytest -m real_ida
 uv run --no-sync pytest -m parity
 uv run --no-sync pytest -m arch_matrix   # raw-binary import/disassembly matrix
 uv run --no-sync tools/arch_matrix.py    # the same, one row per CPU
 ```
+
+`--no-sync` keeps `uv` from re-resolving `.venv` between commands. It is
+required if you pinned a specific IDA-shipped `idapro*.whl`; otherwise plain
+`uv run ...` also works.
 
 Build the distribution archives and validate the PyPI metadata with:
 
@@ -371,6 +378,38 @@ uv run twine check dist/*
 The test suite covers offline unit tests, real IDB integration, radare2 output
 parity, and the architecture matrix in `tests/integration/test_arch_matrix.py`
 (22 configurations covering the 19 supported machines).
+
+## Troubleshooting
+
+### `Cannot load IDA library file libidalib.so`
+
+`idapro` cannot find your IDA installation. Run the activation script once:
+
+```bash
+python <IDA>/idalib/python/py-activate-idalib.py -d <IDA>
+```
+
+or set `IDADIR=<IDA>`.
+
+### `The ida-nexus plugin is installed but idat was not found`
+
+The plugin is present, but IDA Nexus still cannot locate `idat`. Configure the
+IDA install path as above, or set `IDA_NEXUS_IDALIB_ONLY=1` to use idalib.
+
+### `License not yet accepted, cannot run in batch mode`
+
+Start the IDA GUI once and accept the license. Headless idalib workers reuse
+that acceptance state.
+
+### `WorkerStartError: idalib worker ... exited with status 1`
+
+Check the install path and license first. To rule out the plugin path, run with
+`IDA_NEXUS_IDALIB_ONLY=1`.
+
+### `DatabaseBusyError: an unregistered IDA session owns ...`
+
+Another IDA or idare2 worker owns the database. Use `idare2 -L` to list
+registered instances, close the owner, or work on a copy.
 
 ## Releasing
 

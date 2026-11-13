@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="89" height="20" role="img" aria-label="PyPI: v0.1.0">
-  <title>PyPI: v0.1.0</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="89" height="20" role="img" aria-label="PyPI: v0.1.1">
+  <title>PyPI: v0.1.1</title>
   <defs>
     <linearGradient id="g" x2="0" y2="100%">
       <stop offset="0" stop-color="#fff" stop-opacity=".18"/>
@@ -17,7 +17,7 @@
   <g fill="#fff" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">
     <text x="21" y="15" fill="#000" fill-opacity=".35">PyPI</text>
     <text x="21" y="14">PyPI</text>
-    <text x="65.5" y="15" fill="#000" fill-opacity=".35">v0.1.0</text>
-    <text x="65.5" y="14">v0.1.0</text>
+    <text x="65.5" y="15" fill="#000" fill-opacity=".35">v0.1.1</text>
+    <text x="65.5" y="14">v0.1.1</text>
   </g>
 </svg>
