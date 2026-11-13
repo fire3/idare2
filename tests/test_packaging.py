@@ -30,3 +30,8 @@ def test_console_scripts_are_declared() -> None:
     scripts = _project()["scripts"]
     assert scripts["idare2"] == "idare2.cli:main"
     assert scripts["ir2"] == "idare2.cli:main"
+
+
+def test_pypi_badge_matches_the_package_version() -> None:
+    svg = (ROOT / "assets" / "badges" / "pypi.svg").read_text(encoding="utf-8")
+    assert f"v{idare2.__version__}" in svg

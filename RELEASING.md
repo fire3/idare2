@@ -61,7 +61,16 @@ For each release:
 2. Update `src/idare2/__init__.py`.
 3. Move the entries in `CHANGELOG.md` from `Unreleased` to the new version and
    date.
-4. Update version or dependency examples in the README and docs if needed.
+4. Regenerate the self-hosted README badges:
+
+   ```bash
+   uv run tools/update_badges.py
+   ```
+
+   This updates `assets/badges/pypi.svg` from `__version__`, and the Python and
+   license badges from `pyproject.toml`. The CI badge stays dynamic and is
+   served by GitHub Actions.
+5. Update version or dependency examples in the README and docs if needed.
 
 ## Local checks
 

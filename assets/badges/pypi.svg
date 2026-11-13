@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="89" height="20" role="img" aria-label="PyPI: v0.1.0">
+  <title>PyPI: v0.1.0</title>
+  <defs>
+    <linearGradient id="g" x2="0" y2="100%">
+      <stop offset="0" stop-color="#fff" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".08"/>
+    </linearGradient>
+    <clipPath id="r">
+      <rect width="89" height="20" rx="3"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#r)">
+    <rect width="42" height="20" fill="#24292f"/>
+    <rect x="42" width="47" height="20" fill="#3775a9"/>
+    <rect width="89" height="20" fill="url(#g)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">
+    <text x="21" y="15" fill="#000" fill-opacity=".35">PyPI</text>
+    <text x="21" y="14">PyPI</text>
+    <text x="65.5" y="15" fill="#000" fill-opacity=".35">v0.1.0</text>
+    <text x="65.5" y="14">v0.1.0</text>
+  </g>
+</svg>

@@ -1,9 +1,9 @@
 # idare2
 
-[![PyPI](https://img.shields.io/pypi/v/idare2.svg)](https://pypi.org/project/idare2/)
-[![Python versions](https://img.shields.io/pypi/pyversions/idare2.svg)](https://pypi.org/project/idare2/)
+[![PyPI](https://raw.githubusercontent.com/fire3/idare2/main/assets/badges/pypi.svg)](https://pypi.org/project/idare2/)
+[![Python versions](https://raw.githubusercontent.com/fire3/idare2/main/assets/badges/python.svg)](https://pypi.org/project/idare2/)
 [![CI](https://github.com/fire3/idare2/actions/workflows/ci.yml/badge.svg)](https://github.com/fire3/idare2/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/fire3/idare2/blob/main/LICENSE)
+[![License: MIT](https://raw.githubusercontent.com/fire3/idare2/main/assets/badges/license.svg)](https://github.com/fire3/idare2/blob/main/LICENSE)
 
 `idare2` brings a radare2-style command line and output model to IDA Pro.
 It drives an IDA database through [IDA Nexus](https://github.com/HexRaysSA/ida-nexus),
