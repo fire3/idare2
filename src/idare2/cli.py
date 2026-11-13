@@ -126,23 +126,24 @@ def _version(options: argv_parser.Options) -> int:
         print(f"idare2 {__version__}")
         return EXIT_OK
     import platform
+    from importlib.metadata import version as dist_version
 
-    print(f"idare2   {__version__}")
+    print(f"idare2      {__version__}")
     try:
         import ida_nexus
 
-        print(f"idare-nexus {ida_nexus.__version__}")
+        print(f"ida-nexus   {dist_version('ida-nexus')}")
         print(f"ida-domain  {ida_nexus.get_ida_domain_version()}")
     except Exception as exc:
         print(f"ida-nexus   unavailable ({type(exc).__name__})")
-    print(f"python   {platform.python_version()}")
+    print(f"python      {platform.python_version()}")
     try:
         import ida_kernwin
         import idapro  # noqa: F401
 
-        print(f"ida      {ida_kernwin.get_kernel_version()}")
+        print(f"ida         {ida_kernwin.get_kernel_version()}")
     except Exception:
-        print("ida      (not importable from this interpreter)")
+        print("ida         (not importable from this interpreter)")
     return EXIT_OK
 
 

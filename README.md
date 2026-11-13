@@ -1,5 +1,10 @@
 # idare2
 
+[![PyPI](https://img.shields.io/pypi/v/idare2.svg)](https://pypi.org/project/idare2/)
+[![Python versions](https://img.shields.io/pypi/pyversions/idare2.svg)](https://pypi.org/project/idare2/)
+[![CI](https://github.com/fire3/idare2/actions/workflows/ci.yml/badge.svg)](https://github.com/fire3/idare2/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/fire3/idare2/blob/main/LICENSE)
+
 `idare2` brings a radare2-style command line and output model to IDA Pro.
 It drives an IDA database through [IDA Nexus](https://github.com/HexRaysSA/ida-nexus),
 so analysis, disassembly, cross-references, types, strings, and decompilation come
@@ -8,30 +13,49 @@ directly from IDA and Hex-Rays.
 Use it interactively or from scripts. When attached to a running IDA instance,
 both clients share the same database.
 
+> **Status:** alpha. The command surface is broad, but interfaces may change
+> before 1.0.
+
 ## Requirements
 
-- IDA Pro 9.1 or newer, including idalib
-- Python 3.11 or newer
+- IDA Pro 9.1 or newer, including idalib. IDA is commercial software and is not
+  bundled with idare2.
+- Python 3.11 or newer.
 
 ## Installation
 
-Install the idalib Python bindings for your IDA installation:
+Install the latest release from PyPI into a virtual environment that also has
+IDA's idalib bindings:
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+
+# 1. Install the idalib bindings shipped with IDA Pro.
 pip install <IDA>/idalib/python/idapro*.whl
 python <IDA>/py-activate-idalib.py -d <IDA>
-```
 
-Then install idare2:
-
-```bash
-uv venv --python 3.12
-source .venv/bin/activate
-uv pip install -e '.[test]'
+# 2. Install idare2 and its dependencies.
+pip install idare2
 ```
 
 The `idare2` and `ir2` commands are available after activating the virtual
 environment.
+
+To install the latest development version from source:
+
+```bash
+git clone https://github.com/fire3/idare2.git
+cd idare2
+uv venv --python 3.12
+source .venv/bin/activate
+
+# Install the idalib bindings into the same environment.
+uv pip install <IDA>/idalib/python/idapro*.whl
+python <IDA>/py-activate-idalib.py -d <IDA>
+
+uv pip install -e '.[test]'
+```
 
 ## Usage
 
@@ -210,19 +234,45 @@ Most information commands support a `j` suffix for JSON output.
 
 ## Development
 
+The default test suite is offline and does not need IDA:
+
 ```bash
+uv sync --group dev
 uv run pytest
-uv run pytest -m real_ida
-uv run pytest -m parity
-uv run pytest -m arch_matrix      # raw-binary import/disassembly matrix
-uv run tools/arch_matrix.py       # the same, one row per CPU
 uv run ruff check .
+```
+
+`uv sync` and `uv run` manage `.venv` exactly, so they can replace the
+`idapro` package that IDA's idalib wheel provides. For the IDA-backed suites,
+install idalib after syncing and disable the implicit sync:
+
+```bash
+uv pip install <IDA>/idalib/python/idapro*.whl
+python <IDA>/py-activate-idalib.py -d <IDA>
+
+uv run --no-sync pytest -m real_ida
+uv run --no-sync pytest -m parity
+uv run --no-sync pytest -m arch_matrix   # raw-binary import/disassembly matrix
+uv run --no-sync tools/arch_matrix.py    # the same, one row per CPU
+```
+
+Build the distribution archives and validate the PyPI metadata with:
+
+```bash
+uv build
+uv run twine check dist/*
 ```
 
 The test suite covers offline unit tests, real IDB integration, radare2 output
 parity, and the architecture matrix in `tests/integration/test_arch_matrix.py`
 (22 configurations covering the 19 supported machines).
 
+## Releasing
+
+See [RELEASING.md](https://github.com/fire3/idare2/blob/main/RELEASING.md) for
+the version-bump checklist, TestPyPI dry run, and PyPI Trusted Publishing setup.
+Release notes live in [CHANGELOG.md](https://github.com/fire3/idare2/blob/main/CHANGELOG.md).
+
 ## License
 
-MIT
+MIT. See [LICENSE](https://github.com/fire3/idare2/blob/main/LICENSE).

@@ -246,13 +246,15 @@ def _address_map(session: Session, argument: str, *, physical_to_virtual: bool) 
 
 
 def _version_lines() -> list[str]:
+    from importlib.metadata import version as dist_version
+
     from idare2 import __version__
 
     lines = [f"idare2      {__version__}"]
     try:
         import ida_nexus
 
-        lines.append(f"ida-nexus   {ida_nexus.__version__}")
+        lines.append(f"ida-nexus   {dist_version('ida-nexus')}")
         lines.append(f"ida-domain  {ida_nexus.get_ida_domain_version()}")
     except Exception:
         lines.append("ida-nexus   unavailable")

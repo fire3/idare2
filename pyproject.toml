@@ -1,23 +1,40 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "idare2"
-version = "0.1.0"
+dynamic = ["version"]
 description = "radare2-style CLI over IDA Pro databases, driven by ida-nexus"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "fire3" }]
-keywords = ["reverse-engineering", "ida", "radare2", "disassembler"]
+keywords = [
+    "binary-analysis",
+    "disassembler",
+    "ida",
+    "ida-pro",
+    "radare2",
+    "reverse-engineering",
+]
 classifiers = [
+    "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
-    "Topic :: Security",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+    "Topic :: Software Development :: Disassemblers",
+    "Topic :: Utilities",
 ]
-dependencies = ["ida-nexus>=0.13"]
+dependencies = ["ida-nexus>=0.13,<1"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
@@ -27,7 +44,21 @@ idare2 = "idare2.cli:main"
 ir2 = "idare2.cli:main"
 
 [project.urls]
+Homepage = "https://github.com/fire3/idare2"
 Repository = "https://github.com/fire3/idare2"
+Issues = "https://github.com/fire3/idare2/issues"
+Changelog = "https://github.com/fire3/idare2/blob/main/CHANGELOG.md"
+
+[dependency-groups]
+dev = [
+    "build>=1.2",
+    "pytest>=8",
+    "ruff>=0.6",
+    "twine>=6",
+]
+
+[tool.hatch.version]
+path = "src/idare2/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/idare2"]
