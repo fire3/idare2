@@ -57,7 +57,7 @@ version in another file.
 
 For each release:
 
-1. Choose the next version, for example `0.1.1` or `0.2.0`.
+1. Choose the next version, for example `0.1.2` or `0.2.0`.
 2. Update `src/idare2/__init__.py`.
 3. Move the entries in `CHANGELOG.md` from `Unreleased` to the new version and
    date.
@@ -145,7 +145,7 @@ python -m venv /tmp/idare2-testpypi
 /tmp/idare2-testpypi/bin/pip install \
   --index-url https://test.pypi.org/simple/ \
   --extra-index-url https://pypi.org/simple/ \
-  'idare2==0.1.1'
+  'idare2==0.1.2'
 /tmp/idare2-testpypi/bin/idare2 -v
 ```
 
@@ -158,21 +158,21 @@ PyPI, not TestPyPI.
 
    ```bash
    git add src/idare2/__init__.py CHANGELOG.md README.md
-   git commit -m "release: v0.1.1"
+   git commit -m "release: v0.1.2"
    ```
 
 2. Tag and push:
 
    ```bash
-   git tag -a v0.1.1 -m "idare2 0.1.1"
+   git tag -a v0.1.2 -m "idare2 0.1.2"
    git push origin main
-   git push origin v0.1.1
+   git push origin v0.1.2
    ```
 
 3. Create a GitHub release for the tag:
 
    ```bash
-   gh release create v0.1.1 --title "idare2 0.1.1" --notes-from-tag
+   gh release create v0.1.2 --title "idare2 0.1.2" --notes-from-tag
    ```
 
    Publishing the release triggers `.github/workflows/publish.yml`, which

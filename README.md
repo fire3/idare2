@@ -191,7 +191,7 @@ idare2 -L     # databases currently registered with IDA Nexus
 reports the IDA kernel version:
 
 ```text
-idare2      0.1.1
+idare2      0.1.2
 ida-nexus   0.13.4
 ida-domain  0.5.1
 python      3.14.6
