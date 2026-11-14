@@ -23,7 +23,13 @@ from typing import Any
 PT_LOAD = 1
 PT_DYNAMIC = 2
 PT_INTERP = 3
+PT_NOTE = 4
 PT_PHDR = 6
+PT_TLS = 7
+PT_GNU_EH_FRAME = 0x6474E550
+PT_GNU_STACK = 0x6474E551
+PT_GNU_RELRO = 0x6474E552
+PT_GNU_PROPERTY = 0x6474E553
 PT_ARM_EXIDX = 0x70000001
 PT_GNU_STACK = 0x6474E551
 DT_NEEDED = 1
@@ -84,7 +90,12 @@ _PROGRAM_NAMES = {
     PT_PHDR: "PHDR",
     PT_INTERP: "INTERP",
     PT_DYNAMIC: "DYNAMIC",
+    PT_NOTE: "NOTE",
+    PT_TLS: "TLS",
+    PT_GNU_EH_FRAME: "GNU_EH_FRAME",
     PT_GNU_STACK: "GNU_STACK",
+    PT_GNU_RELRO: "GNU_RELRO",
+    PT_GNU_PROPERTY: "GNU_PROPERTY",
     PT_ARM_EXIDX: "EXIDX",
 }
 
@@ -918,12 +929,18 @@ class ElfFile:
         """Memory maps for ``iSS`` (r2's ``Elf_(maps)``)."""
         rows: list[dict[str, Any]] = []
         load_count = 0
+        seen_names: dict[str, int] = {}
         for program in self.programs:
             if program.type == PT_LOAD:
                 name = f"LOAD{load_count}"
                 load_count += 1
             else:
                 name = _PROGRAM_NAMES.get(program.type, f"PT_{program.type:x}")
+                # r2 dedups repeated segment names with a _N suffix (the two
+                # PT_NOTE segments of a static binary read NOTE, NOTE_1).
+                seen_names[name] = seen_names.get(name, 0) + 1
+                if seen_names[name] > 1:
+                    name = f"{name}_{seen_names[name] - 1}"
             rows.append(
                 {
                     "nth": len(rows),

@@ -94,6 +94,43 @@ def test_iI(session) -> None:
     assert any(line.startswith("bits") for line in lines)
 
 
+@pytest.fixture(scope="module")
+def writable_session(working_copy: Path):
+    """A writable session on a private copy (Cf/CCa-style write tests)."""
+
+    try:
+        with nexus.connect(
+            nexus.Target(path=str(working_copy), readonly=False), timeout=600, linger=0
+        ) as handle:
+            remote = rpc.Remote(handle, timeout=120)
+            info = remote.call("open_summary")
+            sess = Session(handle, remote, Config(), info, readonly=False)
+            sess.setup()
+            yield sess
+    except Idare2Error as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"cannot attach writable to {working_copy}: {exc}")
+
+
+def test_cf_defines_and_undefines_data(writable_session) -> None:
+    """``Cf`` materialises a pf format as data items; ``Cf-`` undoes it."""
+    session = writable_session
+    session.failed = False
+    address = int(session.info.get("maximum_ea") or 0) - 0x40
+    if not address:
+        pytest.skip("the database has no addressable span")
+    session.run(f"s 0x{address:x}")
+    assert session.run("Cf 16 [4]d") == []
+    assert not session.failed, session.last_error
+    # The item is real: Cd. reports the dword array, C lists the format.
+    assert session.run("Cd.") == ["size: 16", "type: dword"]
+    listing = "\n".join(session.run("C"))
+    assert "pf [4]d" in listing
+    # Undo restores the unknown state.
+    assert session.run("Cf-") == []
+    assert session.run("Cd.") == ["size: 1", "type: unknown"]
+    assert "pf [4]d" not in "\n".join(session.run("C"))
+
+
 def test_analysis_helpers_work_on_a_read_only_database(session) -> None:
     """``an``/``adk``/``ah`` are informational and must not need -w."""
     session.failed = False

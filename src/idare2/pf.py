@@ -186,6 +186,91 @@ def parse_format(
     return Format(tuple(fields), repeat=repeat, union=union)
 
 
+#: pf format characters idare2 can materialise as IDA data items (``Cf``),
+#: mapped to the ``db.bytes.create_*_at`` maker kind.
+_DATA_KINDS = {
+    "b": "byte",
+    "c": "byte",
+    "C": "byte",
+    "w": "word",
+    "g": "word",
+    "d": "dword",
+    "i": "dword",
+    "x": "dword",
+    "o": "dword",
+    "t": "dword",
+    "s": "byte",  # r2's fixed 4-byte string renders as a byte array
+    "S": "byte",  # the 8-byte variant likewise
+    "q": "qword",
+    "f": "float",
+    "F": "double",
+    "Q": "oword",
+}
+
+
+def format_to_items(
+    text: str,
+    *,
+    size: int | None = None,
+    bits: int = 32,
+) -> list[dict[str, Any]]:
+    """Map a pf format string to sequential data items for ``Cf``.
+
+    Each item is ``{"offset", "kind", "count"}`` relative to the base
+    address; ``kind`` names a ``db.bytes.create_*_at`` maker.  Formats that
+    cannot be materialised honestly (unions, nested braces, strings running
+    to NUL, r2-only view characters) raise ``UsageError`` rather than
+    degrading.
+    """
+    if re.match(r"^0", text.strip()):
+        raise UsageError("Cf: union formats (leading 0) are not supported")
+    if "{" in text or "}" in text:
+        raise UsageError("Cf: nested struct formats are not supported")
+    parsed = parse_format(text, pointer_size=max(bits // 8, 1))
+    items: list[dict[str, Any]] = []
+    offset = 0
+    for field in parsed.fields:
+        if field.code in _SKIP or field.code in ("e", "+"):
+            continue
+        if field.code in ("z", "Z"):
+            raise UsageError(
+                "Cf: NUL-terminated string fields have no fixed size"
+            )
+        if field.code in ("n", "N"):
+            kind, item_size = "byte", field.size
+            count = field.size
+        elif field.code == "p":
+            item_size = max(bits // 8, 1)
+            kind = "dword" if item_size == 4 else "qword"
+            count = field.count
+        else:
+            kind = _DATA_KINDS[field.code]
+            item_size = field.size
+            count = field.count
+        span = item_size * count
+        if size is not None and offset + span > size:
+            raise UsageError(
+                f"Cf: format needs {offset + span} bytes but size is {size}"
+            )
+        items.append({"offset": offset, "kind": kind, "count": count})
+        offset += span
+    if not items:
+        raise UsageError("Cf: format defines no data items")
+    return items
+
+
+def items_span(items: list[dict[str, Any]]) -> int:
+    """Total bytes the items cover, from the base address."""
+    sizes = {
+        "byte": 1, "word": 2, "dword": 4, "qword": 8,
+        "float": 4, "double": 8, "oword": 16,
+    }
+    return max(
+        int(item["offset"]) + sizes[item["kind"]] * int(item["count"])
+        for item in items
+    )
+
+
 def format_size(fmt: Format, *, include_repeat: bool = True) -> int:
     """Bytes consumed by one format, rounded to r2's minimum for strings."""
     cursor = 0

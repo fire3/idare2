@@ -99,9 +99,14 @@ def _walk(db: Any, start: int, limit: int, max_count: int | None) -> Iterator[An
 def _walk_back(db: Any, start: int, max_count: int) -> list[Any]:
     """Instructions immediately before ``start``, oldest first.
 
-    ``db.instructions.get_previous`` is IDA's own backward navigation; the
+    ``db.instructions.get_previous`` is IDA's own backward navigation, but it
+    stops at the first undefined item -- at a function start preceded by a
+    literal pool or padding it would return nothing at all, and r2's ``pd -N``
+    happily decodes through.  So each step falls back to raw decoding: find a
+    byte position ``back`` below ``cur`` whose decoded instruction *ends*
+    exactly at ``cur`` (r2's contiguous linear walk), youngest first.  The
     result is reversed so it can be concatenated with the forward walk and
-    rendered in address order, which is what r2's ``pd -N`` does.
+    rendered in address order.
     """
     if max_count <= 0:
         return []
@@ -109,19 +114,57 @@ def _walk_back(db: Any, start: int, max_count: int) -> list[Any]:
     out: list[Any] = []
     cur = start
     while len(out) < max_count and len(out) < HARD_CAP:
+        insn = None
         try:
             insn = db.instructions.get_previous(cur)
         except Exception:
+            insn = None
+        if insn is not None:
+            address = int(insn.ea)
+            if 0 <= address < cur:
+                out.append(insn)
+                cur = address
+                continue
+        # Undefined stream: decode raw bytes backwards, youngest first.
+        address = _decode_before(cur)
+        if address is None:
             break
-        if insn is None:
+        raw = _raw_insn(address)
+        if raw is None:
             break
-        address = int(insn.ea)
-        if address < 0 or address >= cur:
-            break
-        out.append(insn)
+        out.append(raw)
         cur = address
     out.reverse()
     return out
+
+
+def _decode_before(cur: int) -> int | None:
+    """The start of an instruction that ends exactly at ``cur``, or None."""
+    try:
+        import ida_ua
+    except ImportError:
+        # Unit-test environments have no IDA SDK; the walk just stops.
+        return None
+
+    for back in range(1, 16):
+        if cur - back < 0:
+            return None
+        insn = ida_ua.insn_t()
+        try:
+            if ida_ua.decode_insn(insn, cur - back) > 0 and int(insn.size) == back:
+                return cur - back
+        except Exception:
+            return None
+    return None
+
+
+def _raw_insn(ea: int) -> Any:
+    import ida_ua
+
+    insn = ida_ua.insn_t()
+    if ida_ua.decode_insn(insn, ea) <= 0:  # pragma: no cover - pre-validated
+        return None
+    return insn
 
 
 def _signature(db: Any, func: Any) -> str | None:

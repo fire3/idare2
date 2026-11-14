@@ -1151,10 +1151,47 @@ def test_disasm_context_combines_both_sides() -> None:
 
 
 def test_disasm_backward_stops_at_the_first_instruction() -> None:
+    """No previous defined instruction and no IDA SDK: the walk just stops."""
     db = _disasm_db([0x1000, 0x1004, 0x1008])
     envelope = dispatch.invoke(db, "disasm", {"ea": 0x1004, "count": 0, "before": 9})
     assert protocol.is_ok(envelope), envelope
     assert _disasm_addresses(envelope["result"]) == [0x1000]
+
+
+class _FakeRawInsn:
+    def __init__(self, ea: int = 0, size: int = 0) -> None:
+        self.ea = ea
+        self.size = size
+
+
+def test_disasm_backward_decodes_raw_bytes_across_gaps(monkeypatch) -> None:
+    """r2's pd -N decodes through undefined items: fake ida_ua to prove it.
+
+    The defined stream holds 0x1004/0x1008 only; 0x1000 is undefined, and the
+    fake SDK decodes a 4-byte instruction there (size must match the step,
+    like a contiguous linear walk).
+    """
+    import sys
+    import types
+
+    fake = types.ModuleType("ida_ua")
+    fake.insn_t = _FakeRawInsn
+
+    def decode_insn(insn, ea):
+        if ea == 0x1000:
+            insn.ea, insn.size = 0x1000, 4
+            return 4
+        return 0
+
+    fake.decode_insn = decode_insn
+    monkeypatch.setitem(sys.modules, "ida_ua", fake)
+
+    db = _disasm_db([0x1004, 0x1008])
+    envelope = dispatch.invoke(db, "disasm", {"ea": 0x1008, "count": 0, "before": 3})
+    assert protocol.is_ok(envelope), envelope
+    # count=0 means no forward instructions; the walk finds 0x1004 defined
+    # and then decodes the undefined 0x1000 raw.
+    assert _disasm_addresses(envelope["result"]) == [0x1000, 0x1004]
 
 
 # ---------------------------------------------------------------------------

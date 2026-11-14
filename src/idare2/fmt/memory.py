@@ -126,7 +126,7 @@ def format_values(payload: dict[str, Any], session: Any, *, fmt: str = "hex") ->
 
     rows: list[str] = []
     if fmt != "hex" and show_header:
-        rows.append(_value_header(ea, cols, address_width, show_offset, show_ascii))
+        rows.append(_value_header(ea, cols, show_offset, show_ascii))
 
     for offset in range(0, len(raw), cols):
         chunk = raw[offset : offset + cols]
@@ -147,16 +147,24 @@ def format_values(payload: dict[str, Any], session: Any, *, fmt: str = "hex") ->
     return rows
 
 
-def _value_header(
-    ea: int, cols: int, address_width: int, show_offset: bool, show_ascii: bool
-) -> str:
-    out = "- offset -".ljust(address_width + 6) if show_offset else ""
-    for index in range(cols):
-        if index:
-            out += "  " if index % 2 else "   "
-        out += f"{(ea + index) & 0xF:X}"
+def _value_header(ea: int, cols: int, show_offset: bool, show_ascii: bool) -> str:
+    """r2 6.2.6's decimal value-dump header.
+
+    One label per value: the low byte of its address, uppercase hex,
+    right-aligned to two characters (``0x10000`` labels its first cells
+    `` 0``, ``0xc8c48`` starts at ``48``).  Labels pair up with a single
+    space, pairs separate with two, and the prefix is ``"- offset -   "``
+    regardless of the address width -- which is why the ASCII block lands
+    wherever the labels end, r2's own quirk on 64-bit databases.
+    """
+    out = "- offset -   " if show_offset else ""
+    labels = [f"{(ea + i) & 0xFF:>2X}" for i in range(cols)]
+    pairs = [labels[i] + " " + labels[i + 1] for i in range(0, cols - 1, 2)]
+    if cols % 2:
+        pairs.append(labels[-1])
+    out += "  ".join(pairs)
     if show_ascii:
-        out += "  " + "".join(f"{(ea + index) & 0xF:X}" for index in range(cols))
+        out += "  " + "".join(f"{(ea + i) & 0xF:X}" for i in range(cols))
     return out.rstrip()
 
 

@@ -375,7 +375,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Analysis | `aa` `aaa` `af` `aF` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `aflc` `afln` `afl+` `a8` `ad` `adk` `ah` `an` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
 | Writing | `w` `wq` `wx` `wa` `w0` `wd` `wf` `wi[1248][+-][n]` `w6[d/e/x]` `wc` `wc+` `wc-` `u` `U` |
-| Metadata | `C` `Cj` `C*` `C.` `CC` `CCr` `CCu` `CC*` `CC.` `CC-` `C-` `Cd` `Cd.` `Ch` `Ch-` `Cs` `Cs.` `Cs.j` `Cs-` `Cs*` |
+| Metadata | `C` `Cj` `C*` `C.` `CC` `CCr` `CCu` `CC*` `CC.` `CC-` `CCa` `CCa-` `C-` `Cd` `Cd.` `Cf` `Cf-` `Ch` `Ch-` `Cs` `Cs.` `Cs.j` `Cs-` `Cs*` |
 | Types | `t` `tj` `t*` `ts` `tu` `tp` `tpv` `tpx` `tc` `td` `tt` `tt-` `t-` `te` `tf` `tfj` `tfc` `tn` `tn-` `to` `dt` |
 | Flags | `f` `f*` `f,` `f-` `f?` `fq` `fn` `fnj` `fN` `fr` `fx` |
 | Sessions | `S` `Ps` `Po` `P-` `Pj` `P` `y` `yy` `yx` `yt` `yf` `cc` `c1` |
@@ -400,7 +400,7 @@ r2 6.2.6.
 | Magic / fs | `m*`, `pm` | `libmagic` and r2's filesystem layer are not wired up. |
 | ESIL | `ae` | No emulator in the IDA path (`asm.emu` is accepted but inert). |
 | Remote / infra | `=`, `:`, `(`, `,`, `{`, `#`, `<`, `-` | Remote control, macros, tables and hashbangs are radare2 plumbing. |
-| C-metadata extras | `CF`, `CS`, `Cb`, `Cf`, `Cm`, `Cr`, `Ct`, `Cv`, `CC!` | Format/magic/signature metadata has no IDA storage; comments and data definitions (`C`, `CC*`, `Cd`, `Ch`, `Cs`) are supported. |
+| C-metadata extras | `CF`, `CS`, `Cb`, `Cm`, `Cr`, `Ct`, `Cv`, `CC!` | Magic/signature/spaces metadata has no IDA storage; comments and data definitions (`C`, `CC*`, `CCa`, `Cd`, `Cf`, `Ch`, `Cs`) are supported. |
 | Bin extras | `ib`, `iL`, `iO`, `ik`, `im`, `io`, `iu`, `iw`, `ix` | rbin-plugin options and per-bin key/value stores; DWARF source lines live under `CL`. |
 | Print variants | `p-`, `pB`, `pF`, `pK`, `pb`, `pg`, `pk`, `pl`, `pmd`, `pq`, `pz` | Radar/zoom/ASN.1/QR renderings without an IDA equivalent. |
 | Analysis extras | `ac` (editing), `aL`, `aj`, `ap`, `ar`, `as`, `av`, `bf`, `bg`, `bm` | Class editing needs write support (read-only `ic` exists); registers and plugins are debug/r2-side concepts. |
@@ -416,6 +416,11 @@ r2 6.2.6.
   `pa`/`wa`/`/a` accept either spelling and convert per assembler.
 - `ie` reads the ELF entry point like r2; the IDA entry list (including
   `.init_proc`/`.term_proc`) stays available through `ies` and `iE`.
+- `Cf` maps a pf format string to IDA data items (`Cf 16 [4]d`) and stores
+  the format as a repeatable comment; `Cf-` undefines the span. Unions and
+  nested struct formats are rejected.
+- The `C` listing shows regular *and* repeatable comments; repeatable ones
+  used to be set-but-invisible.
 - Sessions are read-only unless `-w` is passed.
 - `w` with no arguments saves the IDB.
 - `-j` enables JSON output; it does not start a JavaScript engine as it does in
@@ -466,6 +471,18 @@ uv run --no-sync tools/arch_matrix.py    # the same, one row per CPU
 `--no-sync` keeps `uv` from re-resolving `.venv` between commands. It is
 required if you pinned a specific IDA-shipped `idapro*.whl`; otherwise plain
 `uv run ...` also works.
+
+Before releasing (and after touching command dispatch or registration), run
+the command-surface probe and archive its JSON locally:
+
+```bash
+python tools/cmdsurface.py --target /path/to/sample --json /tmp/cmdsurface.json
+```
+
+The 2026-11-14 baseline is 60% supported (310/510 tokens, r2 6.2.6); treat a
+drop of more than ~3 points as a regression worth a CHANGELOG entry. The
+parity suite runs locally only (`pytest -m parity`); CI stays offline-only
+because it would need an IDA license.
 
 Build the distribution archives and validate the PyPI metadata with:
 

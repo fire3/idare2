@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import pytest
 
 from idare2.config import Config
+from idare2.errors import UsageError
 from idare2.fmt import disasm as fmt_disasm
 from idare2.fmt import graph as fmt_graph
 from idare2.fmt import listing as fmt_listing
@@ -326,6 +327,32 @@ def test_address_width_matches_r2_62() -> None:
     assert fmt_addr(0x1140, 8) == "0x00001140"
     assert fmt_addr(0x140001460, 8) == "0x140001460"
     assert fmt_addr(0x140001460, 16) == "0x0000000140001460"
+
+
+def test_format_to_items_maps_scalars_and_arrays() -> None:
+    from idare2.pf import format_to_items, items_span
+
+    assert format_to_items("[4]d", bits=32) == [{"offset": 0, "kind": "dword", "count": 4}]
+    assert format_to_items("dbxw", bits=32) == [
+        {"offset": 0, "kind": "dword", "count": 1},
+        {"offset": 4, "kind": "byte", "count": 1},
+        {"offset": 5, "kind": "dword", "count": 1},
+        {"offset": 9, "kind": "word", "count": 1},
+    ]
+    assert format_to_items("p", bits=64) == [{"offset": 0, "kind": "qword", "count": 1}]
+    assert format_to_items("p", bits=32) == [{"offset": 0, "kind": "dword", "count": 1}]
+    assert items_span(format_to_items("db d q", bits=64)) == 5
+
+
+@pytest.mark.parametrize(
+    ("fmt", "size"),
+    [("0{dw}", None), ("dz", None), ("[8]d", 4), ("B", None), ("", None)],
+)
+def test_format_to_items_rejects_the_unmaterialisable(fmt: str, size: int | None) -> None:
+    from idare2.pf import format_to_items
+
+    with pytest.raises(UsageError):
+        format_to_items(fmt, size=size, bits=32)
 
 
 def test_immediate_syntax_conversion() -> None:

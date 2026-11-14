@@ -33,6 +33,8 @@ COMMENT_DETAIL = [
     ("CC-", "", "remove the comment at the current address"),
     ("CCu", " text [@addr]", "add a comment only if there is none"),
     ("CCa", " addr text", "add a comment at the given address"),
+    ("Cf", "[sz] [fmt]", "define the data a pf format describes"),
+    ("Cf-", "", "undefine the formatted span at the seek"),
     ("CCa-", " addr", "remove the comment at the given address"),
     ("C-", " [len]", "remove comments in a range"),
     ("Cd", " [size] [repeat]", "define data of the given element size"),
@@ -57,7 +59,7 @@ _SIZES = {"1": "byte", "2": "word", "4": "dword", "8": "qword"}
     suffixes=frozenset(
         {
             "", "j", "*", ".", "C", "C*", "C.", "C-", "Cr", "Cu", "Ca", "Ca-",
-            "-", "d", "d.", "h", "h-", "s", "s.", "s.j", "s-", "s*",
+            "-", "d", "d.", "f", "f-", "h", "h-", "s", "s.", "s.j", "s-", "s*",
         }
     ),
     suffix_label="metadata command",
@@ -93,6 +95,10 @@ def metadata(session: Session, statement: Statement) -> list[str]:
         )
     if suffix in ("Ca", "Ca-"):
         return _comment_at(session, argument, delete=suffix == "Ca-")
+    if suffix == "f":
+        return _format_meta(session, argument)
+    if suffix == "f-":
+        return _format_meta_delete(session, argument)
     if suffix == "C-":
         return _delete_comment(session)
     if suffix == "-":
@@ -193,6 +199,45 @@ def _add_comment(
         "set_comment", ea=ea, text=text, repeatable=repeatable
     )
     session.prime_comments({ea: text})
+    return []
+
+
+def _format_meta(session: Session, argument: str) -> list[str]:
+    """``Cf [sz] [fmt]`` -- define the data a pf format describes."""
+    words = argument.split(maxsplit=1)
+    if len(words) != 2:
+        raise UsageError("Cf needs a size and a pf format string")
+    size_text, fmt = words
+    size = session.eval(size_text)
+    if size <= 0:
+        raise UsageError("Cf: the size must be positive")
+    from idare2.pf import format_to_items
+
+    items = format_to_items(
+        fmt, size=size, bits=int(session.info.get("bits") or 32)
+    )
+    cmd_module.require_write(session, "'Cf'")
+    payload = session.remote.call(
+        "set_format_meta", ea=session.seek, items=items, fmt=fmt
+    )
+    errors = payload.get("errors") or []
+    if errors:
+        session.failed = True
+        first = errors[0]
+        session.warn_once(
+            f"Cf:{first['ea']}",
+            f"Cf applied {len(payload['applied'])} of {len(items)} items;"
+            f" item at {session.format_addr(int(first['ea']))}: {first['error']}",
+        )
+    return []
+
+
+def _format_meta_delete(session: Session, argument: str) -> list[str]:
+    """``Cf-`` -- undefine the formatted span at the seek."""
+    if argument:
+        raise UsageError("Cf- takes no argument (it works on the seek)")
+    cmd_module.require_write(session, "'Cf-'")
+    session.remote.call("delete_format_meta", ea=session.seek)
     return []
 
 

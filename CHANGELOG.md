@@ -13,6 +13,30 @@ the 0.2 roadmap (`docs/roadmap-0.2.md`, local notes).
 
 ### Added
 
+- `Cf [sz] [fmt]` materialises a pf format as IDA data items (`Cf 16 [4]d`
+  defines four dwords) and stores the format string as a repeatable comment;
+  `Cf-` undefines the span and drops the comment. Scalar and array formats
+  map to `create_byte/word/dword/qword/float/double/oword_at`; unions, nested
+  braces and NUL-terminated string fields are rejected explicitly. A failing
+  item keeps the earlier ones (IDA has no rollback) and the command warns
+  `applied N of M`.
+- `iSS` names the program-header types r2 does (`NOTE`, `TLS`,
+  `GNU_RELRO`, `GNU_PROPERTY` …, previously the raw `PT_4`) and dedups
+  repeated segment names with r2's `_N` suffix (`NOTE`, `NOTE_1`).
+- `pd -N`/`pd--` walk back through undefined items: the backward walk used
+  IDA's defined-instruction navigation and stopped at the first gap, so a
+  function start preceded by a literal pool or padding returned nothing
+  where r2 decodes straight through. Each step now falls back to decoding
+  raw bytes (the instruction must end exactly at the seek, like r2's
+  contiguous linear walk).
+- Decimal value dumps (`pxd`/`pxu`) label the header with the low byte of
+  each value's address, right-aligned to two characters — the old single
+  nibble labels only matched r2 when all labels were below `0x10`. Verified
+  against r2 6.2.6 at `0x10000` and `0xc8c48`; the rendering at aligned
+  addresses is byte-identical to before.
+- `aflj`/`afij` now carry r2's graph statistics `C`/`CC.` read only the REGULAR
+  kind, so `CCr` notes (and `Cf`'s stored format) were set-but-invisible;
+  both reads now use `CommentKind.ALL`.
 - `aflj`/`afij` now carry r2's graph statistics — `edges`, `cc`,
   `maxbbins`, `midbbins`, `ratbbins`, `is-lineal` — computed in a single
   walk per function (the flow chart and the instruction enumeration used to
