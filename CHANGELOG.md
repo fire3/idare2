@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-11-14
+
+Fixes from the agent-driven live-test campaign of 2026-11-14 (416 recorded
+probes over 20 ELF/PE/Mach-O binaries, 13 raw slices and an IDB).
+
+### Fixed
+
+- `--no-save-on-close` (and a writable batch without an explicit `w`) is now
+  honoured: the worker shutdown ran `handle.take_snapshot()`, which does not
+  exist in ida-nexus 0.14.2, so the shutdown request never reached Nexus and
+  the worker saved on its own exit. Saving at close now requires
+  `--save-on-close`; an explicit `w`/`wq` still saves.
+- Text output no longer truncates 64-bit addresses above 4 GiB: the client
+  read the key `bits` while `open_summary` reports `bitness`, so every address
+  on PE64/MIPS64/Mach-O databases rendered as its low 32 bits.
+- `iI` now reports `stripped`/`lsyms` from the input file's symbol table (the
+  same source `is` uses) instead of IDA's synthesised name table, and shapes
+  `arch`/`bintype`/`os` the way r2 does (`x86`/`elf`/`linux`, `pe`/`windows`,
+  `mach0`/`darwin`).
+- `-j` no longer turns commands without a JSON form into usage errors
+  (`iI`, `iM`, `ig`, `af`, `pD`); the substitution is token-level.
+- `--backend idalib` now selects the backend for path opens; `--backend gui`
+  on a path fails with a clear message instead of silently spawning a worker.
+- `f` lists names written into the IDB by an earlier session (flags, `afn`
+  renames); it previously seeded only from the original ELF symbol table.
+- A command-line `-e` overrides rc files and projects, as r2's does.
+- Opening a directory or passing a non-positive `--timeout`/`--idle`/
+  `--startup-timeout` now fails with a one-line usage error instead of an
+  opaque `WorkerStartError`.
+
+### Changed
+
+- README: the memory row lists `p=d` (the only `p=` form implemented) instead
+  of `p=`.
+
 ## [0.1.2] - 2026-11-13
 
 ### Changed

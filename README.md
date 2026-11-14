@@ -345,6 +345,11 @@ idare2 -w -qc 'e io.cache=true; wx 90 @ main; wc+' firmware.bin
 `w` saves the IDB. With `e io.cache=true`, writes are buffered until `wc+` is
 used.
 
+When a writable batch ends, the changes are discarded unless the session asked
+to keep them — an explicit `w`/`wq`, or `--save-on-close` on the command line
+(`--no-save-on-close` forces the discard). A read-only session never writes
+the database, whatever it runs.
+
 ### Command language
 
 Common radare2 operators are supported, including `@`, `~`, `|`, `>`, `>>`,
@@ -365,7 +370,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
 | Disassembly | `pd` `pd -N` `pd--` `pD` `pdf` `pdb` `pdk` `pdr` `pi` `pdi` `pdl` `pdq` `pdj` `pdC` `pdJ` `pd,` `pdc` `pC` `pA` |
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
-| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
+| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=d` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
 | Information | `i` `iI` `ij` `it` `itj` `iD` `ia` `iaj` `il` `ilj` `ilq` `iS` `iSj` `iSS` `iS.` `iSh` `iSm` `ii` `is` `iz` `izz` `izzj` `ir` `ih` `iH` `ie` `iee` `ies` `iE` `iM` `iC` `iV` `iv` `iT` `ig` `ic` `icj` `icq` `icl` `ics` `ic*` `CL` `CLu` `CLf` `CLL` |
 | Analysis | `aa` `aaa` `af` `aF` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `aflc` `afln` `afl+` `a8` `ad` `adk` `ah` `an` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
