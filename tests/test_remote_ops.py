@@ -454,6 +454,74 @@ def test_function_info_skips_hexrays_when_unavailable(monkeypatch) -> None:
     assert _local_count(db, object()) == 0
 
 
+class _FakeFunctionDb:
+    """The slice of ida_domain.Database the ``afl``/``afi`` ops touch."""
+
+    bitness = 32
+
+    def __init__(self) -> None:
+        self.func = SimpleNamespace(start_ea=0x1000, end_ea=0x1100, frsize=16, args=2)
+        functions = SimpleNamespace(
+            get_all=lambda: iter([self.func]),
+            get_at=lambda _ea: self.func,
+            get_name=lambda _f: "main",
+            get_flowchart=lambda _f: [1, 2, 3],
+            get_instructions=lambda _f: iter(range(5)),
+            does_return=lambda _f: True,
+            get_callers=lambda _f: [0x2000],
+            get_callees=lambda _f: [self.func],
+            get_signature=lambda _f: "int __cdecl main(int)",
+            get_flags=lambda _f: 0,
+            is_far=lambda _f: False,
+            get_local_variables=lambda _f: [],
+        )
+        self.functions = functions
+
+
+def test_functions_rows_carry_r2_json_names() -> None:
+    from idare2.remote.ops.analysis import functions
+
+    rows, _meta = functions(_FakeFunctionDb())
+    row = rows[0]
+    assert row["addr"] == row["ea"] == row["minaddr"] == 0x1000
+    assert row["maxaddr"] == row["end"] == 0x1100
+    assert row["realsz"] == row["size"] == 0x100
+    assert row["nbbs"] == 3
+    assert row["ninstrs"] == 5
+    assert row["calltype"] == "cdecl"
+    assert row["stackframe"] == 16
+    assert row["nargs"] == 2
+    assert row["noreturn"] is False
+    assert row["type"] == "fcn"
+    assert row["bits"] == 32
+
+
+def test_function_info_json_follows_r2_afij() -> None:
+    envelope = dispatch.invoke(_FakeFunctionDb(), "function_info", {"ea": 0x1000})
+    row = _rows(envelope)
+    assert row["addr"] == 0x1000
+    assert row["indegree"] == row["callers"] == 1
+    assert row["outdegree"] == row["callees"] == 1
+    assert row["recursive"] is True
+    assert row["nlocals"] == row["locals"] == 0
+
+
+@pytest.mark.parametrize(
+    ("signature", "expected"),
+    [
+        ("int __cdecl main(int)", "cdecl"),
+        ("void __stdcall f(void)", "stdcall"),
+        ("int main(void)", ""),
+        ("", ""),
+        (None, ""),
+    ],
+)
+def test_calltype_parsed_from_signature(signature: str | None, expected: str) -> None:
+    from idare2.remote.ops.analysis import _calltype
+
+    assert _calltype(signature) == expected
+
+
 def test_imports_accepts_the_client_offset_and_count() -> None:
     """``ii`` passes offset/count; the handler must take them (was TypeError)."""
     envelope = dispatch.invoke(

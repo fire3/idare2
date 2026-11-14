@@ -729,6 +729,61 @@ def test_axt_reference_sites_match_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def test_aflj_keys_cover_r2_loop_keys(session, r2) -> None:
+    """``aflj`` rows carry r2's key names for the facts idare2 can derive.
+
+    r2's graph-only statistics (``edges``/``cc``/``maxbbins``/...) and
+    Hex-Rays-dependent ``nlocals`` are out of scope for the table form.
+    """
+    ours = json.loads("\n".join(session.run("aflj")))
+    theirs = json.loads("\n".join(r2("aflj")))
+    assert isinstance(ours, list) and isinstance(theirs, list)
+    ours_keys = set(ours[0])
+    theirs_keys = set(theirs[0])
+    expected = {"addr", "size", "realsz", "minaddr", "maxaddr", "name",
+                "nbbs", "type", "bits", "noreturn", "signature", "calltype",
+                "stackframe", "nargs"}
+    missing = expected - ours_keys
+    assert not missing, f"aflj is missing r2 keys: {sorted(missing)}"
+    assert expected <= theirs_keys  # sanity: r2 6.x still spells them so
+
+
+def test_afij_keys_cover_r2_function_keys(session, r2) -> None:
+    ours = json.loads("\n".join(session.run("afij")))
+    theirs = json.loads("\n".join(r2("afij")))
+    assert isinstance(ours, (dict, list))
+    ours_row = ours[0] if isinstance(ours, list) else ours
+    theirs_row = theirs[0] if isinstance(theirs, list) else theirs
+    expected = {"addr", "name", "size", "realsz", "minaddr", "maxaddr",
+                "nbbs", "ninstrs", "signature", "noreturn", "calltype",
+                "indegree", "outdegree", "nargs", "stackframe"}
+    missing = expected - set(ours_row)
+    assert not missing, f"afij is missing r2 keys: {sorted(missing)}"
+    assert expected <= set(theirs_row)
+
+
+def test_aflj_addresses_match_r2(session, r2) -> None:
+    """Both engines list overlapping function entry addresses.
+
+    The two engines name differently shaped functions differently (r2's
+    ``sym.imp.*`` vs IDA's ``.abort`` style), so the comparison is on the
+    address sets, with shared names additionally required to agree.
+    """
+    ours = json.loads("\n".join(session.run("aflj")))
+    theirs = json.loads("\n".join(r2("aflj")))
+    our_addresses = {int(row["addr"]) for row in ours}
+    their_addresses = {int(row["addr"]) for row in theirs}
+    assert len(our_addresses & their_addresses) >= 100
+    by_name_ours = {row["name"]: int(row["addr"]) for row in ours}
+    by_name_theirs = {row["name"]: int(row["addr"]) for row in theirs}
+    mismatched = {
+        name
+        for name in set(by_name_ours) & set(by_name_theirs)
+        if by_name_ours[name] != by_name_theirs[name]
+    }
+    assert not mismatched, sorted(mismatched)[:10]
+
+
 def test_function_boundaries_and_block_counts(session, r2) -> None:
     """``afij`` and ``afbj`` must agree on the function's extent and blocks."""
     address = "0x15e10"

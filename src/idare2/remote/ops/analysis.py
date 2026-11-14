@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -53,9 +54,16 @@ def functions(
     """Function table (``afl``).
 
     Basic-block counts come from a flow chart per function, which is not free,
-    so they are computed only for the functions actually being returned.
+    so they are computed only for the functions actually being returned.  The
+    JSON rows (``aflj``) carry r2's key names -- ``addr``/``minaddr``/
+    ``maxaddr``/``realsz`` alongside the historical ``ea``/``end`` -- plus the
+    per-function facts that do not need another round trip.  r2's graph-only
+    statistics (``edges``/``cc``/``maxbbins``...) and Hex-Rays' ``nlocals``
+    are omitted: the latter hard-crashes workers on processors without a
+    decompiler, and the former would be invented.
     """
     predicate = helpers.name_filter(pattern)
+    bits = int(getattr(db, "bitness", 0) or 0)
 
     def make() -> Iterator[Any]:
         for func in db.functions.get_all():
@@ -68,13 +76,28 @@ def functions(
     funcs, next_offset = helpers.paginate(make(), offset, count)
     out = []
     for func in funcs:
+        ea = int(func.start_ea)
+        end = int(func.end_ea)
+        signature = _signature(db, func)
         out.append(
             {
-                "ea": int(func.start_ea),
-                "end": int(func.end_ea),
-                "size": int(func.end_ea) - int(func.start_ea),
+                "ea": ea,
+                "end": end,
+                "addr": ea,
+                "minaddr": ea,
+                "maxaddr": end,
+                "size": end - ea,
+                "realsz": end - ea,
                 "name": db.functions.get_name(func),
                 "nbbs": _block_count(db, func),
+                "ninstrs": _instruction_count(db, func),
+                "signature": signature,
+                "calltype": _calltype(signature),
+                "stackframe": int(getattr(func, "frsize", 0) or 0),
+                "nargs": int(getattr(func, "args", 0) or 0),
+                "noreturn": not bool(db.functions.does_return(func)),
+                "type": "fcn",
+                "bits": bits,
             }
         )
     return out, helpers.page_meta(out, next_offset)
@@ -88,9 +111,40 @@ def _block_count(db: Any, func: Any) -> int:
         return 0
 
 
+def _instruction_count(db: Any, func: Any) -> int:
+    try:
+        return sum(1 for _ in db.functions.get_instructions(func))
+    except Exception:
+        return 0
+
+
+def _recursive(start: int, callees: list[Any]) -> bool:
+    """Whether the function calls itself; callees may be funcs or raw EAs."""
+    for item in callees:
+        ea = item if isinstance(item, int) else getattr(item, "start_ea", None)
+        if ea is not None and int(ea) == start:
+            return True
+    return False
+
+
+#: Calling-convention tokens IDA writes into a signature.  r2's per-processor
+#: defaults (``reg`` for ARM, ``sysv``/``win64`` for x86-64) differ, so an
+#: unmatched signature yields an empty string rather than a guess.
+_CALLTYPE_RE = re.compile(
+    r"__(cdecl|stdcall|fastcall|thiscall|userpurge|pascal|cdeclptr|msfastcall)"
+)
+
+
+def _calltype(signature: str | None) -> str:
+    if not signature:
+        return ""
+    match = _CALLTYPE_RE.search(signature)
+    return match.group(1) if match else ""
+
+
 @op("function_info")
 def function_info(db: Any, ea: int) -> dict[str, Any]:
-    """Function detail (``afi``)."""
+    """Function detail (``afi``); the JSON keys follow r2's ``afij``."""
     func = helpers.require_func(db, ea)
     chart = db.functions.get_flowchart(func)
     blocks = list(chart) if chart is not None else []
@@ -98,21 +152,37 @@ def function_info(db: Any, ea: int) -> dict[str, Any]:
     callers = list(db.functions.get_callers(func))
     callees = list(db.functions.get_callees(func))
     locals_count = _local_count(db, func)
+    signature = _signature(db, func)
+    start = int(func.start_ea)
+    end = int(func.end_ea)
 
     return {
-        "ea": int(func.start_ea),
-        "end": int(func.end_ea),
+        "ea": start,
+        "end": end,
+        "addr": start,
+        "minaddr": start,
+        "maxaddr": end,
         "name": db.functions.get_name(func),
-        "size": int(func.end_ea) - int(func.start_ea),
+        "size": end - start,
+        "realsz": end - start,
         "nbbs": len(blocks),
         "ninstrs": instruction_count,
         "callers": len(callers),
         "callees": len(callees),
+        "indegree": len(callers),
+        "outdegree": len(callees),
         "locals": locals_count,
+        "nlocals": locals_count,
+        "nargs": int(getattr(func, "args", 0) or 0),
+        "stackframe": int(getattr(func, "frsize", 0) or 0),
+        "calltype": _calltype(signature),
+        "signature": signature,
         "is_far": bool(db.functions.is_far(func)),
         "does_return": bool(db.functions.does_return(func)),
         "noreturn": not bool(db.functions.does_return(func)),
-        "signature": _signature(db, func),
+        "recursive": _recursive(start, callees),
+        "type": "fcn",
+        "bits": int(getattr(db, "bitness", 0) or 0),
         "flags": helpers.flag_value(db.functions.get_flags(func)),
     }
 
