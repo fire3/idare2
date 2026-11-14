@@ -12,6 +12,10 @@ re-evaluation of 2026-11-14 (`docs/r2-parity-report.md` §15).
 
 ### Added
 
+- `tools/cmdsurface.py`: the command-surface probe from the 2026-11-14
+  re-evaluation — harvests r2's help tree, probes idare2 with one batch
+  session and reports supported / excluded / missing per command token
+  (`--json` for archives).
 - `e asm.syntax` selects the immediate style of the disassembly: `intel`
   (the default) rewrites IDA's MASM-style `11h` to r2's `0x11`; `masm` keeps
   IDA's text. `pa`/`wa`/`/a` accept either spelling — the user's r2-style
