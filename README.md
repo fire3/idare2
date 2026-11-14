@@ -383,6 +383,29 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 
 Most information commands support a `j` suffix for JSON output.
 
+### Unsupported commands
+
+Every radare2 command below fails explicitly (with the reason in the error)
+instead of falling back to a different command. The groups follow the shape of
+r2 6.2.6.
+
+| Group | Commands | Why |
+|---|---|---|
+| Debugger | `d*` (`db dc ds dr dx dp dm do` …) | No debug backend; IDA's debugger is not reachable through ida-nexus. |
+| File I/O | `o*` (`open`), `r*` (resize) | Single-database model: one database per session, opened on the command line. |
+| Visual mode | `V`, `v`, `v.`, `ve`, `vi` | Terminal UI is a radare2 feature; idare2 is line-based. |
+| Generators | `g*` (r_egg), `py` (rlang) | Shellcode generation and embedded scripting are radare2 features. |
+| Zignatures | `z*` | Use IDA's own signature/FLIRT machinery instead. |
+| Key-value store | `k*` (sdb) | r2's internal sdb has no IDA counterpart. |
+| Magic / fs | `m*`, `pm` | `libmagic` and r2's filesystem layer are not wired up. |
+| ESIL | `ae` | No emulator in the IDA path (`asm.emu` is accepted but inert). |
+| Remote / infra | `=`, `:`, `(`, `,`, `{`, `#`, `<`, `-` | Remote control, macros, tables and hashbangs are radare2 plumbing. |
+| C-metadata extras | `CF`, `CS`, `Cb`, `Cf`, `Cm`, `Cr`, `Ct`, `Cv`, `CC!` | Format/magic/signature metadata has no IDA storage; comments and data definitions (`C`, `CC*`, `Cd`, `Ch`, `Cs`) are supported. |
+| Bin extras | `ib`, `iL`, `iO`, `ik`, `im`, `io`, `iu`, `iw`, `ix` | rbin-plugin options and per-bin key/value stores; DWARF source lines live under `CL`. |
+| Print variants | `p-`, `pB`, `pF`, `pK`, `pb`, `pg`, `pk`, `pl`, `pmd`, `pq`, `pz` | Radar/zoom/ASN.1/QR renderings without an IDA equivalent. |
+| Analysis extras | `ac` (editing), `aL`, `aj`, `ap`, `ar`, `as`, `av`, `bf`, `bg`, `bm` | Class editing needs write support (read-only `ic` exists); registers and plugins are debug/r2-side concepts. |
+| Text log | `TT`, `TV` | `T` itself is supported; the tail/view variants are not. |
+
 ## Behavior notes
 
 - IDA performs analysis when the database is opened, so `aa` is usually a no-op.
