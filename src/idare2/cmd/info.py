@@ -48,6 +48,7 @@ INFO_DETAIL = [
     ("ig", "[h]", "guess the program size"),
     ("iE", "", "exports"),
     ("iM", "", "main address"),
+    ("ic", "[jq.l]", "classes, methods and fields (see ic?)"),
     ("CL", "[j*.] [addr]", "source-line information"),
 ]
 

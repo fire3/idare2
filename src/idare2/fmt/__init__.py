@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-#: r2 prints 32-bit addresses with 8 hex digits and 64-bit with 16.
+#: radare2 pads addresses to 8 hex digits whatever the bitness; wider values
+#: simply render longer (``0x123456789`` stays 9 digits).  (r2 5.x padded
+#: 64-bit addresses to 16 digits; 6.x stopped doing that.)
 WIDTH32 = 8
-WIDTH64 = 16
+WIDTH64 = 8
 
 
 def addr_width(bits: int | None) -> int:
@@ -19,8 +21,12 @@ def addr_width(bits: int | None) -> int:
 
 
 def fmt_addr(ea: int, width: int = WIDTH32) -> str:
-    """``0x00015e50`` -- r2's zero-padded address form."""
-    return f"0x{ea & ((1 << (width * 4)) - 1):0{width}x}"
+    """``0x00015e50`` -- r2's zero-padded address form.
+
+    ``width`` is the *minimum* width: the value is never truncated, so
+    addresses above ``2**width`` keep all their digits.
+    """
+    return f"0x{ea & ((1 << 64) - 1):0{width}x}"
 
 
 def fmt_hex_bytes(raw: bytes, *, group: bool = True) -> str:

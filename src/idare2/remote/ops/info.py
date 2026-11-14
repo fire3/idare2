@@ -738,22 +738,56 @@ def symbols(
 def strings(
     db: Any,
     pattern: str | None = None,
-    offset: int = 0,
+    offset: int | None = None,
     count: int | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
-    """String table (``iz``)."""
+    """String table (``iz``).
+
+    r2's ``iz`` lists data strings only: symbol tables, relocation sections,
+    ``.interp`` and friends never appear even though IDA's string list
+    includes their contents.  Sections of those ELF types (plus a name-based
+    fallback for ``.interp``-style PROGBITS sections) are excluded here.
+    """
     predicate = helpers.name_filter(pattern)
     elf = _elf_for(db)
     segments = None if elf is not None else _segment_index(db)
+    excluded = _string_exclusions(elf) if elf is not None else ()
 
     def make() -> Iterator[dict[str, Any]]:
         for item in db.strings.get_all():
             row = _string_row(item, elf, segments)
             if row is None or not predicate(row["text"]):
                 continue
+            if any(start <= row["ea"] < end for start, end in excluded):
+                continue
             yield row
 
     return helpers.paged(make, offset, count)
+
+
+#: ELF section types whose contents are metadata, not strings (r2's ``iz``
+#: never reports them): SYMTAB, STRTAB, RELA, DYNAMIC, NOTE, REL, DYNSYM.
+_NON_STRING_SECTION_TYPES = frozenset({2, 3, 4, 6, 7, 9, 11})
+_NON_STRING_SECTION_NAMES = (
+    ".interp",
+    ".comment",
+    ".shstrtab",
+)
+
+
+def _string_exclusions(elf: Any) -> list[tuple[int, int]]:
+    """Virtual-address ranges r2's ``iz`` would skip."""
+    ranges: list[tuple[int, int]] = []
+    for section in elf.sections:
+        if section.size <= 0 or not section.addr:
+            continue
+        name = section.name or ""
+        if (
+            section.type in _NON_STRING_SECTION_TYPES
+            or name.startswith(_NON_STRING_SECTION_NAMES)
+        ):
+            ranges.append((int(section.addr), int(section.addr) + int(section.size)))
+    return ranges
 
 
 def _string_row(
@@ -788,18 +822,24 @@ def _string_row(
 
 
 def _string_type(item: Any) -> str:
-    """Type name of a string, tolerant of codes ida-domain's enum rejects.
+    """r2's type column for a string, from IDA's StringType.
 
-    ``StringItem.type`` evaluates ``StringType(get_str_type_code(internal))``,
-    and an ``IntEnum`` raises ``ValueError`` for any value outside its members
-    -- ``16 is not a valid StringType``.  Decompiling with ``pdc`` can leave
-    such a string behind, and without this guard one odd literal took the whole
-    ``iz`` listing down with it, permanently, across sessions.
+    ``StringType`` is an ``IntEnum``, so ``str(item.type)`` is the numeric
+    value (``"0"``) -- map the member name to r2's width-based label instead.
+    An ``IntEnum`` raises ``ValueError`` for any value outside its members
+    (decompiling with ``pdc`` can leave such a string behind); keep the
+    fallback that guards against one odd literal taking the whole ``iz``
+    listing down.
     """
     try:
-        return str(item.type)
-    except ValueError:
+        name = item.type.name
+    except (ValueError, AttributeError):
         return f"0x{int(getattr(item, 'internal_type', 0)):x}"
+    if name.endswith("_16"):
+        return "utf16le"
+    if name.endswith("_32"):
+        return "utf32le"
+    return "ascii"
 
 
 def _string_encoding(item: Any) -> str:

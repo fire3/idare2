@@ -1,6 +1,6 @@
 """Listing renderers: file info, segments, functions, symbols, strings.
 
-The tables use r2's shape (header row, then a ``―`` rule, then rows) with
+The tables use r2's shape (header row, then a rule, then rows) with
 columns padded to their widest cell.  Exact inter-column padding differs from
 r2's table printer in places; the parity tests normalise whitespace runs rather
 than chase byte-identical alignment.
@@ -13,8 +13,9 @@ from typing import Any
 
 from idare2.fmt import addr_width, fmt_addr, human_size, truth
 
-#: r2 underlines table headers with U+2015 HORIZONTAL BAR, not ASCII '-'.
-RULE = "―"
+#: r2 6.x underlines table headers with plain ASCII dashes.  (An earlier
+#: revision used U+2015; 6.2.6 emits ``0x2d`` -- verified byte-wise.)
+RULE = "-"
 
 
 def table(headers: Sequence[str], rows: Iterable[Sequence[str]], *, right: Sequence[int] = ()) -> list[str]:

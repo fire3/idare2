@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from idare2 import cmd as cmd_module
 from idare2.cmd import command
 from idare2.errors import QuitRequested, UsageError
-from idare2.fmt import addr_width
 from idare2.fmt import listing as fmt_listing
 from idare2.parser import Statement
 
@@ -128,18 +127,30 @@ def question(session: Session, statement: Statement) -> list[str]:
     if suffix == "x":
         return _hexpair(argument)
     if suffix == "b":
-        return [bin(session.eval(argument))[2:]]
+        # r2 suffixes the digits with ``b`` instead of prefixing ``0b``.
+        return [bin(session.eval(argument or "0"))[2:] + "b"]
     if suffix == "o":
-        return [oct(session.eval(argument))]
+        return [f"0{session.eval(argument or '0'):o}"]
     if suffix == "u":
-        return [fmt_listing.human_size(session.eval(argument))]
+        return [fmt_listing.human_size(session.eval(argument or "0"))]
     if suffix == "j":
         import json
 
-        return [json.dumps(session.eval(argument))]
+        return [
+            json.dumps(
+                _representation_map(session.eval(argument or "0")),
+                separators=(",", ":"),
+            )
+        ]
 
     if suffix.startswith(("eb", "et", "ne", "le", "ge", "eq")):
         raise UsageError(f"unsupported question command '?{suffix}' (see ?)")
+
+    if not argument and suffix in ("v", "vi"):
+        # r2 prints the empty value forms as plain ``0``, without 0x.
+        return ["0"]
+    if not argument and suffix in ("vx", "X"):
+        argument = "0"
 
     if not argument and suffix:
         raise UsageError(f"unsupported question command '?{suffix}' (see ?)")
@@ -268,21 +279,102 @@ def _version_lines() -> list[str]:
 
 
 def _representations(value: int, session: Session) -> list[str]:
-    """r2's full ``?`` block: every way of reading the same number."""
-    width = addr_width(session.info.get("bits"))
-    mask = (1 << (width * 4)) - 1
-    unsigned = value & mask
+    """r2 6.x's full ``?`` block: every way of reading the same number.
+
+    Rows labelled ``int32``/``uint32`` when the value fits 32 bits, otherwise
+    ``int64``/``uint64``.  ``float``/``double`` reinterpret the value's bits
+    as IEEE-754, matching r2.
+    """
+    import struct
+
+    unsigned = value & 0xFFFFFFFFFFFFFFFF
+    if unsigned <= 0xFFFFFFFF:
+        mask, label = 0xFFFFFFFF, "32"
+    else:
+        mask, label = 0xFFFFFFFFFFFFFFFF, "64"
+    unsigned &= mask
     signed = unsigned - (mask + 1) if unsigned > mask >> 1 else unsigned
-    binary = bin(unsigned & 0xFFFF)[2:]
+    high = (unsigned >> 16) << 12
+    bits = max(unsigned.bit_length(), 1)
+    bits += (8 - bits % 8) % 8
+    try:
+        f32 = struct.unpack("<f", struct.pack("<I", unsigned & 0xFFFFFFFF))[0]
+        f64 = struct.unpack("<d", struct.pack("<Q", unsigned))[0]
+    except (OverflowError, struct.error):  # pragma: no cover
+        f32 = f64 = 0.0
     return [
-        f"int32   {signed}",
-        f"uint32  {unsigned}",
+        f"int{label}   {signed}",
+        f"uint{label}  {unsigned}",
         f"hex     0x{unsigned:x}",
         f"octal   0{unsigned:o}",
         f"unit    {fmt_listing.human_size(unsigned)}",
-        f"segment {unsigned >> 16:04x}:{unsigned & 0xFFFF:04x}",
-        f"binary  0b{binary}",
+        f"segment {high:04x}:{unsigned & 0xFFFF:04x}",
+        f"string  {_value_string(unsigned)}",
+        f"fvalue  {float(signed):.1f}",
+        f"float   {f32:.15f}f",
+        f"double  {f64:.15f}",
+        f"binary  0b{unsigned:0{bits}b}",
+        f"base36  0_{_to_base(unsigned, 36)}",
+        f"ternary 0t{_to_base(unsigned, 3)}",
     ]
+
+
+def _representation_map(value: int) -> dict[str, str]:
+    """``?j``'s object: all four integer readings plus the derived rows.
+
+    Unlike the text block, r2's JSON always carries int32/uint32/int64/uint64,
+    pads ``hex`` to eight digits and renders ``float``/``double`` with six
+    decimals, and has no ``string`` row.
+    """
+    import struct
+
+    unsigned = value & 0xFFFFFFFFFFFFFFFF
+    signed64 = unsigned - (1 << 64) if unsigned > (1 << 63) - 1 else unsigned
+    low32 = unsigned & 0xFFFFFFFF
+    signed32 = low32 - (1 << 32) if low32 > (1 << 31) - 1 else low32
+    try:
+        f32 = struct.unpack("<f", struct.pack("<I", low32))[0]
+        f64 = struct.unpack("<d", struct.pack("<Q", unsigned))[0]
+    except (OverflowError, struct.error):  # pragma: no cover
+        f32 = f64 = 0.0
+    bits = max(unsigned.bit_length(), 1)
+    bits += (8 - bits % 8) % 8
+    return {
+        "int32": str(signed32),
+        "uint32": str(low32),
+        "int64": str(signed64),
+        "uint64": str(unsigned),
+        "hex": f"0x{unsigned:08x}",
+        "octal": f"0{unsigned:o}",
+        "unit": fmt_listing.human_size(unsigned),
+        "segment": f"{low32 >> 16:04x}:{low32 & 0xFFFF:04x}",
+        "fvalue": f"{float(signed64):.1f}",
+        "float": f"{f32:.6f}f",
+        "double": f"{f64:.6f}",
+        "binary": f"0b{unsigned:0{bits}b}",
+        "base36": f"0_{_to_base(unsigned, 36)}",
+        "ternary": f"0t{_to_base(unsigned, 3)}",
+    }
+
+
+def _value_string(value: int) -> str:
+    """``string`` row: the value's little-endian bytes until the NUL."""
+    raw = value.to_bytes(8, "little").rstrip(b"\0")
+    body = "".join(
+        chr(byte) if 0x20 <= byte <= 0x7E else f"\\x{byte:02x}" for byte in raw
+    )
+    return f'"{body}"'
+
+
+def _to_base(value: int, base: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    if value == 0:
+        return "0"
+    out: list[str] = []
+    while value:
+        value, digit = divmod(value, base)
+        out.append(digits[digit])
+    return "".join(reversed(out))
 
 
 def _hexpair(argument: str) -> list[str]:
@@ -414,7 +506,7 @@ def blocksize(session: Session, statement: Statement) -> list[str]:
     if argument:
         session.blocksize = max(session.eval(argument), 1)
         return []
-    return [str(session.blocksize)]
+    return [f"0x{session.blocksize:x}"]
 
 
 @command("%", usage="[name[=value]]", summary="environment variables")

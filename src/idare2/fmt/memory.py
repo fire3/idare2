@@ -1,14 +1,16 @@
 """Hexdump and value rendering, matching radare2's ``px`` layout.
 
-Measured against r2 6.2.5::
+Measured against r2 6.2.6::
 
     - offset -  1011 1213 1415 1617 1819 1A1B 1C1D 1E1F  0123456789ABCDEF
     0x00008d10  9e00 0000 0000 0000 0000 0000 3000 0000  ............0...
 
-The header is not decorative: the first block is the **low byte** of each
-byte's offset in uppercase hex, two bytes per group, and the second block is
-the uppercase hex digit of each byte's **low nibble**.  Both wrap at 0xFF, which
-is why ``px @ 0x8d1b`` labels its first group ``1B1C``.
+The hex-offset header labels each byte with its **low byte** in uppercase
+hex, right-aligned to two characters *without* zero padding, two bytes per
+group: ``0x4008`` labels its first groups `` 8 9``/`` A B`` but ``0x8d10``
+starts at ``1011``.  The second block is the uppercase hex digit of each
+byte's **low nibble**.  Both wrap at 0xFF / 0xF, which is why ``px @ 0x8d1b``
+labels its first group ``1B1C``.
 """
 
 from __future__ import annotations
@@ -58,10 +60,10 @@ def _header(
     out = ("- offset -  ") if show_offset else ""
     if pairs and cols % 2 == 0:
         groups = [
-            f"{(ea + i) & 0xFF:02X}{(ea + i + 1) & 0xFF:02X}" for i in range(0, cols, 2)
+            f"{(ea + i) & 0xFF:>2X}{(ea + i + 1) & 0xFF:>2X}" for i in range(0, cols, 2)
         ]
     else:
-        groups = [f"{(ea + i) & 0xFF:02X}" for i in range(cols)]
+        groups = [f"{(ea + i) & 0xFF:>2X}" for i in range(cols)]
     out += " ".join(groups)
     if show_ascii:
         out += "  " + "".join(f"{(ea + i) & 0xF:X}" for i in range(cols))

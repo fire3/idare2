@@ -70,7 +70,7 @@ def test_rasm2_fallback_uses_the_database_architecture(monkeypatch) -> None:
 
     assert assembler.assemble(session, "nop") == b"\x00\x00\xa0\xe1"
     assert seen == [
-        ["/opt/rasm2", "-q", "-a", "arm", "-o", "0x1000", "-b", "32", "--", "nop"]
+        ["/opt/rasm2", "-q", "-a", "arm", "-s", "0x1000", "-b", "32", "--", "nop"]
     ]
 
 

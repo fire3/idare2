@@ -54,7 +54,7 @@ PC_UNSUPPORTED = frozenset({"pCa", "pCA", "pCc", "pCd", "pCD", "pCx", "pCw"})
 @command(
     "pC",
     usage="[rows]",
-    summary="disassemble in columns",
+    summary="print memory and disassembly (pd, px, pC...)",
     detail=PC_DETAIL,
     suffixes=frozenset({"", "a", "A", "c", "d", "D", "x", "w"}),
     suffix_label="print modifier",
@@ -668,7 +668,14 @@ def print_memory(session: Session, statement: Statement) -> list[str]:
     if token == "p8":
         return fmt_memory.format_bytes(payload, session)
     if token == "pr":
-        return payload.get("data", b"").decode("utf-8", errors="replace").splitlines()
+        data = payload.get("data", b"")
+        # Bare `pr` writes the bytes untouched, like r2.  With any text
+        # modifier (``~`` ``|`` ``>`` repeats, iterators) the output has to
+        # go through the line pipeline, so it degrades to latin-1 text.
+        if _pr_is_bare(statement):
+            session.write_raw(data)
+            return []
+        return data.decode("latin-1").split("\n")
     if token == "pc":
         raw = bytes(payload.get("data") or b"")
         lines = _c_array(raw)
@@ -1370,6 +1377,20 @@ def print_c_array(session: Session, statement: Statement) -> list[str]:
     if token in ("pcp", "pcP"):
         return _python_pack(raw)
     raise UsageError(f"unsupported print modifier '{token[1:]}' (see p?)")
+
+
+def _pr_is_bare(statement: Statement) -> bool:
+    """Whether ``pr`` can bypass the line pipeline and emit raw bytes."""
+    return (
+        statement.filter is None
+        and statement.pipe is None
+        and statement.redirect is None
+        and not statement.append
+        and statement.repeat == 1
+        and not statement.dot
+        and statement.iterator is None
+        and statement.iterator_size is None
+    )
 
 
 def _c_array(raw: bytes) -> list[str]:

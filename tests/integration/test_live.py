@@ -357,7 +357,7 @@ def test_seek_sticks(session) -> None:
     # Regression: a temporary-seek scope used to restore the seek even for `s`,
     # which made `s main; s` print the old address.
     session.run("s 0x10000")
-    assert session.run("s") == ["0x00010000"]
+    assert session.run("s") == ["0x10000"]
 
 
 def test_pd_renders(session) -> None:
@@ -646,7 +646,7 @@ def test_seek_history_matches_r2_shape(session) -> None:
     a clean one.  Address padding is idare2's own (it also drives the prompt).
     """
     session.failed = False
-    current = session.run("s")[0]
+    current = session.format_addr(session.seek)
     before = session.run("s=")[0]
 
     def chain(*extra: str) -> str:
@@ -737,7 +737,7 @@ def test_function_graph_forms(session) -> None:
 def test_sized_iterator_sets_and_restores_blocksize(session) -> None:
     session.failed = False
     session.blocksize = 64
-    assert session.run("b @@@= 0x00016bb4 8 0x00016bb8 16") == ["8", "16"]
+    assert session.run("b @@@= 0x00016bb4 8 0x00016bb8 16") == ["0x8", "0x10"]
     assert not session.failed, session.last_error
     assert session.blocksize == 64
 
@@ -749,7 +749,9 @@ def test_sized_iterator_sets_and_restores_blocksize(session) -> None:
         session.run(f"s 0x{saved_seek:x}")
     assert not session.failed, session.last_error
     assert block_sizes
-    assert all(size.isdigit() and int(size) > 0 for size in block_sizes)
+    assert all(
+        size.startswith("0x") and int(size, 16) > 0 for size in block_sizes
+    )
     assert session.blocksize == 64
 
 

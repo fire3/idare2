@@ -5,6 +5,50 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Output-format alignment with radare2 6.2.6, from the CLI-difference
+re-evaluation of 2026-11-14 (`docs/r2-parity-report.md` §15).
+
+### Fixed
+
+- Addresses now render the way radare2 6.x does: zero-padded to 8 hex digits
+  at any bitness, and never truncated — `pd`/`afl`/`px`/`axt` and the prompt
+  used to pad 64-bit addresses to 16 digits, and `fmt_addr` masked values
+  above `2**32` when the width was 8.
+- `px`'s header labels each offset with its low byte right-aligned to two
+  characters without zero padding (`- offset -   0 1  2 3 ...` at `0x4000`,
+  `1011 1213 ...` at `0x8d10`), matching r2 6.2.6 byte-for-byte; the table
+  header rule is ASCII `-` again (r2 6.x stopped using U+2015).
+- `iz` now reports only data strings like r2: ELF sections whose type is
+  SYMTAB/STRTAB/RELA/DYNAMIC/NOTE/REL/DYNSYM, plus `.interp`-style metadata
+  sections, are excluded; the `type` column maps IDA's `StringType` enum to
+  `ascii`/`utf16le`/`utf32le` instead of printing the raw enum number (`0`).
+- `?` prints r2 6.2.6's full block: `int32`/`uint32` (or `int64`/`uint64`
+  past 32 bits), plus the `string`, `fvalue`, `float`, `double`, `base36` and
+  `ternary` rows. `?j` returns r2's object shape. Empty value forms print
+  zero (`?v` → `0`, `?b` → `0b`, `?o` → `00`).
+- `?b` suffixes the digits with `b` (`10100b`) and `?o` keeps octal's leading
+  zero (`024`), as r2 does.
+- Bare `s` prints the address unpadded (`0x1140`); the zero-padded form stays
+  `s:`. `b` prints the block size in hex (`0x100`).
+- `aa`/`aaa` are silent on success like r2.
+- Bare `pr` writes the bytes untouched instead of decoding them as UTF-8
+  (which replaced non-UTF-8 bytes with U+FFFD and split lines); with `~`, `|`,
+  `>` or repeats it degrades to latin-1 text lines.
+- The rasm2 fallback passes the address as `-s` again: rasm2 6.2.6 treats
+  `-o` as the *output file*, so the 0.1.1 change made it read stdin and print
+  nothing.
+- `?`'s command index no longer claims a bare `p` command, and `i?` lists
+  `ic`.
+
+### Changed
+
+- Tests: the parity helper drops header rules by character set, the parity
+  and integration expectations follow the new address/number renderings, and
+  new unit tests pin the `px` header, `?` block, `iz` filtering, `pr` raw
+  path and address widths.
+
 ## [0.1.3] - 2026-11-14
 
 Fixes from the agent-driven live-test campaign of 2026-11-14 (416 recorded

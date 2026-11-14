@@ -709,6 +709,23 @@ class Session:
         """Emit a diagnostic.  Overridden by the CLI to reach real stderr."""
         print(message, file=sys.stderr)
 
+    def write_raw(self, data: bytes) -> None:
+        """Write bytes to stdout untouched (``pr``), keeping text ordering.
+
+        Text and byte writes interleave correctly because the text side is
+        flushed first.  When stdout has no byte buffer (tests, captured
+        streams) the data degrades to latin-1 text, which round-trips every
+        byte value in-process.
+        """
+        buffer = getattr(sys.stdout, "buffer", None)
+        if buffer is None:
+            sys.stdout.write(data.decode("latin-1"))
+            sys.stdout.flush()
+            return
+        sys.stdout.flush()
+        buffer.write(data)
+        buffer.flush()
+
     # -- display helpers ---------------------------------------------------
 
     @property

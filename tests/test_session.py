@@ -566,7 +566,7 @@ def test_seek_is_permanent() -> None:
     session, _ = make_session()
     session.run("s 0x2000")
     assert session.seek == 0x2000
-    assert session.run("s") == ["0x00002000"]
+    assert session.run("s") == ["0x2000"]
 
 
 def test_64bit_addresses_round_trip_in_text_output() -> None:
@@ -578,10 +578,12 @@ def test_64bit_addresses_round_trip_in_text_output() -> None:
     """
     session, _ = make_session(bitness=64)
     session.run("s 0x140001460")
-    # r2 prints 64-bit addresses zero-padded to 16 digits, never truncated.
-    assert session.run("s") == ["0x0000000140001460"]
-    assert session.format_addr(0x140001460) == "0x0000000140001460"
-    assert session.prompt() == "[0x0000000140001460]> "
+    # r2 6.x pads addresses to 8 digits and never truncates wider values;
+    # the bare `s` echo is unpadded, `s:` keeps the padded form.
+    assert session.run("s") == ["0x140001460"]
+    assert session.run("s:") == ["0x140001460"]
+    assert session.format_addr(0x140001460) == "0x140001460"
+    assert session.prompt() == "[0x140001460]> "
     # The printed address is seekable again.
     session.run("s 0x140001460")
     assert session.seek == 0x140001460
@@ -595,9 +597,9 @@ def test_aaa_runs_deep_analysis() -> None:
         instance=SimpleNamespace(backend="idalib"),
         wait_autoanalysis=lambda _timeout: None,
     )
-    assert session.run("aa") == ["-- analysis complete --"]
-    assert session.run("aaa") == ["-- analysis complete (deep) --"]
-    assert session.run("aaaa") == ["-- analysis complete (deep) --"]
+    assert session.run("aa") == []
+    assert session.run("aaa") == []
+    assert session.run("aaaa") == []
     assert [name for name, _ in remote.calls].count("deep_analyze") == 2
 
 
@@ -1738,7 +1740,7 @@ def test_temporary_instruction_and_value_selectors() -> None:
 def test_temporary_command_selector_uses_its_first_address() -> None:
     session, _remote = make_session()
     session.seek = 0x1000
-    assert session.run("s @c:?e 0x1234") == ["0x00001234"]
+    assert session.run("s @c:?e 0x1234") == ["0x1234"]
     assert session.seek == 0x1000
 
 
@@ -1852,7 +1854,7 @@ def test_search_repeat_uses_the_last_query() -> None:
 
 def test_blocksize() -> None:
     session, _ = make_session()
-    assert session.run("b") == ["256"]
+    assert session.run("b") == ["0x100"]
     session.run("b 64")
     assert session.blocksize == 64
     session.run("b+16")
@@ -1891,11 +1893,8 @@ def test_sized_iterator_pairs_set_seek_and_blocksize_then_restore() -> None:
     session.seek = 0x3000
     session.blocksize = 64
 
-    assert session.run("s @@@= 0x1000 8 0x2000 16") == [
-        "0x00001000",
-        "0x00002000",
-    ]
-    assert session.run("b @@@= 0x1000 8 0x2000 16") == ["8", "16"]
+    assert session.run("s @@@= 0x1000 8 0x2000 16") == ["0x1000", "0x2000"]
+    assert session.run("b @@@= 0x1000 8 0x2000 16") == ["0x8", "0x10"]
     assert session.seek == 0x3000
     assert session.blocksize == 64
 
@@ -1903,7 +1902,7 @@ def test_sized_iterator_pairs_set_seek_and_blocksize_then_restore() -> None:
 def test_sized_iterator_ignores_a_trailing_unpaired_value() -> None:
     """r2 only runs explicitly paired addresses, then stops."""
     session, _remote = make_session()
-    assert session.run("b @@@= 0x1000 8 0x2000") == ["8"]
+    assert session.run("b @@@= 0x1000 8 0x2000") == ["0x8"]
 
 
 def test_sized_iterator_rejects_a_negative_size() -> None:
@@ -1919,8 +1918,8 @@ def test_sized_iterators_for_blocks_and_functions() -> None:
     session.seek = 0x1000
     session.blocksize = 64
 
-    assert session.run("b @@@b") == ["8", "16"]
-    assert session.run("b @@@F") == ["8", "16"]
+    assert session.run("b @@@b") == ["0x8", "0x10"]
+    assert session.run("b @@@F") == ["0x8", "0x10"]
     assert session.blocksize == 64
 
 
@@ -1928,15 +1927,15 @@ def test_sized_iterators_for_instructions_flags_and_strings() -> None:
     session, _remote = make_session()
     session.run("f zz 32 @ 0x3000")
 
-    assert session.run("b @@@i") == ["4"]
-    assert session.run("b @@@f:zz") == ["32"]
-    assert session.run("b @@@z") == ["6", "12"]
+    assert session.run("b @@@i") == ["0x4"]
+    assert session.run("b @@@f:zz") == ["0x20"]
+    assert session.run("b @@@z") == ["0x6", "0xc"]
 
 
 def test_sized_iterator_segments_and_unknown_selector() -> None:
     session, _remote = make_session()
-    assert session.run("b @@@S") == ["4096"]
-    assert session.run("b @@@SS") == ["4096"]
+    assert session.run("b @@@S") == ["0x1000"]
+    assert session.run("b @@@SS") == ["0x1000"]
 
     session.failed = False
     assert session.run("b @@@q") == []
@@ -2856,6 +2855,105 @@ def test_question_set_last_result() -> None:
 def test_question_value_commands(command: str, expected: list[str]) -> None:
     session, _remote = make_session()
     assert session.run(command) == expected
+
+
+def test_question_full_block_matches_r2_62(session_fixture=None) -> None:
+    """r2 6.2.6's ``?`` block: 13 rows, int64 labels past 32 bits."""
+    session, _remote = make_session()
+    assert session.run("? 0x10+4") == [
+        "int32   20",
+        "uint32  20",
+        "hex     0x14",
+        "octal   024",
+        "unit    20",
+        "segment 0000:0014",
+        'string  "\\x14"',
+        "fvalue  20.0",
+        "float   0.000000000000000f",
+        "double  0.000000000000000",
+        "binary  0b00010100",
+        "base36  0_k",
+        "ternary 0t202",
+    ]
+
+
+def test_question_full_block_labels_64bit_values() -> None:
+    session, _remote = make_session()
+    lines = session.run("? 0x123456789")
+    assert lines[0] == "int64   4886718345"
+    assert lines[1] == "uint64  4886718345"
+    assert lines[5] == "segment 12345000:6789"
+    assert lines[11] == "base36  0_28tfc09"
+
+
+def test_question_value_suffixes_match_r2_62() -> None:
+    session, _remote = make_session()
+    # r2 suffixes `?b` with `b` and keeps the leading zero of `?o`.
+    assert session.run("?b 20") == ["10100b"]
+    assert session.run("?o 20") == ["024"]
+    assert session.run("?u 20") == ["20"]
+    # Empty value forms print zero, like r2.
+    assert session.run("?v") == ["0"]
+    assert session.run("?b") == ["0b"]
+    assert session.run("?o") == ["00"]
+    assert session.run("?u") == ["0"]
+    assert session.run("?vi") == ["0"]
+
+
+def test_question_json_object_matches_r2_62() -> None:
+    import json
+
+    session, _remote = make_session()
+    parsed = json.loads(session.run("?j 20")[0])
+    assert parsed["hex"] == "0x00000014"
+    assert parsed["float"] == "0.000000f"
+    assert parsed["double"] == "0.000000"
+    assert parsed["binary"] == "0b00010100"
+    assert parsed["base36"] == "0_k"
+    assert parsed["ternary"] == "0t202"
+    assert "string" not in parsed
+
+
+def test_seek_echo_is_unpadded_and_s_colon_is_padded() -> None:
+    session, _remote = make_session()
+    session.run("s 0x1140")
+    assert session.run("s") == ["0x1140"]
+    assert session.run("s:") == ["0x00001140"]
+
+
+def test_blocksize_echo_is_hexadecimal() -> None:
+    session, _remote = make_session()
+    assert session.run("b") == ["0x100"]
+    session.run("b 64")
+    assert session.run("b") == ["0x40"]
+
+
+def test_write_raw_round_trips_bytes_in_process(monkeypatch: object) -> None:
+    import io
+    import sys
+
+    session, _remote = make_session()
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+    # StringIO has no byte buffer, so this exercises the latin-1 fallback,
+    # which keeps every byte value distinct inside the process.
+    session.write_raw(bytes([0x41, 0x00, 0xC3]))
+    assert stream.getvalue() == "A\x00\xc3"
+
+
+def test_pr_falls_back_to_latin1_text_with_modifiers() -> None:
+    session, _remote = make_session()
+    from idare2.cmd.print import _pr_is_bare
+    from idare2.parser import parse
+
+    bare, = parse("pr 4")
+    assert _pr_is_bare(bare)
+    filtered, = parse("pr 4~x")
+    assert not _pr_is_bare(filtered)
+    redirected, = parse("pr 4 > /tmp/x")
+    assert not _pr_is_bare(redirected)
+    repeated, = parse("3pr 4")
+    assert not _pr_is_bare(repeated)
 
 
 def test_question_version_is_not_the_generic_help() -> None:

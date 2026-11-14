@@ -149,8 +149,10 @@ def _rasm2_assemble(
 
     # `open_summary` exposes ``bitness``; ``file_info``/the session also expose
     # ``bits``.  Use both, otherwise rasm2 silently defaults to 64 bits.
+    # rasm2's seek flag is ``-s``/``-@`` (``-o`` is the *output file*, which
+    # makes 6.2.6 read stdin and print nothing).
     bits = int(session.info.get("bitness") or session.info.get("bits") or 0)
-    argv = [executable, "-q", "-a", plugin, "-o", f"0x{ea:x}"]
+    argv = [executable, "-q", "-a", plugin, "-s", f"0x{ea:x}"]
     if bits:
         argv.extend(["-b", str(bits)])
     if session.info.get("endian") == "big":

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from idare2.cmd import command
 from idare2.errors import UsageError
-from idare2.fmt import addr_width, fmt_addr
+from idare2.fmt import addr_width
 
 if TYPE_CHECKING:
     from idare2.parser import Statement
@@ -50,7 +50,8 @@ def seek(session: Session, statement: Statement) -> list[str]:
 
     if suffix == "":
         if not argument:
-            return [fmt_addr(session.seek, width)]
+            # r2 prints the seek unpadded; the zero-padded form is `s:`.
+            return [f"0x{session.seek:x}"]
         session.seek_to(session.resolve(argument))
         return []
 

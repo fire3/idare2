@@ -9,6 +9,7 @@ so a plain unit test of the handler would never see it.
 
 from __future__ import annotations
 
+from enum import IntEnum
 from types import SimpleNamespace
 
 import pytest
@@ -785,7 +786,8 @@ class PlainString:
     length = 6
     internal_type = 0
     contents = b"abc"
-    type = "0"
+    # ida-domain's StringType is an IntEnum; `C` must map to r2's `ascii`.
+    type = IntEnum("FakeStringType", {"C": 0}).C
     encoding = "ascii"
 
 
@@ -796,7 +798,12 @@ def test_string_type_falls_back_on_an_unknown_enum_value() -> None:
     from idare2.remote.ops.info import _string_type
 
     assert _string_type(OddString()) == "0x10"
-    assert _string_type(PlainString()) == "0"
+    assert _string_type(PlainString()) == "ascii"
+
+    class WideString(PlainString):
+        type = IntEnum("FakeStringType", {"C_16": 1}).C_16
+
+    assert _string_type(WideString()) == "utf16le"
 
 
 def test_string_encoding_falls_back_on_an_unknown_enum_value() -> None:
@@ -829,7 +836,7 @@ def test_string_row_keeps_the_normal_path_intact() -> None:
         "section": ".rodata",
         "length": 3,
         "size": 6,
-        "type": "0",
+        "type": "ascii",
         "encoding": "ascii",
         "text": "abc",
     }

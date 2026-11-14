@@ -303,6 +303,35 @@ def test_hexdump_matches_r2(session: FakeSession) -> None:
     assert out[2].startswith("0x00008d20")
 
 
+def test_hexdump_header_labels_are_right_aligned_not_zero_padded(session: FakeSession) -> None:
+    """r2 6.2.6: labels are ``%2X`` (right-aligned), not ``%02X``."""
+    payload = {"ea": 0x4000, "count": 16, "data": bytes(16)}
+    out = fmt_memory.format_hexdump(payload, session)
+    assert out[0] == (
+        "- offset -   0 1  2 3  4 5  6 7  8 9  A B  C D  E F  "
+        "0123456789ABCDEF"
+    )
+
+
+def test_hexdump_header_labels_widen_past_0x0f(session: FakeSession) -> None:
+    payload = {"ea": 0x4008, "count": 16, "data": bytes(16)}
+    out = fmt_memory.format_hexdump(payload, session)
+    assert out[0].startswith("- offset -   8 9  A B  C D  E F 1011 1213 1415 1617")
+
+
+def test_address_width_matches_r2_62() -> None:
+    """r2 6.x pads addresses to 8 digits at any bitness, never truncating."""
+    from idare2.fmt import fmt_addr
+
+    assert fmt_addr(0x1140, 8) == "0x00001140"
+    assert fmt_addr(0x140001460, 8) == "0x140001460"
+    assert fmt_addr(0x140001460, 16) == "0x0000000140001460"
+
+
+def test_table_rule_is_ascii_dash() -> None:
+    assert fmt_listing.RULE == "-"
+
+
 def test_hexdump_wrap_at_ff(session: FakeSession) -> None:
     payload = {"ea": 0x00008D1B, "count": 16, "data": bytes.fromhex("00300000" + "00" * 12)}
     out = fmt_memory.format_hexdump(payload, session)

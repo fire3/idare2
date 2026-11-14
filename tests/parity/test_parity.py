@@ -374,10 +374,11 @@ def test_function_graph_blocks_and_edges_overlap(session, r2) -> None:
 
 
 def _table_rows(lines: list[str]) -> list[list[str]]:
+    # Drop header rules: idare2 used to emit U+2015, r2 6.x uses ASCII '-'.
     return [
         split_columns(line)
         for line in lines
-        if line.strip() and "―" not in line
+        if line.strip() and not set(line.strip()) <= {"-", "―", " "}
     ]
 
 
