@@ -5,6 +5,6 @@ IDA process by :mod:`idare2.remote.entry`, so it must not pull in anything that
 is unavailable in IDA's own Python (no ``ida_nexus``, no ``ida_*``).
 """
 
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 
 __all__ = ["__version__"]

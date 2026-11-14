@@ -370,7 +370,7 @@ idare2 -qc 'axt > refs.txt' firmware.bin
 | Seeking | `s` `s+` `s-` `sf` `sF` `sb` `sn` `so` `sp` `s=` `s:` `s*` |
 | Disassembly | `pd` `pd -N` `pd--` `pD` `pdf` `pdb` `pdk` `pdr` `pi` `pdi` `pdl` `pdq` `pdj` `pdC` `pdJ` `pd,` `pdc` `pC` `pA` |
 | Assembly | `pa` `wa` `wa*` `wa+` `waf` `waF` |
-| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=d` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `ph` `pwd` `x` `x8` `xw` `xq` `xj` |
+| Memory | `px` `pxw` `pxq` `pxd` `pxu` `p8` `p8j` `p8s` `p8,` `p8d` `p8x` `p8*` `p8b` `p8f` `pr` `pc` `p6` `pj` `p=d` `pt` `pu` `pf` `pfj` `pfs` `ps` `psw` `psz` `psp` `psW` `psu` `psx` `psn` `pv` `pvu` `pvd` `pvp` `pvj` `ph` `pwd` `x` `x8` `xw` `xq` `xj` `pFa` `pFo` `pFp` `pFx` `pFaj` `pFxj` |
 | Information | `i` `iI` `ij` `it` `itj` `iD` `ia` `iaj` `il` `ilj` `ilq` `iS` `iSj` `iSS` `iS.` `iSh` `iSm` `ii` `is` `iz` `izz` `izzj` `ir` `ih` `iH` `ie` `iee` `ies` `iE` `iM` `iC` `iV` `iv` `iT` `ig` `ic` `icj` `icq` `icl` `ics` `ic*` `CL` `CLu` `CLf` `CLL` |
 | Analysis | `aa` `aaa` `af` `aF` `afr` `afn` `afu` `afi` `afl` `aflj` `aflq` `afb` `afc` `afC` `afv` `afvj` `afvR` `afvW` `afx` `afxj` `ao` `aoj` `ab` `axt` `axf` `axj` `aflc` `afln` `afl+` `a8` `ad` `adk` `ah` `an` `agf` `agfj` `agfd` |
 | Search | `/` `/x` `/v` `/r` `/w` `/wi` `/a` `/p` `//` `/+` |
@@ -419,6 +419,11 @@ r2 6.2.6.
 - `Cf` maps a pf format string to IDA data items (`Cf 16 [4]d`) and stores
   the format as a repeatable comment; `Cf-` undefines the span. Unions and
   nested struct formats are rejected.
+- `pFa/pFo/pFp/pFx` decode ASN.1/DER, OIDs, PKCS#7 and X.509 with a strict
+  client-side DER parser (see `pF?`); `j` suffixes emit JSON trees.
+- `aflj` carries r2's graph statistics (`edges`, `cc`, `maxbbins`...);
+  `nlocals` lives in `afij` only, because a Hex-Rays query per function
+  triples the run of the table form.
 - The `C` listing shows regular *and* repeatable comments; repeatable ones
   used to be set-but-invisible.
 - Sessions are read-only unless `-w` is passed.

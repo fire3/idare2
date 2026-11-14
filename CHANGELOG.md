@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-14
 
 Output-format alignment with radare2 6.2.6, from the CLI-difference
 re-evaluation of 2026-11-14 (`docs/r2-parity-report.md` §15), continued by
@@ -220,7 +220,8 @@ probes over 20 ELF/PE/Mach-O binaries, 13 raw slices and an IDB).
 - GitHub Actions CI across Python 3.11-3.14 and PyPI/TestPyPI Trusted
   Publishing workflows.
 
-[Unreleased]: https://github.com/fire3/idare2/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/fire3/idare2/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/fire3/idare2/compare/v0.1.3...v0.2.0
 [0.1.2]: https://github.com/fire3/idare2/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/fire3/idare2/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/fire3/idare2/releases/tag/v0.1.0
