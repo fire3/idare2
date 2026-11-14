@@ -394,6 +394,9 @@ def _variables(session: Session) -> list[str]:
         ("$s", str(session.info.get("filesize") or 0), "file size"),
         ("$B", session.format_addr(int(session.info.get("base_address") or 0)), "base address"),
         ("$e", session.format_addr(int(session.info.get("start_ip") or 0)), "entry point"),
+        ("$M", session.format_addr(int(session.info.get("minimum_ea") or 0)), "lowest map address"),
+        ("$w", str((int(session.info.get("bits") or 32)) // 8), "word size in bytes"),
+        ("$S", session.format_addr(session.get_var("S") or 0), "offset of the segment at the seek"),
         ("$?", str(session.last_result), "last command result"),
     ]
     return [f"{name:<6} {value:<20} {help}" for name, value, help in rows]

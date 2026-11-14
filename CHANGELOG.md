@@ -20,6 +20,15 @@ the 0.2 roadmap (`docs/roadmap-0.2.md`, local notes).
   braces and NUL-terminated string fields are rejected explicitly. A failing
   item keeps the earlier ones (IDA has no rollback) and the command warns
   `applied N of M`.
+- `pFa/pFo/pFp/pFx` decode ASN.1/DER, OIDs, PKCS#7 and X.509 — pure
+  client-side DER parsing (`idare2.asn1`), so every backend behaves the same
+  and the worker does no work. Strict DER (BER indefinite lengths, non-minimal
+  encodings and multi-byte tags are rejected with the offset); r2-shaped
+  indented tree with absolute offsets, `key: value` certificate fields and
+  `j` JSON forms. Tested against a real system certificate.
+- `$w`, `$M` and `$S` join `?$`: word size, lowest map address and the
+  offset of the segment holding the seek (r2 6.2.6's spellings; the older
+  `$x`/`$X`/`$I` trio is not in 6.2.6, so it stays out).
 - `iSS` names the program-header types r2 does (`NOTE`, `TLS`,
   `GNU_RELRO`, `GNU_PROPERTY` …, previously the raw `PT_4`) and dedups
   repeated segment names with r2's `_N` suffix (`NOTE`, `NOTE_1`).

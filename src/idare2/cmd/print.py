@@ -600,6 +600,67 @@ def _decompile(session: Session, target: int, count: int | None, offset: int) ->
     return with_more(list(payload.get("lines") or []), meta)
 
 
+PF_DETAIL = [
+    ("pFa", "[j] [len]", "decode ASN.1/DER from the block"),
+    ("pFo", "[j] [len]", "decode an ASN.1 OID"),
+    ("pFp", "[j] [len]", "decode PKCS#7 content info"),
+    ("pFx", "[j] [len]", "decode an X.509 certificate"),
+]
+
+
+@command(
+    "pF",
+    usage="[abopx][j] [len]",
+    summary="decode ASN.1, OIDs, PKCS#7 and X.509",
+    detail=PF_DETAIL,
+    json_suffix=True,
+    suffixes=frozenset({"", "a", "aj", "o", "oj", "p", "pj", "x", "xj"}),
+    suffix_label="ASN.1 command",
+    suffix_help="pF?",
+)
+def print_asn1(session: Session, statement: Statement) -> list[str]:
+    """``pF`` family -- pure client-side DER parsing (see idare2.asn1)."""
+    from idare2 import asn1
+
+    token = statement.cmd
+    rest, count, _offset = numeric_args(session, statement)
+    target = session.resolve(rest[0]) if rest else session.seek
+    size = count if count is not None else session.blocksize
+    if size <= 0:
+        raise UsageError("pF needs a positive byte count")
+    payload = session.remote.call("read_bytes", ea=target, count=size)
+    data = bytes(payload.get("data") or b"")
+    try:
+        nodes = asn1.parse(data)
+    except UsageError as exc:
+        raise UsageError(f"{token} @ {session.format_addr(target)}: {exc}") from None
+
+    # r2's bare pF decodes ASN.1.
+    body = (token if token != "pF" else "pFa")[2:]
+    if body == "a":
+        return asn1.render_asn1(nodes)
+    if body == "o":
+        if len(nodes) != 1 or nodes[0].tag_no != 6:
+            raise UsageError("pFo needs an OID at the block start")
+        return asn1.render_oid(nodes[0])
+    if body == "p":
+        return asn1.render_pkcs7(nodes[0])
+    if body == "x":
+        return asn1.render_x509(nodes[0])
+    if body == "aj":
+        return [asn1.dumps(nodes)]
+    if body == "oj":
+        if len(nodes) != 1 or nodes[0].tag_no != 6:
+            raise UsageError("pFoj needs an OID at the block start")
+        dotted = asn1.decode_oid(nodes[0].value)
+        return [to_json({"oid": dotted, "name": asn1.oid_name(dotted)})]
+    if body == "pj":
+        return [to_json(asn1.render_pkcs7(nodes[0]))]
+    if body == "xj":
+        return [to_json(asn1.render_x509(nodes[0]))]
+    raise UsageError(f"unsupported ASN.1 command '{token}' (see pF?)")
+
+
 @command(
     "pa",
     usage="[asm]",

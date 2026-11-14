@@ -2915,6 +2915,18 @@ def test_question_json_object_matches_r2_62() -> None:
     assert "string" not in parsed
 
 
+def test_word_size_and_map_vars() -> None:
+    """r2 6.2.6's $w/$M/$S: word size, lowest map, segment offset."""
+    session, _remote = make_session()
+    assert session.run("?v $w") == ["0x4"]
+    # the fake session's info carries no minimum_ea, so $M falls back to 0
+    assert session.run("?v $M") == ["0x0"]
+    session.info["minimum_ea"] = 0x1000
+    assert session.run("?v $M") == ["0x1000"]
+    listing = "\n".join(session.run("?$"))
+    assert "$w" in listing and "$M" in listing and "$S" in listing
+
+
 def test_comment_at_address_forms() -> None:
     session, remote = make_session()
     assert session.run("CCa 0x2000 hello world") == []

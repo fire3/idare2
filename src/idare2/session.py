@@ -173,11 +173,26 @@ class Session:
             "s": int(self.info.get("filesize") or 0),
             "B": int(self.info.get("base_address") or 0),
             "e": int(self.info.get("start_ip") or 0),
-            "M": self.seek,
-            "o": self.seek,
+            # r2 6.2.6: $M is the lowest map address, $w the word size,
+            # $S the offset of the segment holding the seek.
+            "M": int(self.info.get("minimum_ea") or 0),
+            "w": (int(self.info.get("bits") or self.info.get("bitness") or 32)) // 8,
             "?": self.last_result,
         }
+        if name == "S":
+            return self._segment_start()
         return builtins.get(name)
+
+    def _segment_start(self) -> int | None:
+        """The start of the segment containing the seek ($S)."""
+        try:
+            for segment in self.remote.call("segments"):
+                start = int(segment["vaddr"])
+                if start <= self.seek < start + int(segment["vsize"]):
+                    return start
+        except Exception:
+            return None
+        return None
 
     def deref(self, addr: int, size: int) -> int:
         payload = self.remote.call("read_value", ea=addr, width=size)
