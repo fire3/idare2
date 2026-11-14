@@ -155,3 +155,22 @@ def test_help_and_version_do_not_need_a_database() -> None:
     assert argv.parse(["-v"]).wants_database is False
     assert argv.parse(["-L"]).wants_database is False
     assert argv.parse(["foo.bin"]).wants_database is True
+
+
+def test_durations_must_be_positive_and_finite() -> None:
+    """`--timeout -1` used to reach the remote layer and exit 4 (transport);
+    a bad duration is a usage error, before any worker is spawned."""
+    for flag in ("--timeout", "--startup-timeout", "--idle"):
+        for value in ("-1", "0", "inf", "nan", "abc"):
+            with pytest.raises(UsageError):
+                argv.parse([flag, value])
+    with pytest.raises(UsageError):
+        argv.parse(["--timeout=0"])
+
+
+def test_linger_accepts_zero_but_not_negative() -> None:
+    assert argv.parse(["--linger", "0"]).linger == 0.0
+    with pytest.raises(UsageError):
+        argv.parse(["--linger", "-1"])
+    with pytest.raises(UsageError):
+        argv.parse(["--linger", "inf"])

@@ -66,6 +66,11 @@ class Session:
         self.remote = remote
         self.config = config
         self.info = info
+        # `open_summary` spells the width `bitness`, while most formatters read
+        # `bits`.  Normalising once here keeps a 64-bit database from rendering
+        # every text address truncated to 32 bits.
+        if info.get("bits") is None and info.get("bitness") is not None:
+            info["bits"] = info["bitness"]
         self.readonly = readonly
 
         self.colors = Colors(config.get_int("scr.color"))
@@ -309,11 +314,13 @@ class Session:
             and command.json_suffix
             and not statement.cmd.endswith("j")
         ):
-            # `-j` makes the JSON form the default for the commands that have
-            # one.  Opt-in per command on purpose: `pxj`/`f j` are not tokens
-            # any handler accepts, so a blanket "append j" would turn working
-            # commands into usage errors.
-            statement = replace(statement, cmd=statement.cmd + "j")
+            # `-j` makes the JSON form the default, but only for the tokens
+            # that actually have one: appending `j` blind turned `iI`, `iM`,
+            # `af` and `pD` into usage errors.  Commands without a JSON form
+            # keep running their text form.
+            json_cmd = command.json_form(statement.cmd, remainder)
+            if json_cmd is not None:
+                statement = replace(statement, cmd=json_cmd)
         return command.handler(self, statement)
 
     def postprocess(self, lines: list[str], statement: Statement) -> list[str]:
@@ -645,6 +652,21 @@ class Session:
             return
         payload, _ = self.remote.call_with_meta("symbols", offset=0, count=-1)
         self.flags.seed((int(item["ea"]), item["name"]) for item in payload)
+        # `symbols` reads the input file's symbol table; the IDB may carry
+        # additional (or renamed) names from an earlier session.  The IDB name
+        # wins at a given address, the way a GUI analyst would see it.
+        try:
+            names = self.remote.call("names") or []
+            for row in names:
+                ea, name = int(row["ea"]), str(row["name"])
+                for other in self.flags.at(ea):
+                    if other.name != name:
+                        self.flags.remove(other.name)
+                if self.flags.lookup(name) is None:
+                    self.flags.add(name, ea)
+        except Exception:
+            # A remote that cannot answer `names` still gets the symbol table.
+            return
 
     def write_flag(self, name: str, ea: int, size: int = 1) -> bool:
         """Create a flag, writing it into the IDB when that is allowed."""
@@ -693,7 +715,7 @@ class Session:
     def addr_width(self) -> int:
         from idare2.fmt import addr_width
 
-        return addr_width(self.info.get("bits"))
+        return addr_width(self.info.get("bits", self.info.get("bitness")))
 
     def format_addr(self, ea: int) -> str:
         from idare2.fmt import fmt_addr

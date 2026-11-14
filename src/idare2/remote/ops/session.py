@@ -20,6 +20,10 @@ def open_summary(db: Any) -> dict[str, Any]:
         "module": db.module,
         "architecture": db.architecture,
         "bitness": db.bitness,
+        # The r2-shaped spelling the client-side formatters read; keeping both
+        # in sync here means `addr_width` cannot silently fall back to 32-bit
+        # rendering on a 64-bit database.
+        "bits": db.bitness,
         "format": db.format,
         "endian": "big" if ida_ida.inf_is_be() else "little",
         "base_address": helpers.base_address(db),

@@ -128,6 +128,12 @@ def resolve(target: Target) -> Any:
         candidate = Path(target.path).expanduser()
         if not candidate.exists():
             raise NoDatabaseError(f"no such file: {target.path}")
+        if not candidate.is_file():
+            raise NoDatabaseError(
+                f"cannot open {target.path}: it is a directory"
+                if candidate.is_dir()
+                else f"cannot open {target.path}: not a regular file"
+            )
         return str(candidate.resolve())
 
     rows = [row for row in list_databases() if _matches_backend(row, target.backend)]
@@ -152,9 +158,21 @@ def resolve(target: Target) -> Any:
 
 def open_handle(selection: Any, target: Target, *, timeout: float, linger: float):
     """Open one handle.  The caller owns it and must close it."""
+    import os
+
     from ida_nexus import DatabaseHandle, DatabaseOpenOptions, NexusConnectionError
 
     if isinstance(selection, str):
+        if target.backend == "gui":
+            raise NoDatabaseError(
+                "--backend gui cannot open a path: open the file in the IDA GUI "
+                "and attach to it with --attach or --idb"
+            )
+        if target.backend == "idalib":
+            # Nexus picks the backend itself (idat first when the plugin is
+            # installed); the flag is only a constraint, so forward it the way
+            # Nexus documents: this environment switch forces idalib workers.
+            os.environ["IDA_NEXUS_IDALIB_ONLY"] = "1"
         hints = _import_hints_requested(target)
         return DatabaseHandle.open(
             selection,
@@ -199,29 +217,34 @@ def await_analysis(handle: Any, timeout: float, mode: str = "wait") -> None:
         )
 
 
-@contextmanager
 def shutdown_if_ours(handle: Any, *, save: bool) -> bool:
-    """Shut down our managed worker, or leave it for other clients.
+    """Shut down our managed worker, saving or discarding its changes.
 
     Nexus saves the database when a **managed idalib worker** shuts down,
     regardless of ``db.save_on_close`` (verified in ``ida_nexus/cli/worker.py``:
     it calls ``Database.close(save=...)`` from ``server.save_on_shutdown``,
-    which defaults to true).  So for a read-only session the only way to keep
-    "opening a database must not rewrite it" true is to discard the changes at
-    shutdown.
+    which defaults to true).  So ``save=False`` is the only way to keep
+    "opening a database must not rewrite it" true for sessions that touched it.
 
-    ``take_snapshot()`` is Nexus's exclusivity check: it fails while any other
-    lease is attached, which is exactly when we must *not* shut the worker down.
+    The shutdown request itself is the exclusivity check: the server refuses
+    while any other lease is attached, which is exactly when we must *not*
+    shut the worker down.  ``take_snapshot()`` was tried first in older
+    ida-nexus; it does not exist on every version, so it is only a hint.
     """
+    take_snapshot = getattr(handle, "take_snapshot", None)
+    if take_snapshot is not None:
+        try:
+            take_snapshot()
+        except Exception:
+            return False
     try:
-        handle.take_snapshot()
+        result = handle.shutdown_database(save=save)
     except Exception:
         return False
     try:
-        handle.shutdown_database(save=save)
-    except Exception:
-        return False
-    return True
+        return bool(result.get("shutting_down"))
+    except AttributeError:
+        return bool(result)
 
 
 def _open_with_retry(selection: Any, target: Target, *, timeout: float, linger: float) -> Any:
@@ -258,8 +281,9 @@ def connect(target: Target, *, timeout: float, linger: float, wait: str = "wait"
     """Own a handle's whole lifecycle: resolve, open, await analysis, close.
 
     With ``linger=0`` -- the batch/test policy -- the worker is shut down on the
-    way out and the database is discarded unless the session was writable.
-    With the default hour-long linger nothing is shut down, so nothing is
+    way out.  The database is persisted only for a writable session that asked
+    for it (``--save-on-close``); an explicit ``w``/``wq`` still saves on its
+    own.  With the default hour-long linger nothing is shut down, so nothing is
     written either; a read-only session therefore never rewrites the IDB.
     """
     handle = None
@@ -281,7 +305,9 @@ def connect(target: Target, *, timeout: float, linger: float, wait: str = "wait"
     finally:
         if handle is not None:
             if linger <= 0:
-                shutdown_if_ours(handle, save=not target.readonly)
+                shutdown_if_ours(
+                    handle, save=(not target.readonly) and target.save_on_close
+                )
             handle.close()
 
 

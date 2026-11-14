@@ -90,8 +90,76 @@ _R2_ARCH = {
 }
 
 
+#: IDA bintype spellings -> r2's ``bintype`` value (``iI``).
+_R2_BINTYPE = {
+    "elf": "elf",
+    "elf64": "elf",
+    "elf32": "elf",
+    "pe": "pe",
+    "pe32": "pe",
+    "pe32+": "pe",
+    "portable": "pe",
+    "portable executable": "pe",
+    "mach-o": "mach0",
+    "macho": "mach0",
+    "mach0": "mach0",
+}
+
+#: r2's ``os`` value for container formats that name their platform; ELF keeps
+#: whatever the loader reported (r2 derives it from the OS/ABI byte).
+_FORMAT_OS = {
+    "pe": "windows",
+    "mach0": "darwin",
+}
+
+
 def _is_dummy(name: str) -> bool:
     return name.startswith(_DUMMY_PREFIXES)
+
+
+def _has_symbol_table(elf: Any, names: list[tuple[Any, str]]) -> bool:
+    """Whether the input carries a real symbol table (``iI`` stripped/lsyms).
+
+    ``stripped``/``lsyms`` describe the *input file's* symbol table, the way r2
+    and ``is`` see it.  IDA synthesises names for almost any analysed binary
+    (``start``, FLIRT hits), so the database's name table cannot answer this --
+    the ELF ``.symtab`` can.  Non-ELF inputs keep the name-table heuristic.
+    """
+    if elf is not None:
+        return bool(elf.symtabs)
+    return any(not _is_dummy(name) for _, name in names)
+
+
+def _elf_os_from_notes(elf: Any) -> str | None:
+    """Guess the OS from an ELF ``.note.ABI-tag`` (r2 prints ``os linux``).
+
+    The OS/ABI header byte is SysV for every glibc binary, and IDA reports
+    nothing, so the note sections are the only input-side evidence.  The tag
+    encodes the OS as an integer in the descriptor (0 = Linux, 3 = FreeBSD,
+    4 = NetBSD); a missing tag (musl, BSD) leaves the loader's answer alone.
+    """
+    import struct
+
+    _ABI_OS = {0: "linux", 1: "gnu", 2: "solaris", 3: "freebsd", 4: "netbsd"}
+    for section in getattr(elf, "sections", ()):
+        if getattr(section, "type", None) != 7:  # SHT_NOTE
+            continue
+        try:
+            data = elf.section_bytes(section)
+        except Exception:
+            continue
+        offset = 0
+        while offset + 12 <= len(data):
+            namesz, descsz, note_type = struct.unpack_from("<III", data, offset)
+            offset += 12
+            name = data[offset : offset + namesz]
+            offset += (namesz + 3) & ~3
+            desc = data[offset : offset + descsz]
+            offset += (descsz + 3) & ~3
+            if name.rstrip(b"\0") != b"GNU" or note_type != 1 or len(desc) < 4:
+                continue
+            return _ABI_OS.get(int(struct.unpack_from("<I", desc)[0]))
+    return None
 
 
 @op("file_info")
@@ -103,20 +171,27 @@ def file_info(db: Any) -> dict[str, Any]:
     arch = db.architecture or "unknown"
     bits = db.bitness or 0
     fmt = (db.format or "unknown").lower()
-    bintype = fmt.split()[0].rstrip(",")
+    bintype = _R2_BINTYPE.get(fmt.split()[0].rstrip(","), fmt.split()[0].rstrip(","))
     names = list(db.names.get_all())
-    has_real_symbol = any(not _is_dummy(name) for _, name in names)
     import_count = sum(1 for _ in db.imports.get_all_imports())
+
+    elf = _elf_for(db)
+    has_symbols = _has_symbol_table(elf, names)
 
     try:
         os_name = ida_ida.inf_get_osname() or "unknown"
     except Exception:
         os_name = "unknown"
+    os_name = _FORMAT_OS.get(bintype, os_name.lower())
+    if bintype == "elf" and os_name in ("", "unknown"):
+        os_name = _elf_os_from_notes(elf) or os_name
 
     return {
         "path": db.path,
         "module": db.module,
-        "arch": arch,
+        # r2-shaped values, so scripts moving from r2 keep working (`ia` uses
+        # the same mapping).  IDA's own spelling stays in `machine`/`class`.
+        "arch": _R2_ARCH.get(arch.lower(), arch),
         "bits": bits,
         "baddr": helpers.base_address(db),
         "binsz": db.filesize,
@@ -125,11 +200,11 @@ def file_info(db: Any) -> dict[str, Any]:
         "compiler": _compiler_name(db),
         "endian": "big" if ida_ida.inf_is_be() else "little",
         "machine": _MACHINE.get(arch.lower(), arch),
-        "os": os_name.lower(),
+        "os": os_name,
         "lang": "c",
         "static": import_count == 0,
-        "stripped": not has_real_symbol,
-        "lsyms": has_real_symbol,
+        "stripped": not has_symbols,
+        "lsyms": has_symbols,
         "va": True,
         "md5": db.md5,
         "sha256": db.sha256,
@@ -824,6 +899,23 @@ def demangled_names(db: Any) -> list[dict[str, Any]]:
         if real and real != name:
             out.append({"ea": int(ea), "realname": real})
     return out
+
+
+@op("names")
+def db_names(db: Any) -> list[dict[str, Any]]:
+    """The names IDA keeps in the database (``f`` seeding).
+
+    ``symbols`` reads the original ELF symbol table, so names written into the
+    IDB by an earlier session (``f name @ addr``, ``afn``) are invisible to it.
+    This operation is the IDB's own name table, minus the auto-generated
+    ``sub_``/``loc_`` placeholders -- those are IDA's analysis noise, not flags
+    the user created.
+    """
+    return [
+        {"ea": int(ea), "name": name}
+        for ea, name in db.names.get_all()
+        if name and not _is_dummy(name)
+    ]
 
 
 @op("set_name", writes=True)

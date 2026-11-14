@@ -41,6 +41,11 @@ class Command:
     query_suffix: bool = False
     #: The command has a ``j`` form, so ``-j`` may default it to JSON.
     json_suffix: bool = False
+    #: Exact tokens that accept the ``j`` suffix when ``-j`` is passed.  When
+    #: ``None``, the JSON capability is inferred (see :meth:`json_form`); set it
+    #: explicitly when the handler accepts ``j`` on tokens the inference cannot
+    #: see (``izz`` -> ``izzj``, ``afvR`` -> ``afvRj``).
+    json_tokens: frozenset[str] | None = None
     #: Remaining characters the handler accepts after the pattern.  ``None``
     #: means "the handler validates its own suffixes" (legacy behaviour); an
     #: explicit set makes :meth:`Session.invoke` reject anything else before
@@ -64,6 +69,32 @@ class Command:
         if remainder in self.suffixes:
             return True
         return any(remainder.startswith(prefix) for prefix in self.suffix_prefixes)
+
+    def json_form(self, token: str, remainder: str) -> str | None:
+        """The ``-j`` JSON form of ``token``, or ``None`` when it has none.
+
+        ``-j`` must never turn a working command into a usage error, so the
+        substitution only happens when the concrete token has a JSON form:
+
+        1. an explicit :attr:`json_tokens` set wins (the handler decides);
+        2. otherwise a ``<token>j`` row in the help table means the handler
+           implements it;
+        3. otherwise, a handler that validates its own suffixes is trusted to
+           reject the ``j`` form itself;
+        4. otherwise the declared suffix set must accept ``<remainder>j``.
+        """
+        candidate = token + "j"
+        if self.json_tokens is not None:
+            return candidate if token in self.json_tokens else None
+        if self.detail:
+            if any(row[0] == candidate for row in self.detail):
+                return candidate
+            return None
+        if self.suffixes is None:
+            return candidate
+        if self.accepts_remainder(remainder + "j"):
+            return candidate
+        return None
 
 
 REGISTRY: list[Command] = []
@@ -104,6 +135,7 @@ def command(
     detail: list[tuple[str, str, str]] | None = None,
     query_suffix: bool = False,
     json_suffix: bool = False,
+    json_tokens: frozenset[str] | set[str] | tuple[str, ...] | None = None,
     suffixes: frozenset[str] | set[str] | None = None,
     suffix_prefixes: tuple[str, ...] = (),
     suffix_label: str = "command",
@@ -132,6 +164,7 @@ def command(
                 detail=list(detail or []),
                 query_suffix=query_suffix,
                 json_suffix=json_suffix,
+                json_tokens=None if json_tokens is None else frozenset(json_tokens),
                 suffixes=None if suffixes is None else frozenset(suffixes),
                 suffix_prefixes=suffix_prefixes,
                 suffix_label=suffix_label,

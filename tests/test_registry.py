@@ -128,3 +128,87 @@ def test_print_suffix_set_covers_implemented_and_explicitly_unsupported() -> Non
     for token in ("", "j", "f", "fj", "b", "r", "i", "d", "C", "J", ",", "s", "--"):
         assert command.accepts_remainder(token), token
     assert not command.accepts_remainder("zz")
+
+
+# ---------------------------------------------------------------------------
+# `-j`: the JSON form must exist for every token it is applied to
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        # Commands the report caught turning into usage errors under -j.
+        ("iI", None),
+        ("iM", None),
+        ("ig", None),
+        ("af", None),
+        ("pD", None),
+        ("/p", None),  # r2 refuses /pj explicitly
+        ("ilq", None),
+        ("CLf", None),
+        # Working JSON forms must keep working.
+        ("i", "ij"),
+        ("it", "itj"),
+        ("ih", "ihj"),
+        ("iH", "iHj"),
+        ("iC", "iCj"),
+        ("iD", "iDj"),
+        ("iS", "iSj"),
+        ("iS.", "iS.j"),
+        ("iSh", "iShj"),
+        ("iSm", "iSmj"),
+        ("ii", "iij"),
+        ("is", "isj"),
+        ("iz", "izj"),
+        ("izz", "izzj"),
+        ("ir", "irj"),
+        ("ie", "iej"),
+        ("iee", "ieej"),
+        ("ies", "iesj"),
+        ("iE", "iEj"),
+        ("afl", "aflj"),
+        ("afb", "afbj"),
+        ("afi", "afij"),
+        ("afx", "afxj"),
+        ("afv", "afvj"),
+        ("afvR", "afvRj"),
+        ("axt", "axtj"),
+        ("pd", "pdj"),
+        ("pdf", "pdfj"),
+        ("pi", "pij"),
+        ("x", "xj"),
+        ("ao", "aoj"),
+        ("b", "bj"),
+        ("t", "tj"),
+        ("tf", "tfj"),
+        ("ic", "icj"),
+        ("C", "Cj"),
+        ("Cs.", "Cs.j"),
+        ("/", "/j"),
+        ("/x", "/xj"),
+        ("/wi", "/wij"),
+    ],
+)
+def test_json_form_exists_exactly_when_expected(token: str, expected: str | None) -> None:
+    """`-j` appends `j` only when the handler implements the JSON form."""
+    found = cmd.lookup(token)
+    assert found is not None, token
+    command, remainder = found
+    assert command.json_form(token, remainder) == expected, token
+
+
+def test_every_json_help_row_is_a_reachable_json_form() -> None:
+    """A `j` row in a command's help table must be the -j form of its base."""
+    for command in cmd.all_commands():
+        if not command.json_suffix:
+            continue
+        for token, _args, _description in command.detail:
+            if not token.endswith("j"):
+                continue
+            found = cmd.lookup(token[:-1])
+            assert found is not None, f"no base command for {token}"
+            base, remainder = found
+            assert base.json_form(token[:-1], remainder) == token, (
+                f"-j '{token[:-1]}' does not select '{token}'"
+            )

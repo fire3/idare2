@@ -74,6 +74,9 @@ Worker lifetime
   --timeout <sec>         per-operation timeout (default 30)
   --startup-timeout <sec> database open/spawn deadline (default 600)
   --save-on-close / --no-save-on-close
+                          whether a writable session persists its changes when
+                          the worker is shut down (default: no; an explicit
+                          `w`/`wq` always saves)
 
 Conventions
   addresses   expressions: 0x401000, main+0x10, $$+4; bare digits are DECIMAL
@@ -200,6 +203,13 @@ def _run(options: argv_parser.Options) -> int:
         _load_rc(session, options)
         if options.project:
             _load_project(session, options.project)
+        # Command-line `-e` wins over startup files and projects, the way r2
+        # treats its own `-e` (measured: rc sets scr.color, `-e scr.color=0`
+        # still reports 0).  The rc file runs through `session.run`, so it
+        # would otherwise overwrite whatever the user forced on the CLI.
+        for key, value in options.evals:
+            session.config.set(key, value)
+        session._resolve_color()
 
         code = _run_scripts(session, options)
         if code is not None:
@@ -213,13 +223,15 @@ def _run(options: argv_parser.Options) -> int:
 
 
 def _config_from(options: argv_parser.Options) -> Config:
+    # Only the output-mode switches are applied here: the `-e` evals are
+    # re-applied after the rc file so the command line wins (see _run).
     config = Config()
-    for key, value in options.evals:
-        config.set(key, value)
     if options.color is not None:
         config.set("scr.color", options.color)
     if options.json:
         config.set("scr.color", 0)
+    for key, _value in options.evals:
+        config.get(key)  # unknown keys fail before a database is opened
     return config
 
 

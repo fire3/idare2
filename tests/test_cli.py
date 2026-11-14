@@ -300,3 +300,56 @@ def test_verbose_version_reports_why_ida_is_unavailable(monkeypatch, capsys) -> 
 
     out = capsys.readouterr().out
     assert "ida         (not importable: Cannot load IDA library file libidalib.so." in out
+
+
+# ---------------------------------------------------------------------------
+# `-e` overrides the rc files, the way r2's own -e does
+# ---------------------------------------------------------------------------
+
+
+def test_command_line_evals_beat_the_rc_file(monkeypatch, tmp_path: Path, capsys) -> None:
+    """An rc setting `scr.color` used to overwrite a CLI `-e` silently."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".idare2rc").write_text("e scr.color=3\n", encoding="utf-8")
+    monkeypatch.delenv("IDARE2_RCFILE", raising=False)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: False))
+
+    import idare2.nexus as nexus
+
+    handle = SimpleNamespace(instance=SimpleNamespace(backend="idalib", record_id="t"))
+
+    @contextmanager
+    def fake_connect(target, **kwargs):
+        yield handle
+
+    class FakeRemote:
+        def __init__(self, handle_, timeout=None):
+            pass
+
+        def call(self, operation, **kwargs):
+            return {
+                "bitness": 32,
+                "start_ip": 0x1000,
+                "base_address": 0x1000,
+                "filesize": 0x1000,
+            }
+
+    monkeypatch.setattr(nexus, "connect", fake_connect)
+    monkeypatch.setattr("idare2.cli.Remote", FakeRemote)  # cli binds Remote at import time
+
+    def run(*arguments: str) -> str:
+        code = cli.main(list(arguments))
+        captured = capsys.readouterr()
+        assert code == 0, captured.err
+        return captured.out
+
+    # Control: without -e the rc wins.
+    assert "3" in run("-q", "-c", "e scr.color", "sample.bin").split()
+    # With -e the command line wins, rc notwithstanding.
+    assert "0" in run("-q", "-e", "scr.color=0", "-c", "e scr.color", "sample.bin").split()

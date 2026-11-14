@@ -932,3 +932,45 @@ def test_disasm_backward_stops_at_the_first_instruction() -> None:
     envelope = dispatch.invoke(db, "disasm", {"ea": 0x1004, "count": 0, "before": 9})
     assert protocol.is_ok(envelope), envelope
     assert _disasm_addresses(envelope["result"]) == [0x1000]
+
+
+# ---------------------------------------------------------------------------
+# iI metadata: stripped/lsyms come from the input's symbol table
+# ---------------------------------------------------------------------------
+
+
+def test_stripped_follows_the_elf_symtab() -> None:
+    """IDA synthesises names (`start`, FLIRT hits), so the name table cannot
+    answer "is this binary stripped" -- the ELF `.symtab` can."""
+    from idare2.remote.ops import info as info_ops
+
+    stripped_elf = SimpleNamespace(symtabs=[])
+    assert info_ops._has_symbol_table(stripped_elf, [(0x1000, "main")]) is False
+
+    symbolised_elf = SimpleNamespace(symtabs=[object()])
+    assert info_ops._has_symbol_table(symbolised_elf, []) is True
+
+
+def test_stripped_falls_back_to_name_shapes_without_an_elf() -> None:
+    from idare2.remote.ops import info as info_ops
+
+    # Only IDA's auto-generated names: nothing the input carried.
+    assert info_ops._has_symbol_table(None, [(0x1000, "sub_1000"), (0x2000, "loc_2000")]) is False
+    # A real name among the dummies counts.
+    assert info_ops._has_symbol_table(None, [(0x1000, "sub_1000"), (0x2000, "main")]) is True
+
+
+def test_names_op_lists_the_idb_name_table_without_dummies() -> None:
+    """`f` seeding needs the IDB's names, which `symbols` (the ELF symtab)
+    cannot show; the auto-generated `sub_`/`loc_` placeholders are noise."""
+    names = SimpleNamespace(
+        get_all=lambda: [
+            (0x1000, "main"),
+            (0x2000, "sub_2000"),
+            (0x3000, "loc_3000"),
+            (0x4000, ""),
+        ]
+    )
+    envelope = dispatch.invoke(SimpleNamespace(names=names), "names", {})
+    assert protocol.is_ok(envelope), envelope
+    assert envelope["result"] == [{"ea": 0x1000, "name": "main"}]

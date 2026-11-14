@@ -53,7 +53,9 @@ INFO_DETAIL = [
 
 HEADER_DETAIL = [
     ("ih", "[*jq]", "header fields (ELF)"),
+    ("ihj", "", "header fields as JSON"),
     ("iH", "[*j]", "file header (ELF)"),
+    ("iHj", "", "file header as JSON"),
 ]
 
 #: Languages radare2 6.2.5 accepts for ``iD`` (``r_bin_demangle_type``).  IDA's
@@ -106,6 +108,7 @@ SECTION_DETAIL = [    ("iS", "[algo]", "ELF sections; an algorithm name adds a h
     ("iS.", "", "the section containing the current seek"),
     ("iS.j", "", "the current section as JSON"),
     ("iSh", "[j]", "raw section-header table"),
+    ("iShj", "", "section headers as JSON"),
     ("iSm", "", "sections with the names they contain"),
     ("iSmc", "", "section symbol counts"),
     ("iSmj", "", "section symbols as JSON"),
@@ -381,9 +384,13 @@ def section_info(session: Session, statement: Statement) -> list[str]:
     summary="signature, version and file-version information",
     detail=[
         ("iC", "[j]", "signature info (Mach-O entitlements; empty for ELF)"),
+        ("iCj", "", "signature info as JSON"),
         ("iV", "[j]", "ELF version information (empty without version sections)"),
+        ("iVj", "", "version information as JSON"),
         ("iv", "[j]", "file version info"),
+        ("ivj", "", "file version info as JSON"),
         ("iT", "[j]", "file signature"),
+        ("iTj", "", "file signature as JSON"),
     ],
     json_suffix=True,
     suffixes=frozenset({"", "j"}),
@@ -410,6 +417,9 @@ def version_info(session: Session, statement: Statement) -> list[str]:
     usage="[pat]",
     summary="list symbols, imports, entries, strings",
     json_suffix=True,
+    # `iM` and `ig` have no JSON form (`igh` is their compact form), so `-j`
+    # must not rename them to tokens no handler accepts.
+    json_tokens=frozenset({"ii", "is", "iz", "izz", "ir", "ie", "iE", "iee", "ies"}),
     suffixes=frozenset({"", "j", "e", "ej", "s", "sj", "h", "z", "zj"}),    suffix_label="information command",
     suffix_help="i?",
 )
@@ -547,7 +557,10 @@ def header(session: Session, statement: Statement) -> list[str]:
     "iD",
     usage="[lang] sym",
     summary="demangle a symbol",
-    detail=[("iD", "[lang] sym", "demangle a symbol (default language from bin.lang)")],
+    detail=[
+        ("iD", "[lang] sym", "demangle a symbol (default language from bin.lang)"),
+        ("iDj", "[lang] sym", "the same, as JSON"),
+    ],
     json_suffix=True,
     suffixes=frozenset({"", "j"}),
     suffix_label="information command",

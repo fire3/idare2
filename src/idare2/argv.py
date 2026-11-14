@@ -186,13 +186,13 @@ def _apply_long_value(options: Options, name: str, value: str) -> None:
             raise UsageError("--backend must be gui, idalib or any")
         options.backend = value
     elif name == "linger":
-        options.linger = _float(value, "--linger")
+        options.linger = _nonnegative(value, "--linger")
     elif name == "idle":
-        options.idle = _float(value, "--idle")
+        options.idle = _positive(value, "--idle")
     elif name == "timeout":
-        options.timeout = _float(value, "--timeout")
+        options.timeout = _positive(value, "--timeout")
     elif name == "startup-timeout":
-        options.startup_timeout = _float(value, "--startup-timeout")
+        options.startup_timeout = _positive(value, "--startup-timeout")
     elif name == "color":
         options.color = _int(value, "--color")
     elif name == "endian":
@@ -329,6 +329,21 @@ def _float(value: str, what: str) -> float:
         return float(value)
     except ValueError:
         raise UsageError(f"{what} needs a number, got {value!r}") from None
+
+
+def _positive(value: str, what: str) -> float:
+    """A duration that must be finite and greater than zero."""
+    number = _float(value, what)
+    if number != number or number in (float("inf"), float("-inf")) or number <= 0:
+        raise UsageError(f"{what} must be a positive finite number, got {value!r}")
+    return number
+
+
+def _nonnegative(value: str, what: str) -> float:
+    number = _float(value, what)
+    if number != number or number in (float("inf"), float("-inf")) or number < 0:
+        raise UsageError(f"{what} must be zero or a positive number, got {value!r}")
+    return number
 
 
 def _int(value: str, what: str) -> int:

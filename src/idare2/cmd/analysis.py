@@ -204,6 +204,9 @@ def _await_analysis(session: Session, *, deep: bool) -> list[str]:
     summary="function analysis",
     detail=FUNCTION_DETAIL,
     json_suffix=True,
+    # The listing/detail tokens have JSON forms; `af`/`aF`/`afr`/`afn`/`afu`
+    # do not, and `-j` must keep them working.
+    json_tokens=frozenset({"afl", "afb", "afi", "afx", "afv", "afvR", "afvW"}),
 )
 def function_analysis(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd

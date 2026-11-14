@@ -56,7 +56,16 @@ _KINDS = {
 _KIND_FIXED = {"wi": "-i"}
 
 
-@command("/", usage="[xvr] [pattern]", summary="search", detail=SEARCH_DETAIL, json_suffix=True)
+@command(
+    "/",
+    usage="[xvr] [pattern]",
+    summary="search",
+    detail=SEARCH_DETAIL,
+    json_suffix=True,
+    # Every kind except `/p` has a JSON form (`/pj` is refused explicitly,
+    # as in r2); the j suffix rides on the kind, so list the tokens.
+    json_tokens=frozenset({"/", "/x", "/v", "/r", "/w", "/wi", "/a"}),
+)
 def search(session: Session, statement: Statement) -> list[str]:
     token = statement.cmd
 

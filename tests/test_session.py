@@ -135,6 +135,7 @@ class FakeRemote:
                 "end": 0x2000,
             },
             "file_info": lambda: {"filesize": 0x3000, "architecture": "ARM"},
+            "guess_size": lambda: {"size": 0x3000},
             "file_hashes": lambda: {
                 "md5": "0" * 32,
                 "sha1": "1" * 40,
@@ -551,7 +552,11 @@ def make_session(**info) -> tuple[Session, FakeRemote]:
         handle=object(),
         remote=remote,
         config=Config(),
-        info={"bits": 32, "start_ip": 0x1000, "filesize": 0x1000, "base_address": 0x1000, **info},
+        # Mirrors the real `open_summary` payload: the key is `bitness`, so
+        # every formatter that reads `bits` must go through the session's
+        # normalisation (a bare `.get("bits")` used to fall back to 32-bit
+        # addresses on 64-bit databases).
+        info={"bitness": 32, "start_ip": 0x1000, "filesize": 0x1000, "base_address": 0x1000, **info},
         readonly=False,
     )
     return session, remote
@@ -562,6 +567,24 @@ def test_seek_is_permanent() -> None:
     session.run("s 0x2000")
     assert session.seek == 0x2000
     assert session.run("s") == ["0x00002000"]
+
+
+def test_64bit_addresses_round_trip_in_text_output() -> None:
+    """A 64-bit database must print (and re-seek) full addresses.
+
+    `open_summary` spells the key `bitness`; formatters that read `bits` fell
+    back to 32-bit rendering, truncating PE64/MIPS64/Mach-O addresses to their
+    low 32 bits -- and the printed address was not seekable.
+    """
+    session, _ = make_session(bitness=64)
+    session.run("s 0x140001460")
+    # r2 prints 64-bit addresses zero-padded to 16 digits, never truncated.
+    assert session.run("s") == ["0x0000000140001460"]
+    assert session.format_addr(0x140001460) == "0x0000000140001460"
+    assert session.prompt() == "[0x0000000140001460]> "
+    # The printed address is seekable again.
+    session.run("s 0x140001460")
+    assert session.seek == 0x140001460
 
 
 def test_aaa_runs_deep_analysis() -> None:
@@ -783,6 +806,50 @@ def test_names_seed_flags_lazily() -> None:
     # Cached: a second lookup does not hit the remote again.
     assert session.lookup_name("helper") == 0x2000
     assert remote.operations.count("symbols") == 1
+
+
+def test_idb_names_are_merged_into_the_flag_table() -> None:
+    """`f` must show names a previous session wrote into the IDB.
+
+    `symbols` reads the original ELF symbol table, so a name written by an
+    earlier session (or an `afn` rename) was invisible after reopening.
+    """
+    session, remote = make_session()
+    # Seed the `names` answer: an IDB rename at helper's address plus a new flag.
+    original_call = remote.call
+
+    def call(operation, **arguments):
+        if operation == "names":
+            return [
+                {"ea": 0x2000, "name": "renamed_helper"},
+                {"ea": 0x1149, "name": "symflag"},
+            ]
+        return original_call(operation, **arguments)
+
+    remote.call = call
+    lines = session.run("f")
+    names = {line.split()[-1] for line in lines if line.strip()}
+    assert "renamed_helper" in names
+    assert "symflag" in names
+    assert "helper" not in names  # the IDB rename wins at 0x2000
+    assert "main" in names  # ELF symbols are still listed
+    assert session.lookup_name("renamed_helper") == 0x2000
+    assert session.lookup_name("symflag") == 0x1149
+
+
+def test_names_op_failure_still_leaves_the_symbol_seed() -> None:
+    """A remote without the `names` operation keeps the old behaviour."""
+    session, remote = make_session()
+    original_call = remote.call
+
+    def call(operation, **arguments):
+        if operation == "names":
+            raise AssertionError("unexpected remote call names")
+        return original_call(operation, **arguments)
+
+    remote.call = call
+    assert session.lookup_name("main") == 0x1000
+    assert session.lookup_name("helper") == 0x2000
 
 
 def test_dummy_names_resolve_without_a_round_trip() -> None:
@@ -2396,6 +2463,52 @@ def test_json_default_switches_agf_without_touching_agfd() -> None:
     session, _remote = _json_default()
     assert json.loads("\n".join(session.run("agf @ 0x1000")))[0]["name"] == "main"
     assert session.run("agfd @ 0x1000")[0] == "digraph code {"
+
+
+def test_json_default_leaves_iI_as_text() -> None:
+    """`iIj` is not a token any handler accepts; `-j` must keep `iI` working."""
+    session, remote = _json_default()
+    lines = session.run("iI")
+    assert not any(line.startswith("{") for line in lines)
+    assert not session.failed
+    assert "file_info" in [name for name, _ in remote.calls]
+
+
+def test_json_default_leaves_ig_as_text() -> None:
+    """`ig` has `igh`, not `igj`; `-j` must not invent the token."""
+    session, remote = _json_default()
+    assert session.run("ig") == ["0x00003000"]
+    assert "guess_size" in [name for name, _ in remote.calls]
+
+
+def test_json_default_leaves_pD_as_text() -> None:
+    """`pDj` does not exist; `-j` keeps the byte-count disassembly working."""
+    session, _remote = _json_default()
+    lines = session.run("pD 2 @ 0x1000")
+    assert lines and not lines[0].startswith("{")
+
+
+def test_json_default_leaves_af_as_text() -> None:
+    """`afj` does not exist; `-j` must still create the function."""
+    session, remote = _json_default()
+    assert session.run("af @ 0x1000") == ["-- function main at 0x00001000 --"]
+    assert "create_function" in [name for name, _ in remote.calls]
+
+
+def test_json_default_leaves_iM_as_text() -> None:
+    """`iMj` does not exist; `-j` keeps the main-address lookup working."""
+    session, _remote = _json_default()
+    assert session.run("iM") == ["vaddr=0x00001000 paddr=0x00004000"]
+
+
+def test_json_default_switches_izz_and_it() -> None:
+    import json
+
+    session, _remote = _json_default()
+    payload = json.loads("\n".join(session.run("izz")))
+    assert payload[0]["string"] == "first"
+    payload = json.loads("\n".join(session.run("it")))
+    assert payload["md5"] == "0" * 32
 
 
 def test_afv_renders_args_and_stack_variables() -> None:

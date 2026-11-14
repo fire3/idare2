@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from idare2.errors import QuitRequested, TransportError, UsageError
-from idare2.nexus import Target, connect
+from idare2.nexus import Target, connect, open_handle, resolve
 
 
 class _Handle:
@@ -151,3 +151,161 @@ def test_apply_import_hints_forwards_the_byte_order(monkeypatch) -> None:
     assert calls == [
         ("apply_import_hints", {"bits": None, "entry": None, "big_endian": False})
     ]
+
+
+# ---------------------------------------------------------------------------
+# close-time saving: only a writable session that asked for it
+# ---------------------------------------------------------------------------
+
+
+def _shutdown_calls(monkeypatch) -> list:
+    import idare2.nexus as nexus
+
+    calls: list[tuple[object, bool]] = []
+    monkeypatch.setattr(nexus, "shutdown_if_ours", lambda handle, *, save: calls.append(save) or True)
+    return calls
+
+
+def test_readonly_session_never_saves_on_close(stubbed_nexus, monkeypatch) -> None:
+    calls = _shutdown_calls(monkeypatch)
+    with connect(Target(path="/nonexistent-on-purpose"), timeout=1, linger=0):
+        pass
+    assert calls == [False]
+
+
+def test_writable_session_without_save_on_close_discards(stubbed_nexus, monkeypatch) -> None:
+    """`-w` alone must not persist: the patch survived a `--no-save-on-close`
+    run because connect() only looked at `readonly`."""
+    calls = _shutdown_calls(monkeypatch)
+    with connect(Target(path="/nonexistent-on-purpose", readonly=False), timeout=1, linger=0):
+        pass
+    assert calls == [False]
+
+
+def test_writable_session_with_save_on_close_saves(stubbed_nexus, monkeypatch) -> None:
+    calls = _shutdown_calls(monkeypatch)
+    target = Target(path="/nonexistent-on-purpose", readonly=False, save_on_close=True)
+    with connect(target, timeout=1, linger=0):
+        pass
+    assert calls == [True]
+
+
+def test_save_on_close_is_ignored_for_readonly_sessions(stubbed_nexus, monkeypatch) -> None:
+    calls = _shutdown_calls(monkeypatch)
+    target = Target(path="/nonexistent-on-purpose", readonly=True, save_on_close=True)
+    with connect(target, timeout=1, linger=0):
+        pass
+    assert calls == [False]
+
+
+# ---------------------------------------------------------------------------
+# preflight: directories are not databases
+# ---------------------------------------------------------------------------
+
+
+def test_a_directory_is_rejected_with_an_actionable_error(tmp_path) -> None:
+    from idare2.errors import NoDatabaseError
+
+    with pytest.raises(NoDatabaseError) as caught:
+        resolve(Target(path=str(tmp_path)))
+    assert "directory" in str(caught.value)
+
+
+def test_a_missing_file_is_still_no_such_file() -> None:
+    from idare2.errors import NoDatabaseError
+
+    with pytest.raises(NoDatabaseError, match="no such file"):
+        resolve(Target(path="/nonexistent-on-purpose/missing"))
+
+
+# ---------------------------------------------------------------------------
+# --backend constrains how a path is opened
+# ---------------------------------------------------------------------------
+
+
+def test_backend_idalib_forces_idalib_for_path_opens(monkeypatch, tmp_path) -> None:
+    """`--backend idalib` used to be ignored for path opens; Nexus picks idat
+    unless IDA_NEXUS_IDALIB_ONLY is set."""
+    import idare2.nexus as nexus
+
+    monkeypatch.delenv("IDA_NEXUS_IDALIB_ONLY", raising=False)
+    opened: list[str] = []
+
+    class _Options:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    class _Handle:
+        def __init__(self, path, options=None):
+            opened.append(path)
+
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    monkeypatch.setattr("ida_nexus.DatabaseHandle.open", lambda path, options=None: _Handle(path, options))
+    target = Target(path=str(tmp_path / "sample"), backend="idalib")
+    handle = nexus.open_handle(str(tmp_path / "sample"), target, timeout=1, linger=0)
+    assert opened == [str(tmp_path / "sample")]
+    import os
+
+    assert os.environ.get("IDA_NEXUS_IDALIB_ONLY") == "1"
+    monkeypatch.delenv("IDA_NEXUS_IDALIB_ONLY", raising=False)
+    assert handle is not None
+
+
+def test_backend_gui_cannot_open_a_path(tmp_path) -> None:
+    from idare2.errors import NoDatabaseError
+
+    target = Target(path=str(tmp_path / "sample"), backend="gui")
+    with pytest.raises(NoDatabaseError, match="--backend gui"):
+        open_handle(str(tmp_path / "sample"), target, timeout=1, linger=0)
+
+
+def test_shutdown_discards_even_without_take_snapshot() -> None:
+    """Regression: `handle.take_snapshot()` does not exist in ida-nexus 0.14.2,
+    so the old guard aborted before `shutdown_database(save=...)` ever ran --
+    the worker then saved on its own shutdown, which is how `--no-save-on-close`
+    silently persisted every writable batch."""
+    from idare2.nexus import shutdown_if_ours
+
+    class _Handle:
+        def __init__(self):
+            self.calls = []
+
+        def shutdown_database(self, *, save):
+            self.calls.append(save)
+            return {"shutting_down": True, "save": save}
+
+    handle = _Handle()
+    assert shutdown_if_ours(handle, save=False) is True
+    assert handle.calls == [False]
+
+
+def test_shutdown_reports_a_refused_worker() -> None:
+    from idare2.nexus import shutdown_if_ours
+
+    class _Handle:
+        def shutdown_database(self, *, save):
+            raise RuntimeError("another lease is attached")
+
+    assert shutdown_if_ours(_Handle(), save=False) is False
+
+
+def test_shutdown_honours_take_snapshot_when_it_exists() -> None:
+    """Older ida-nexus: a failed snapshot (another lease attached) still means
+    hands off."""
+    from idare2.nexus import shutdown_if_ours
+
+    class _Handle:
+        def __init__(self):
+            self.shut_down = False
+
+        def take_snapshot(self):
+            raise RuntimeError("busy")
+
+        def shutdown_database(self, *, save):  # pragma: no cover
+            self.shut_down = True
+
+    handle = _Handle()
+    assert shutdown_if_ours(handle, save=False) is False
+    assert handle.shut_down is False
