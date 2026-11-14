@@ -607,6 +607,57 @@ def entries(db: Any, pattern: str | None = None) -> list[dict[str, Any]]:
     return out
 
 
+@op("entry_points")
+def entry_points(db: Any) -> list[dict[str, Any]]:
+    """``ie``: the loader's entry point, in r2's table shape.
+
+    r2 reads the ELF header's ``e_entry`` (``phaddr``/``haddr`` are the byte
+    offset of that field in the file header), not the IDA entry list -- which
+    also contains ``.init_proc``/``.term_proc`` chunks.
+    """
+    elf = _elf_for(db)
+    if elf is not None:
+        entry = int(elf.header.entry)
+        if entry:
+            paddr = elf.vaddr_to_paddr(entry)
+            return [
+                {
+                    "vaddr": entry,
+                    "paddr": paddr if paddr is not None else entry,
+                    # e_entry sits at 0x18 in both ELF32 and ELF64.
+                    "phaddr": 0x18,
+                    "hvaddr": 0x18,
+                    "haddr": 0x18,
+                    "baddr": 0,
+                    "laddr": 0,
+                    "type": "program",
+                }
+            ]
+        return []
+    # Non-ELF: the loader-registered start entry stands in for e_entry.
+    first = None
+    for item in db.entries.get_all():
+        first = item if first is None else first
+        if int(item.ordinal) == 0:
+            first = item
+            break
+    if first is not None:
+        ea = int(first.address)
+        return [
+            {
+                "vaddr": ea,
+                "paddr": ea,
+                "phaddr": 0,
+                "hvaddr": 0,
+                "haddr": 0,
+                "baddr": 0,
+                "laddr": 0,
+                "type": "program",
+            }
+        ]
+    return []
+
+
 @op("constructors")
 def constructors(db: Any) -> list[dict[str, Any]]:
     """``.init_array``/``.fini_array`` entries (``iee``)."""

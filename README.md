@@ -388,6 +388,11 @@ Most information commands support a `j` suffix for JSON output.
 - IDA performs analysis when the database is opened, so `aa` is usually a no-op.
 - `asm.arch` and `asm.bits` are read-only. Set the architecture when creating a
   database with `-a` and `-b`.
+- `e asm.syntax` switches the immediate style of the disassembly output:
+  `intel` (the default) prints r2's `0x11`, `masm` keeps IDA's native `11h`.
+  `pa`/`wa`/`/a` accept either spelling and convert per assembler.
+- `ie` reads the ELF entry point like r2; the IDA entry list (including
+  `.init_proc`/`.term_proc`) stays available through `ies` and `iE`.
 - Sessions are read-only unless `-w` is passed.
 - `w` with no arguments saves the IDB.
 - `-j` enables JSON output; it does not start a JavaScript engine as it does in

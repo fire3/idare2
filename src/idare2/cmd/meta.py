@@ -32,6 +32,8 @@ COMMENT_DETAIL = [
     ("CC.", "", "show the comment at the current address"),
     ("CC-", "", "remove the comment at the current address"),
     ("CCu", " text [@addr]", "add a comment only if there is none"),
+    ("CCa", " addr text", "add a comment at the given address"),
+    ("CCa-", " addr", "remove the comment at the given address"),
     ("C-", " [len]", "remove comments in a range"),
     ("Cd", " [size] [repeat]", "define data of the given element size"),
     ("Cd.", "", "describe the data at the current address"),
@@ -54,7 +56,7 @@ _SIZES = {"1": "byte", "2": "word", "4": "dword", "8": "qword"}
     json_suffix=True,
     suffixes=frozenset(
         {
-            "", "j", "*", ".", "C", "C*", "C.", "C-", "Cr", "Cu",
+            "", "j", "*", ".", "C", "C*", "C.", "C-", "Cr", "Cu", "Ca", "Ca-",
             "-", "d", "d.", "h", "h-", "s", "s.", "s.j", "s-", "s*",
         }
     ),
@@ -89,6 +91,8 @@ def metadata(session: Session, statement: Statement) -> list[str]:
         return _add_comment(
             session, argument, token="CCu", repeatable=False, only_if_missing=True
         )
+    if suffix in ("Ca", "Ca-"):
+        return _comment_at(session, argument, delete=suffix == "Ca-")
     if suffix == "C-":
         return _delete_comment(session)
     if suffix == "-":
@@ -175,18 +179,46 @@ def _add_comment(
     token: str,
     repeatable: bool,
     only_if_missing: bool,
+    ea: int | None = None,
 ) -> list[str]:
     text = _unquote(argument)
     if not text:
         raise UsageError(f"{token} needs comment text")
     cmd_module.require_write(session, f"'{token}'")
-    if only_if_missing and session.remote.call("comments", ea=session.seek):
+    if ea is None:
+        ea = session.seek
+    if only_if_missing and session.remote.call("comments", ea=ea):
         return []
     session.remote.call(
-        "set_comment", ea=session.seek, text=text, repeatable=repeatable
+        "set_comment", ea=ea, text=text, repeatable=repeatable
     )
-    session.prime_comments({session.seek: text})
+    session.prime_comments({ea: text})
     return []
+
+
+def _comment_at(session: Session, argument: str, *, delete: bool) -> list[str]:
+    """``CCa[+-] [addr] [base64:..|text]`` -- comment at a given address."""
+    token = "CCa-" if delete else "CCa"
+    words = argument.split(maxsplit=1)
+    if not words:
+        raise UsageError(f"{token} needs an address")
+    if delete and len(words) != 1:
+        raise UsageError(f"{token} takes an address only")
+    ea = session.resolve(words[0])
+    if delete:
+        cmd_module.require_write(session, f"'{token}'")
+        session.remote.call("delete_comment", ea=ea)
+        return []
+    if len(words) < 2:
+        raise UsageError(f"{token} needs comment text")
+    text = _unquote(words[1])
+    if text.startswith("base64:"):
+        import base64 as _base64
+
+        text = _base64.b64decode(text[7:]).decode("utf-8", errors="replace")
+    return _add_comment(
+        session, text, token=token, repeatable=False, only_if_missing=False, ea=ea
+    )
 
 
 def _delete_comment(session: Session) -> list[str]:

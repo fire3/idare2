@@ -30,9 +30,9 @@ DETAIL = [
     ("sb", "", "seek to the start of the basic block"),
     ("sf", "[addr]", "seek to the function start"),
     ("sF", "[addr]", "seek to the function end"),
-    ("sn", "[n]", "seek to the next instruction"),
+    ("sn", "[n]", "seek to the next flag (per scr.nkey, default flag)"),
     ("so", "[n]", "seek to the next instruction (skipping calls)"),
-    ("sp", "[n]", "seek to the previous instruction"),
+    ("sp", "[n]", "seek to the previous flag (per scr.nkey)"),
     ("s=", "", "list the undo seek history (oldest first)"),
     ("s==", "", "list the history with names or addresses"),
     ("s=*", "", "list the history as radare2 commands"),
@@ -109,6 +109,14 @@ def seek(session: Session, statement: Statement) -> list[str]:
 
     if suffix in ("n", "o", "p"):
         target = session.resolve(argument or None)
+        if suffix in ("n", "p"):
+            # r2 walks what `scr.nkey` names; the default is the next flag.
+            nkey = (session.config.get("scr.nkey") or "flag").lower()
+            if nkey in ("flag", "fun", "func"):
+                jumped = _flag_walk(session, target, forward=suffix == "n")
+                if jumped is not None:
+                    session.seek_to(jumped)
+                    return []
         if suffix == "n":
             payload = session.remote.call("disasm", ea=target, count=2, mode="count")
             lines = payload.get("lines") or []
@@ -197,6 +205,21 @@ def _name_delta(session: Session, ea: int) -> str | None:
         return None
     delta = int(ea) - best.ea
     return best.name if delta == 0 else f"{best.name} + {delta}"
+
+
+def _flag_walk(session: Session, target: int, *, forward: bool) -> int | None:
+    """Nearest flag address strictly after (or before) ``target``."""
+    session._ensure_flags()
+    best = None
+    for flag in session.flags.all():
+        ea = int(flag.ea)
+        ahead = forward and ea > target
+        behind = not forward and ea < target
+        if not (ahead or behind):
+            continue
+        if best is None or (ahead and ea < best) or (behind and ea > best):
+            best = ea
+    return best
 
 
 def _undo(session: Session) -> list[str]:

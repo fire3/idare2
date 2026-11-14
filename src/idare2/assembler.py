@@ -21,6 +21,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from idare2.errors import CommandError, UsageError
+from idare2.fmt import to_intel, to_masm
 
 if TYPE_CHECKING:
     from idare2.session import Session
@@ -90,9 +91,12 @@ def assemble(session: Session, raw_text: str, *, ea: int | None = None) -> bytes
     # r2 substitutes `$$` with the assembler's program counter before handing
     # the expression to the architecture plugin.
     text = text.replace("$$", f"0x{target:x}")
+    # r2 spells immediates `0x11`; IDA's assembler wants `11h`.  The rasm2
+    # fallback converts back, so both paths see their native syntax.
+    masm_text = to_masm(text)
 
     try:
-        payload = session.remote.call("assemble", ea=target, text=text)
+        payload = session.remote.call("assemble", ea=target, text=masm_text)
     except CommandError as ida_error:
         if "assembl" not in str(ida_error).lower():
             raise
@@ -152,12 +156,12 @@ def _rasm2_assemble(
     # rasm2's seek flag is ``-s``/``-@`` (``-o`` is the *output file*, which
     # makes 6.2.6 read stdin and print nothing).
     bits = int(session.info.get("bitness") or session.info.get("bits") or 0)
-    argv = [executable, "-q", "-a", plugin, "-s", f"0x{ea:x}"]
+    argv = [executable, "-q", "-a", plugin, "-s", f"0x{ea:x}", "-S", "intel"]
     if bits:
         argv.extend(["-b", str(bits)])
     if session.info.get("endian") == "big":
         argv.append("-e")
-    argv.extend(["--", text])
+    argv.extend(["--", to_intel(text)])
 
     try:
         completed = subprocess.run(

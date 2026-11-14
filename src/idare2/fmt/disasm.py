@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from idare2.fmt import addr_width, fmt_addr, fmt_hex_bytes
+from idare2.fmt import addr_width, fmt_addr, fmt_hex_bytes, to_intel
 
 #: Width of the ``│ `` flow gutter r2 prints for instructions inside a function.
 GUTTER_WIDTH = 12
@@ -125,12 +125,17 @@ def _line(
 
 
 def _decorate(record: dict[str, Any], session: Any) -> str:
-    """Apply the ``asm.flags`` colouring hook.
+    """Apply the syntax hook and the ``asm.flags`` colouring hook.
 
-    Colouring is a no-op while ``scr.color=0``, which is the default for
-    non-tty output, so the text is returned untouched in the common case.
+    IDA writes immediates in MASM style (``90h``); r2's default ``intel``
+    syntax writes ``0x90``, so ``e asm.syntax=intel`` (the default) rewrites
+    them.  ``e asm.syntax=masm`` keeps IDA's text untouched.  Colouring is a
+    no-op while ``scr.color=0``, which is the default for non-tty output, so
+    the text is returned untouched in the common case.
     """
     text = str(record.get("text") or "")
+    if (session.config.get("asm.syntax") or "intel").lower() != "masm":
+        text = to_intel(text)
     if not session.config.get_bool("asm.flags"):
         return text
     return session.colors.disasm(text, record)

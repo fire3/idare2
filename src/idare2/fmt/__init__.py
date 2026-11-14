@@ -7,6 +7,7 @@ plain dicts that the remote operations return.  That is what lets ``~``, ``|``,
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 #: radare2 pads addresses to 8 hex digits whatever the bitness; wider values
@@ -70,6 +71,33 @@ def human_size(count: int) -> str:
 
 def truth(value: Any) -> str:
     return "true" if value else "false"
+
+
+#: IDA writes hex immediates in MASM style (``90h``, ``0ACh``, ``fs:28h``);
+#: r2's default ``intel`` syntax writes ``0x90``.  Both directions are needed:
+#: the disassembly renderer converts IDA's text, and the assembler converts
+#: the user's r2-style text back to what IDA's assembler accepts.
+_HEX_MASM = re.compile(r"\b0?([0-9][0-9A-Fa-f]*)[hH]\b")
+_HEX_INTEL = re.compile(r"\b0[xX]([0-9A-Fa-f]+)")
+
+
+def to_intel(text: str) -> str:
+    """MASM-style immediates to r2's ``intel`` syntax (``11h`` -> ``0x11``)."""
+    return _HEX_MASM.sub(
+        lambda match: f"0x{int(match.group(1), 16):x}", text
+    )
+
+
+def to_masm(text: str) -> str:
+    """r2-style immediates to IDA's syntax (``0x11`` -> ``11h``, ``0xAB`` -> ``0ABh``)."""
+
+    def repl(match: re.Match[str]) -> str:
+        digits = match.group(1)
+        if digits[0] in "abcdefABCDEF":
+            digits = "0" + digits
+        return f"{digits}h"
+
+    return _HEX_INTEL.sub(repl, text)
 
 
 def jsonable(value: Any) -> Any:

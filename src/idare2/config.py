@@ -46,6 +46,7 @@ KEYS: tuple[Key, ...] = (
     Key("scr.rows", 0, INT, "terminal rows (0 = auto)", minimum=0),
     Key("scr.cols", 0, INT, "terminal columns (0 = auto)", minimum=0),
     Key("scr.pager", "", STR, "pager command for long output"),
+    Key("scr.nkey", "flag", STR, "what sn/sp walk: flag, func or instr"),
     # -- disassembly -------------------------------------------------------
     Key("asm.bytes", True, BOOL, "show the instruction bytes column"),
     Key("asm.bytespace", True, BOOL, "put a space between byte groups"),
@@ -58,6 +59,7 @@ KEYS: tuple[Key, ...] = (
     Key("asm.flags", True, BOOL, "resolve names in the disassembly text"),
     Key("asm.offset", True, BOOL, "show the address column"),
     Key("asm.sub.names", True, BOOL, "show IDA's sub_/loc_ dummy names"),
+    Key("asm.syntax", "intel", STR, "immediate syntax: intel (0x11) or masm (11h)"),
     Key("asm.describe", False, BOOL, "describe operands"),
     Key("asm.emu", False, BOOL, "reserved; idare2 does not emulate"),
     #: Derived from the database, like cfg.bigendian.  They exist so scripts

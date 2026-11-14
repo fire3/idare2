@@ -35,7 +35,8 @@ def table(headers: Sequence[str], rows: Iterable[Sequence[str]], *, right: Seque
             parts.append(cell.rjust(widths[index]) if index in right else cell.ljust(widths[index]))
         return " ".join(parts).rstrip()
 
-    lines = [render(list(headers)), RULE * sum(widths) + " " * (len(widths) - 1)]
+    # r2's rule spans the whole header row, gaps included.
+    lines = [render(list(headers)), RULE * (sum(widths) + len(widths) - 1)]
     lines.extend(render(row) for row in materialised)
     return lines
 
@@ -187,6 +188,29 @@ def format_imports(imports: list[dict[str, Any]], session: Any) -> list[str]:
             ]
         )
     return table(headers, rows)
+
+
+def format_entry_points(rows: list[dict[str, Any]], session: Any) -> list[str]:
+    """``ie`` -- r2's paddr/vaddr/phaddr/vhaddr/type table.
+
+    ``vhaddr`` is the header offset relocated by the load base, like r2.
+    """
+    width = addr_width(session.info.get("bits"))
+    base = int(session.info.get("base_address") or 0)
+    headers = ("paddr", "vaddr", "phaddr", "vhaddr", "type")
+    return table(
+        headers,
+        [
+            [
+                fmt_addr(int(row.get("paddr", 0)), width),
+                fmt_addr(int(row.get("vaddr", 0)), width),
+                fmt_addr(int(row.get("phaddr", 0)), width),
+                fmt_addr(int(row.get("phaddr", 0)) + base, width),
+                row.get("type", "program"),
+            ]
+            for row in rows
+        ],
+    )
 
 
 def format_entries(entries: list[dict[str, Any]], session: Any) -> list[str]:

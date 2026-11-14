@@ -729,6 +729,13 @@ def test_axt_reference_sites_match_r2(session, r2) -> None:
     assert ours == theirs
 
 
+def test_entry_points_match_r2(session, r2) -> None:
+    """``ie`` reads the ELF entry point, in r2's table shape."""
+    ours = _table_rows(session.run("ie"))
+    theirs = _table_rows(r2("ie"))
+    assert ours == theirs
+
+
 def test_aflj_keys_cover_r2_loop_keys(session, r2) -> None:
     """``aflj`` rows carry r2's key names for the facts idare2 can derive.
 

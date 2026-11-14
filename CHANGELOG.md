@@ -10,6 +10,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Output-format alignment with radare2 6.2.6, from the CLI-difference
 re-evaluation of 2026-11-14 (`docs/r2-parity-report.md` §15).
 
+### Added
+
+- `e asm.syntax` selects the immediate style of the disassembly: `intel`
+  (the default) rewrites IDA's MASM-style `11h` to r2's `0x11`; `masm` keeps
+  IDA's text. `pa`/`wa`/`/a` accept either spelling — the user's r2-style
+  text is converted to what IDA's assembler wants, and the rasm2 fallback
+  receives r2 syntax and runs with `-S intel`.
+- `CCa [addr] [base64:..|text]` and `CCa- [addr]`, r2's comment-at-address
+  forms.
+- `e scr.nkey` selects what `sn`/`sp` walk (`flag`, the r2 default, `func` or
+  `instr`); they used to always walk instructions.
+
+### Fixed
+
+- `ie`/`iej` now report the loader entry point in r2's table shape
+  (`paddr vaddr phaddr vhaddr type`, read from the ELF header) instead of
+  dumping the export table; `ies` and `iE` keep the symbol forms.
+- `sn`/`sp` walk the nearest flag like r2's default `scr.nkey=flag`.
+- Table header rules now span the whole header row (gaps included), as r2's
+  do, instead of stopping short with trailing spaces.
+
 ### Fixed
 
 - Addresses now render the way radare2 6.x does: zero-padded to 8 hex digits

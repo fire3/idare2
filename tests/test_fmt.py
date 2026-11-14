@@ -328,6 +328,36 @@ def test_address_width_matches_r2_62() -> None:
     assert fmt_addr(0x140001460, 16) == "0x0000000140001460"
 
 
+def test_immediate_syntax_conversion() -> None:
+    from idare2.fmt import to_intel, to_masm
+
+    assert to_intel("push 11h") == "push 0x11"
+    assert to_intel("mov rax, fs:28h") == "mov rax, fs:0x28"
+    assert to_intel("add eax, 0ACh") == "add eax, 0xac"
+    assert to_intel("push 11") == "push 11"  # decimal stays
+    assert to_masm("push 0x11") == "push 11h"
+    assert to_masm("mov eax, 0xAB") == "mov eax, 0ABh"
+    assert to_masm("call 401000h") == "call 401000h"
+
+
+def test_disasm_syntax_toggle(session: FakeSession) -> None:
+    session.config.set("asm.lines", False)
+    record = {"ea": 0x1000, "text": "push 11h", "bytes": b"\x68\x11"}
+    from idare2.fmt.disasm import _decorate
+
+    assert _decorate(record, session) == "push 0x11"
+    session.config.set("asm.syntax", "masm")
+    assert _decorate(record, session) == "push 11h"
+
+
+def test_entry_point_table_matches_r2_shape(session: FakeSession) -> None:
+    rows = [{"vaddr": 0x19F0, "paddr": 0x19F0, "phaddr": 0x18, "type": "program"}]
+    lines = fmt_listing.format_entry_points(rows, session)
+    assert lines[0] == "paddr      vaddr      phaddr     vhaddr     type"
+    assert set(lines[1].strip()) == {"-"}
+    assert lines[2] == "0x000019f0 0x000019f0 0x00000018 0x00000018 program"
+
+
 def test_table_rule_is_ascii_dash() -> None:
     assert fmt_listing.RULE == "-"
 

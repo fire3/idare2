@@ -49,7 +49,7 @@ def test_program_counter_placeholder_is_substituted(monkeypatch) -> None:
 
     assembler.assemble(session, "call $$", ea=0x401000)
     assert remote.calls == [
-        ("assemble", {"ea": 0x401000, "text": "call 0x401000"})
+        ("assemble", {"ea": 0x401000, "text": "call 401000h"})
     ]
 
 
@@ -70,7 +70,7 @@ def test_rasm2_fallback_uses_the_database_architecture(monkeypatch) -> None:
 
     assert assembler.assemble(session, "nop") == b"\x00\x00\xa0\xe1"
     assert seen == [
-        ["/opt/rasm2", "-q", "-a", "arm", "-s", "0x1000", "-b", "32", "--", "nop"]
+        ["/opt/rasm2", "-q", "-a", "arm", "-s", "0x1000", "-S", "intel", "-b", "32", "--", "nop"]
     ]
 
 

@@ -157,6 +157,7 @@ class FakeRemote:
                 "text": arguments["text"],
                 "repeatable": arguments.get("repeatable", False),
             },
+            "delete_comment": lambda: {"ea": arguments["ea"]},
             "disasm": lambda: {
                 "mode": "count",
                 "ea": arguments["ea"],
@@ -2912,6 +2913,42 @@ def test_question_json_object_matches_r2_62() -> None:
     assert parsed["base36"] == "0_k"
     assert parsed["ternary"] == "0t202"
     assert "string" not in parsed
+
+
+def test_comment_at_address_forms() -> None:
+    session, remote = make_session()
+    assert session.run("CCa 0x2000 hello world") == []
+    calls = dict(remote.calls)
+    assert calls["set_comment"]["ea"] == 0x2000
+    assert calls["set_comment"]["text"] == "hello world"
+
+    assert session.run("CCa 0x2000 base64:Zm9v") == []
+    assert dict(remote.calls)["set_comment"]["text"] == "foo"
+
+    assert session.run("CCa- 0x2000") == []
+    assert dict(remote.calls)["delete_comment"]["ea"] == 0x2000
+
+
+def test_comment_at_address_validates_arguments() -> None:
+    session, _remote = make_session()
+    for bad in ("CCa 0x2000", "CCa", "CCa- 0x2000 extra"):
+        session.failed = False
+        session.run(bad)
+        assert session.failed, bad
+
+
+def test_sn_sp_walk_flags_like_r2() -> None:
+    session, _remote = make_session()
+    session.run("f zz 32 @ 0x3000")
+    session.run("s 0x1000")
+    session.run("sn")
+    assert session.seek == 0x2000
+    session.run("sn")
+    assert session.seek == 0x3000
+    session.run("sp")
+    assert session.seek == 0x2000
+    session.run("sp")
+    assert session.seek == 0x1000
 
 
 def test_seek_echo_is_unpadded_and_s_colon_is_padded() -> None:
