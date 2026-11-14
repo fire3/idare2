@@ -749,10 +749,47 @@ def test_aflj_keys_cover_r2_loop_keys(session, r2) -> None:
     theirs_keys = set(theirs[0])
     expected = {"addr", "size", "realsz", "minaddr", "maxaddr", "name",
                 "nbbs", "type", "bits", "noreturn", "signature", "calltype",
-                "stackframe", "nargs"}
+                "stackframe", "nargs",
+                "edges", "cc", "maxbbins", "midbbins", "ratbbins", "is-lineal"}
     missing = expected - ours_keys
     assert not missing, f"aflj is missing r2 keys: {sorted(missing)}"
     assert expected <= theirs_keys  # sanity: r2 6.x still spells them so
+    # nlocals needs a Hex-Rays query *per function*, which tripled aflj on
+    # large binaries, so table rows never carry it -- afij does (deliberate
+    # divergence from r2, documented in the CHANGELOG).
+    assert "nlocals" not in ours_keys
+
+
+def test_aflj_cc_matches_r2(session, r2) -> None:
+    """Cyclomatic complexity must agree on the functions both engines see.
+
+    The two engines split basic blocks differently, but r2's cc is a
+    function of the block-graph shape, which IDA's flow chart reproduces
+    closely.  A systematic divergence here would mean our cc formula or
+    edge counting is wrong, not a cosmetic difference.
+    """
+    ours = {int(row["addr"]): row for row in json.loads("\n".join(session.run("aflj")))}
+    theirs = {int(row["addr"]): row for row in json.loads("\n".join(r2("aflj")))}
+    shared = sorted(set(ours) & set(theirs))
+    assert len(shared) >= 20
+    mismatched = {
+        ea: (ours[ea]["cc"], theirs[ea]["cc"])
+        for ea in shared
+        if ours[ea]["cc"] != theirs[ea]["cc"]
+    }
+    rate = len(mismatched) / len(shared)
+    assert rate <= 0.10, f"cc diverges on {len(mismatched)}/{len(shared)}: {dict(list(mismatched.items())[:10])}"
+
+
+def test_afij_graph_stats_agree_with_aflj(session, r2) -> None:
+    """afij and aflj share _function_stats: same function, same numbers."""
+    ours_rows = json.loads("\n".join(session.run("aflj")))
+    afij = json.loads("\n".join(session.run("afij")))
+    afij = afij[0] if isinstance(afij, list) else afij
+    row = next(row for row in ours_rows if int(row["addr"]) == int(afij["addr"]))
+    for key in ("nbbs", "ninstrs", "edges", "cc", "maxbbins", "midbbins",
+                "ratbbins", "is-lineal"):
+        assert afij[key] == row[key], key
 
 
 def test_afij_keys_cover_r2_function_keys(session, r2) -> None:

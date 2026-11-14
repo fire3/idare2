@@ -8,7 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Output-format alignment with radare2 6.2.6, from the CLI-difference
-re-evaluation of 2026-11-14 (`docs/r2-parity-report.md` §15).
+re-evaluation of 2026-11-14 (`docs/r2-parity-report.md` §15), continued by
+the 0.2 roadmap (`docs/roadmap-0.2.md`, local notes).
+
+### Added
+
+- `aflj`/`afij` now carry r2's graph statistics — `edges`, `cc`,
+  `maxbbins`, `midbbins`, `ratbbins`, `is-lineal` — computed in a single
+  walk per function (the flow chart and the instruction enumeration used to
+  be two separate traversals). `cc` is `edges − nbbs + 2` with a floor of 1,
+  verified against r2 6.2.6 per-function on the parity fixture. The `nlocals`
+  key stays out of `aflj` rows on purpose: a Hex-Rays query per function
+  tripled the run on a 2435-function binary, so the local count only appears
+  in `afij` (one function at a time), which keeps the ≤1.5× `afl` perf bound.
 
 ### Added
 

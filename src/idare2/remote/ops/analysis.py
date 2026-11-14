@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import bisect
+import contextlib
 import re
+import statistics
 from collections.abc import Iterator
 from typing import Any
 
@@ -50,17 +53,22 @@ def functions(
     pattern: str | None = None,
     offset: int = 0,
     count: int | None = None,
+    with_locals: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """Function table (``afl``).
 
-    Basic-block counts come from a flow chart per function, which is not free,
-    so they are computed only for the functions actually being returned.  The
-    JSON rows (``aflj``) carry r2's key names -- ``addr``/``minaddr``/
-    ``maxaddr``/``realsz`` alongside the historical ``ea``/``end`` -- plus the
-    per-function facts that do not need another round trip.  r2's graph-only
-    statistics (``edges``/``cc``/``maxbbins``...) and Hex-Rays' ``nlocals``
-    are omitted: the latter hard-crashes workers on processors without a
-    decompiler, and the former would be invented.
+    Everything the row carries comes out of a **single walk** per function
+    (:func:`_function_stats`): the flow chart and the instruction enumeration
+    used to be two separate traversals.  The JSON rows (``aflj``) carry r2's
+    key names -- ``addr``/``minaddr``/``maxaddr``/``realsz`` alongside the
+    historical ``ea``/``end`` -- plus the graph statistics r2 prints
+    (``edges``/``cc``/``maxbbins``/...).
+
+    ``nlocals`` requires Hex-Rays and is hard-crash-prone on processors
+    without one (ida-domain does not raise, it kills the worker), so the
+    client must opt in per database via ``with_locals`` -- the client knows
+    from ``open_summary`` whether Hex-Rays is available.  r2 always carries
+    ``nlocals``; we omit the key instead of printing a lie.
     """
     predicate = helpers.name_filter(pattern)
     bits = int(getattr(db, "bitness", 0) or 0)
@@ -79,43 +87,90 @@ def functions(
         ea = int(func.start_ea)
         end = int(func.end_ea)
         signature = _signature(db, func)
-        out.append(
-            {
-                "ea": ea,
-                "end": end,
-                "addr": ea,
-                "minaddr": ea,
-                "maxaddr": end,
-                "size": end - ea,
-                "realsz": end - ea,
-                "name": db.functions.get_name(func),
-                "nbbs": _block_count(db, func),
-                "ninstrs": _instruction_count(db, func),
-                "signature": signature,
-                "calltype": _calltype(signature),
-                "stackframe": int(getattr(func, "frsize", 0) or 0),
-                "nargs": int(getattr(func, "args", 0) or 0),
-                "noreturn": not bool(db.functions.does_return(func)),
-                "type": "fcn",
-                "bits": bits,
-            }
-        )
+        row = {
+            "ea": ea,
+            "end": end,
+            "addr": ea,
+            "minaddr": ea,
+            "maxaddr": end,
+            "size": end - ea,
+            "realsz": end - ea,
+            "name": db.functions.get_name(func),
+            "signature": signature,
+            "calltype": _calltype(signature),
+            "stackframe": int(getattr(func, "frsize", 0) or 0),
+            "nargs": int(getattr(func, "args", 0) or 0),
+            "noreturn": not bool(db.functions.does_return(func)),
+            "type": "fcn",
+            "bits": bits,
+        }
+        row.update(_function_stats(db, func))
+        if with_locals:
+            row["nlocals"] = _local_count(db, func)
+        out.append(row)
     return out, helpers.page_meta(out, next_offset)
 
 
-def _block_count(db: Any, func: Any) -> int:
+def _function_stats(db: Any, func: Any) -> dict[str, Any]:
+    """r2's per-function graph statistics, from **one** walk.
+
+    ``nbbs`` and ``edges`` come from the flow chart (its blocks carry
+    ``succs()``), ``ninstrs`` and the per-block instruction buckets come from
+    a single instruction enumeration bucketed by block bounds.  ``cc`` is
+    ``edges - nbbs + 2`` with a floor of 1, matching r2's output on a
+    one-block PLT stub.
+
+    Every step is defensive: a bad function yields the conservative zero
+    dict, never an exception -- one odd function must not kill ``aflj``.
+    """
+    stats: dict[str, Any] = {
+        "nbbs": 0,
+        "ninstrs": 0,
+        "edges": 0,
+        "cc": 1,
+        "maxbbins": 0,
+        "midbbins": 0.0,
+        "ratbbins": 0.0,
+        "is-lineal": True,
+    }
     try:
-        chart = db.functions.get_flowchart(func)
-        return len(chart) if chart is not None else 0
+        blocks = list(db.functions.get_flowchart(func) or [])
+        bounds = sorted((int(b.start_ea), int(b.end_ea)) for b in blocks)
+        starts = [start for start, _ in bounds]
+        stats["nbbs"] = len(bounds)
+        stats["is-lineal"] = all(
+            a[0] < b[0] for a, b in zip(bounds, bounds[1:], strict=False)
+        )
+        for block in blocks:
+            with contextlib.suppress(Exception):
+                stats["edges"] += len(list(block.succs()))
+        stats["cc"] = max(1, stats["edges"] - stats["nbbs"] + 2)
+
+        counts = [0] * len(bounds)
+        for insn in _safe_instructions(db, func):
+            ea = int(getattr(insn, "address", -1))
+            index = bisect.bisect_right(starts, ea) - 1
+            # Instructions outside every block (tail chunks) still count
+            # toward `ninstrs`, like r2's function-level total, but not into
+            # a bucket.
+            if 0 <= index < len(bounds) and bounds[index][0] <= ea < bounds[index][1]:
+                counts[index] += 1
+            stats["ninstrs"] += 1
+        if counts:
+            stats["maxbbins"] = max(counts)
+            stats["midbbins"] = float(statistics.median(counts))
+            stats["ratbbins"] = stats["ninstrs"] / stats["nbbs"]
     except Exception:
-        return 0
+        # Whatever was computed before the failure stands; aflj keeps going.
+        pass
+    return stats
 
 
-def _instruction_count(db: Any, func: Any) -> int:
+def _safe_instructions(db: Any, func: Any) -> Iterator[Any]:
     try:
-        return sum(1 for _ in db.functions.get_instructions(func))
+        yield from db.functions.get_instructions(func)
     except Exception:
-        return 0
+        return
 
 
 def _recursive(start: int, callees: list[Any]) -> bool:
@@ -146,9 +201,6 @@ def _calltype(signature: str | None) -> str:
 def function_info(db: Any, ea: int) -> dict[str, Any]:
     """Function detail (``afi``); the JSON keys follow r2's ``afij``."""
     func = helpers.require_func(db, ea)
-    chart = db.functions.get_flowchart(func)
-    blocks = list(chart) if chart is not None else []
-    instruction_count = sum(1 for _ in db.functions.get_instructions(func))
     callers = list(db.functions.get_callers(func))
     callees = list(db.functions.get_callees(func))
     locals_count = _local_count(db, func)
@@ -165,8 +217,6 @@ def function_info(db: Any, ea: int) -> dict[str, Any]:
         "name": db.functions.get_name(func),
         "size": end - start,
         "realsz": end - start,
-        "nbbs": len(blocks),
-        "ninstrs": instruction_count,
         "callers": len(callers),
         "callees": len(callees),
         "indegree": len(callers),
@@ -184,6 +234,7 @@ def function_info(db: Any, ea: int) -> dict[str, Any]:
         "type": "fcn",
         "bits": int(getattr(db, "bitness", 0) or 0),
         "flags": helpers.flag_value(db.functions.get_flags(func)),
+        **_function_stats(db, func),
     }
 
 

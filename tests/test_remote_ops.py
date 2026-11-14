@@ -454,19 +454,47 @@ def test_function_info_skips_hexrays_when_unavailable(monkeypatch) -> None:
     assert _local_count(db, object()) == 0
 
 
+class _FakeBlock:
+    """Just the ``ida_gdl.BasicBlock`` surface the stats op touches."""
+
+    def __init__(self, start: int, end: int, succs: tuple[int, ...] = ()) -> None:
+        self.start_ea = start
+        self.end_ea = end
+        self._succs = tuple(succs)
+
+    def succs(self) -> tuple[int, ...]:
+        return self._succs
+
+
 class _FakeFunctionDb:
-    """The slice of ida_domain.Database the ``afl``/``afi`` ops touch."""
+    """The slice of ida_domain.Database the ``afl``/``afi`` ops touch.
+
+    Default shape: one function 0x1000-0x1100, three linear blocks
+    (0x1000/0x1008/0x1010 boundaries, each 8 bytes), five instructions.
+    """
 
     bitness = 32
 
     def __init__(self) -> None:
         self.func = SimpleNamespace(start_ea=0x1000, end_ea=0x1100, frsize=16, args=2)
+        self.blocks = [
+            _FakeBlock(0x1000, 0x1008),
+            _FakeBlock(0x1008, 0x1010),
+            _FakeBlock(0x1010, 0x1100),
+        ]
+        self.instructions = [
+            SimpleNamespace(address=0x1000),
+            SimpleNamespace(address=0x1004),
+            SimpleNamespace(address=0x1008),
+            SimpleNamespace(address=0x1010),
+            SimpleNamespace(address=0x1100 - 4),
+        ]
         functions = SimpleNamespace(
             get_all=lambda: iter([self.func]),
             get_at=lambda _ea: self.func,
             get_name=lambda _f: "main",
-            get_flowchart=lambda _f: [1, 2, 3],
-            get_instructions=lambda _f: iter(range(5)),
+            get_flowchart=lambda _f: self.blocks,
+            get_instructions=lambda _f: iter(self.instructions),
             does_return=lambda _f: True,
             get_callers=lambda _f: [0x2000],
             get_callees=lambda _f: [self.func],
@@ -494,6 +522,126 @@ def test_functions_rows_carry_r2_json_names() -> None:
     assert row["noreturn"] is False
     assert row["type"] == "fcn"
     assert row["bits"] == 32
+
+
+def test_stats_single_block_stub() -> None:
+    """t1: a one-block, three-instruction stub -- r2's PLT shape."""
+    from idare2.remote.ops.analysis import _function_stats
+
+    db = _FakeFunctionDb()
+    db.blocks = [_FakeBlock(0x1000, 0x1100)]
+    db.instructions = [
+        SimpleNamespace(address=0x1000),
+        SimpleNamespace(address=0x1004),
+        SimpleNamespace(address=0x1008),
+    ]
+    stats = _function_stats(db, db.func)
+    assert stats["nbbs"] == 1
+    assert stats["edges"] == 0
+    assert stats["cc"] == 1
+    assert stats["ninstrs"] == 3
+    assert stats["maxbbins"] == 3
+    assert stats["midbbins"] == 3.0
+    assert stats["ratbbins"] == 3.0
+    assert stats["is-lineal"] is True
+
+
+def test_stats_diamond_has_edges_and_cc() -> None:
+    """t2: three blocks chained 0->1->(0,2): edges=3, cc=2."""
+    from idare2.remote.ops.analysis import _function_stats
+
+    db = _FakeFunctionDb()
+    db.blocks = [
+        _FakeBlock(0x1000, 0x1008, succs=(1,)),
+        _FakeBlock(0x1008, 0x1010, succs=(0, 2)),
+        _FakeBlock(0x1010, 0x1100),
+    ]
+    stats = _function_stats(db, db.func)
+    assert stats["edges"] == 3
+    assert stats["cc"] == 2
+
+
+def test_stats_self_loop_counts_as_an_edge() -> None:
+    """t3: a block jumping to itself contributes its own edge."""
+    from idare2.remote.ops.analysis import _function_stats
+
+    db = _FakeFunctionDb()
+    db.blocks = [
+        _FakeBlock(0x1000, 0x1008, succs=(0, 1)),
+        _FakeBlock(0x1008, 0x1100),
+    ]
+    stats = _function_stats(db, db.func)
+    assert stats["edges"] == 2
+    assert stats["cc"] == 2
+
+
+def test_stats_out_of_block_instructions_count_toward_ninstrs_only() -> None:
+    """t4: a tail instruction outside every bucket lifts ninstrs, not bins."""
+    from idare2.remote.ops.analysis import _function_stats
+
+    db = _FakeFunctionDb()
+    db.blocks = [_FakeBlock(0x1000, 0x1008)]
+    db.instructions = [
+        SimpleNamespace(address=0x1000),
+        SimpleNamespace(address=0x1080),  # inside the function, outside the block
+    ]
+    stats = _function_stats(db, db.func)
+    assert stats["ninstrs"] == 2
+    assert stats["maxbbins"] == 1
+    assert stats["ratbbins"] == 2.0
+
+
+def test_stats_survives_a_bad_succs_and_a_bad_flowchart() -> None:
+    """t5/t6: one bad block degrades to zero edges; a bad chart to all zeros."""
+    from idare2.remote.ops.analysis import _function_stats
+
+    db = _FakeFunctionDb()
+    bad = _FakeBlock(0x1000, 0x1008)
+    bad.succs = lambda: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
+    db.blocks = [bad, _FakeBlock(0x1008, 0x1100)]
+    stats = _function_stats(db, db.func)
+    assert stats["edges"] == 0
+    assert stats["nbbs"] == 2
+    assert stats["cc"] == 1
+
+    db.blocks = None  # type: ignore[assignment]
+    db.functions.get_flowchart = lambda _f: (_ for _ in ()).throw(RuntimeError("boom"))
+    assert _function_stats(db, db.func)["nbbs"] == 0
+
+
+def test_stats_median_of_even_bucket_count_is_a_float() -> None:
+    """t7: two blocks -> median is the mean of the two counts."""
+    from idare2.remote.ops.analysis import _function_stats
+
+    db = _FakeFunctionDb()
+    db.blocks = [_FakeBlock(0x1000, 0x1008), _FakeBlock(0x1008, 0x1100)]
+    db.instructions = [SimpleNamespace(address=0x1000), SimpleNamespace(address=0x1008)]
+    stats = _function_stats(db, db.func)
+    assert stats["midbbins"] == 1.0
+    assert stats["maxbbins"] == 1
+
+
+def test_aflj_omits_nlocals_unless_opted_in() -> None:
+    """t8/t9: nlocals rides on with_locals, never on processor luck."""
+    from idare2.remote.ops.analysis import functions
+
+    rows, _meta = functions(_FakeFunctionDb())
+    assert "nlocals" not in rows[0]
+
+    rows, _meta = functions(_FakeFunctionDb(), with_locals=True)
+    assert rows[0]["nlocals"] == 0
+
+
+def test_afl_and_aflj_stats_agree_on_the_same_function() -> None:
+    """afij and aflj share _function_stats; same function, same numbers."""
+    from idare2.remote.ops.analysis import functions
+
+    db = _FakeFunctionDb()
+    rows, _meta = functions(db)
+    detail = dispatch.invoke(db, "function_info", {"ea": 0x1000})
+    info = _rows(detail)
+    for key in ("nbbs", "ninstrs", "edges", "cc", "maxbbins", "midbbins", "ratbbins", "is-lineal"):
+        assert info[key] == rows[0][key], key
 
 
 def test_function_info_json_follows_r2_afij() -> None:

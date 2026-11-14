@@ -229,6 +229,10 @@ def function_analysis(session: Session, statement: Statement) -> list[str]:
 
     if token in ("afl", "aflj", "aflq", "aflc", "afl+", "afln"):
         pattern = rest[0] if rest else None
+        # `nlocals` needs a Hex-Rays query per function, which triples aflj
+        # on large binaries, so the table rows never carry it -- `afij`
+        # (one function at a time) does.  The op keeps the with_locals knob
+        # for callers that really want it.
         payload, meta = session.remote.call_with_meta(
             "functions", pattern=pattern, offset=offset, count=count
         )
