@@ -154,6 +154,13 @@ class Session:
         found = self.flags.lookup(name)
         if found is not None:
             return found
+        if name == "entry0":
+            # r2 synthesises entry0 at the program entry point; IDA keeps the
+            # loader's own spelling (_start, start, ...).  Resolve the r2 name
+            # here so `s entry0`/`pd @ entry0` work out of the box.
+            entry = int(self.info.get("start_ip") or 0)
+            if entry:
+                return entry
         if name in self.aliases:
             return self.eval(self.aliases[name])
         return None

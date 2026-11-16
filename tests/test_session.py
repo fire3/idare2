@@ -861,6 +861,14 @@ def test_dummy_names_resolve_without_a_round_trip() -> None:
     assert "symbols" not in remote.operations
 
 
+def test_r2_entry0_name_resolves_to_the_entry_point() -> None:
+    """r2 names the entry point entry0; IDA keeps the loader's spelling."""
+    session, _ = make_session()
+    assert session.lookup_name("entry0") == 0x1000
+    assert session.run("s entry0") == []
+    assert session.seek == 0x1000
+
+
 def test_alias_is_a_variable() -> None:
     session, _ = make_session()
     session.run("$m=main")

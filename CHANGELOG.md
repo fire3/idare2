@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `s entry0` (and any `@ entry0`) now resolves to the program entry point.
+  radare2 synthesises an `entry0` flag, while IDA keeps the loader's own
+  spelling (`_start`, `start`, ...), so the r2 name used to fail with
+  `ERROR: cannot resolve name 'entry0'` and made a batch run exit non-zero.
+
 - `-a` now accepts radare2 architecture names (`x86`, `arm`, `mips`, `ppc`,
   `riscv`, `m68k`, `sparc`, `sh`, `s390`, ...) and maps them to the IDA
   processor module they select. `-a x86` used to be passed to IDA verbatim,
