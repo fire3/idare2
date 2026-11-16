@@ -16,10 +16,22 @@ _WIDTHS = {1: "byte", 2: "word", 4: "dword", 8: "qword"}
 
 @op("read_bytes")
 def read_bytes(db: Any, ea: int, count: int) -> dict[str, Any]:
-    """Raw memory read (``px``, ``p8``, ``pr``)."""
+    """Raw memory read (``px``, ``p8``, ``pr``).
+
+    r2 fills unmapped bytes with 0xff instead of failing the whole request
+    (``px 8`` past EOF is a common workflow), so the same padding is applied
+    here; partially mapped ranges keep their readable prefix.
+    """
     if count > MAX_READ:
         helpers.fail(protocol.BAD_ARGS, f"refusing to read {count} bytes at once")
-    return {"ea": ea, "count": count, "data": helpers.read_bytes(db, ea, count)}
+    try:
+        data = db.bytes.get_bytes_at(ea, count)
+        raw = b"\xff" * count if data is None else bytes(data)
+    except Exception:
+        raw = b"\xff" * count
+    if len(raw) < count:
+        raw += b"\xff" * (count - len(raw))
+    return {"ea": ea, "count": count, "data": raw[:count]}
 
 
 @op("read_values")

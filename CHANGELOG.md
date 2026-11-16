@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `iIj` is now a real token (`iI` as JSON), and `-j` maps `iI` onto it. The
+  JSON bundle workflows that call `iIj` no longer fail with "unsupported
+  information command 'Ij'".
+- Unmapped reads (`px`/`p8` past EOF) now return `ff` bytes instead of failing
+  the command, matching r2; a partially mapped read keeps its readable prefix.
 - The numeric repeat prefix now repeats the command's output too:
   `3?e x` prints `x` three times instead of only the last iteration.
 - Backtick and `$(...)` substitution run before parsing, so

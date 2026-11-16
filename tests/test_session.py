@@ -895,6 +895,12 @@ def test_backtick_substitution_runs_the_inner_command() -> None:
     assert session.run("?e v-$(?e sub)") == ["v-sub"]
 
 
+def test_iIj_emits_the_file_info_as_json() -> None:
+    session, _ = make_session()
+    payload = json.loads(session.run("iIj")[0])
+    assert payload["filesize"] == 0x3000
+
+
 def test_alias_is_a_variable() -> None:
     session, _ = make_session()
     session.run("$m=main")
@@ -2499,11 +2505,11 @@ def test_json_default_switches_agf_without_touching_agfd() -> None:
     assert session.run("agfd @ 0x1000")[0] == "digraph code {"
 
 
-def test_json_default_leaves_iI_as_text() -> None:
-    """`iIj` is not a token any handler accepts; `-j` must keep `iI` working."""
+def test_json_default_turns_iI_into_json() -> None:
+    """`iIj` is a real token, so -j may select it."""
     session, remote = _json_default()
     lines = session.run("iI")
-    assert not any(line.startswith("{") for line in lines)
+    assert lines and lines[0].startswith("{")
     assert not session.failed
     assert "file_info" in [name for name, _ in remote.calls]
 

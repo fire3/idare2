@@ -139,7 +139,7 @@ def test_print_suffix_set_covers_implemented_and_explicitly_unsupported() -> Non
     ("token", "expected"),
     [
         # Commands the report caught turning into usage errors under -j.
-        ("iI", None),
+        ("iI", "iIj"),
         ("iM", None),
         ("ig", None),
         ("af", None),

@@ -80,6 +80,21 @@ def test_dispatcher_preserves_handler_error_codes(monkeypatch) -> None:
     }
 
 
+def test_read_bytes_pads_unmapped_with_ff() -> None:
+    """r2's px/p8 return 0xff past EOF; the raw-read op must not fail."""
+    db = SimpleNamespace(bytes=SimpleNamespace(get_bytes_at=lambda ea, count: None))
+    envelope = dispatch.invoke(db, "read_bytes", {"ea": 0xFFFFFFF0, "count": 8})
+    assert protocol.is_ok(envelope), envelope
+    assert bytes(envelope["result"]["data"]) == b"\xff" * 8
+
+
+def test_read_bytes_pads_a_short_read() -> None:
+    db = SimpleNamespace(bytes=SimpleNamespace(get_bytes_at=lambda ea, count: b"AB"))
+    envelope = dispatch.invoke(db, "read_bytes", {"ea": 0x1000, "count": 4})
+    assert protocol.is_ok(envelope), envelope
+    assert bytes(envelope["result"]["data"]) == b"AB\xff\xff"
+
+
 def test_duplicate_remote_operation_fails_loudly() -> None:
     with pytest.raises(ValueError, match="duplicate remote operation 'imports'"):
         dispatch.op("imports")(lambda db: None)

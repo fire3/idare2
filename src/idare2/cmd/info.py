@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 INFO_DETAIL = [
     ("i", "", "show information about the current file"),
     ("iI", "", "binary info (key: value)"),
+    ("iIj", "", "binary info as JSON"),
     ("ij", "", "the same information as JSON"),
     ("it", "", "file hashes"),
     ("itj", "", "file hashes as JSON"),
@@ -80,7 +81,7 @@ _DEMANGLE_ALIASES = {
     "freepascal": "pascal",
 }
 
-FILE_TOKENS = frozenset({"i", "iI", "ij", "it", "itj"})
+FILE_TOKENS = frozenset({"i", "iI", "iIj", "ij", "it", "itj"})
 
 LISTING_DETAIL = {
     "ii": [("ii", "[pat]", "imports"), ("iij", "[pat]", "imports as JSON")],
@@ -311,7 +312,7 @@ def _format_section_symbols(
     summary="file information",
     detail=INFO_DETAIL,
     json_suffix=True,
-    suffixes=frozenset({"", "I", "j", "t", "tj"}),
+    suffixes=frozenset({"", "I", "Ij", "j", "t", "tj"}),
     suffix_label="information command",
     suffix_help="i?",
 )
