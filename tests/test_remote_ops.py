@@ -80,6 +80,44 @@ def test_dispatcher_preserves_handler_error_codes(monkeypatch) -> None:
     }
 
 
+def test_imports_fill_plt_addresses_from_executable_functions(monkeypatch) -> None:
+    """IDA's ``.puts`` PLT stub supplies the vaddr r2 prints for ``ii``."""
+    from idare2.remote.ops import info as info_ops
+
+    class FakeElf:
+        @staticmethod
+        def import_rows():
+            return [
+                {"ordinal": 1, "ea": 0, "vaddr": None, "bind": "GLOBAL",
+                 "type": "FUNC", "lib": "", "name": "puts"},
+                {"ordinal": 2, "ea": 0, "vaddr": None, "bind": "WEAK",
+                 "type": "NOTYPE", "lib": "", "name": "_ITM_deregisterTMCloneTable"},
+            ]
+
+    class FakeFunctions:
+        @staticmethod
+        def get_all():
+            return [SimpleNamespace(start_ea=0x1060), SimpleNamespace(start_ea=0x4090)]
+
+        @staticmethod
+        def get_name(func):
+            return ".puts" if int(func.start_ea) == 0x1060 else "puts"
+
+    db = SimpleNamespace(
+        segments=SimpleNamespace(
+            get_all=lambda: [
+                SimpleNamespace(start_ea=0x1000, end_ea=0x2000, perm=5),
+                SimpleNamespace(start_ea=0x4000, end_ea=0x5000, perm=6),
+            ]
+        ),
+        functions=FakeFunctions(),
+    )
+    monkeypatch.setattr(info_ops, "_elf_for", lambda db: FakeElf())
+    rows = _rows(dispatch.invoke(db, "imports", {"offset": 0, "count": None}))
+    assert rows[0]["vaddr"] == 0x1060
+    assert rows[1]["vaddr"] is None
+
+
 def test_read_bytes_pads_unmapped_with_ff() -> None:
     """r2's px/p8 return 0xff past EOF; the raw-read op must not fail."""
     db = SimpleNamespace(bytes=SimpleNamespace(get_bytes_at=lambda ea, count: None))

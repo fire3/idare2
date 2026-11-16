@@ -565,9 +565,13 @@ def imports(
 
     def make() -> Iterator[dict[str, Any]]:
         if elf is not None:
+            plt = _plt_functions(db)
             for row in elf.import_rows():
-                if predicate(row["name"]):
-                    yield row
+                if not predicate(row["name"]):
+                    continue
+                if not row.get("vaddr"):
+                    row["vaddr"] = plt.get(row["name"])
+                yield row
             return
         for item in db.imports.get_all_imports():
             name = item.name or ""
@@ -585,6 +589,38 @@ def imports(
             }
 
     return helpers.paged(make, offset, count)
+
+
+def _plt_functions(db: Any) -> dict[str, int]:
+    """Import name -> PLT stub address, from functions in executable segments.
+
+    IDA names an x86-64 PLT stub ``.puts`` while the import is ``puts``; the
+    EXTERNAL-segment copy (``puts`` at the IAT/thunk address) is not the
+    address r2 reports.  Keeping only functions that live in an executable
+    segment and normalising the leading dot resolves both.
+    """
+    executable: list[tuple[int, int]] = []
+    try:
+        for segment in db.segments.get_all():
+            if int(getattr(segment, "perm", 0)) & 1:
+                executable.append((int(segment.start_ea), int(segment.end_ea)))
+    except Exception:
+        return {}
+    out: dict[str, int] = {}
+    try:
+        functions = list(db.functions.get_all())
+    except Exception:
+        return {}
+    for func in functions:
+        ea = int(func.start_ea)
+        if not any(start <= ea < end for start, end in executable):
+            continue
+        name = str(db.functions.get_name(func) or "").lstrip(".")
+        if not name:
+            continue
+        if name not in out or ea < out[name]:
+            out[name] = ea
+    return out
 
 
 @op("entries")

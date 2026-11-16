@@ -172,7 +172,8 @@ def test_import_table_matches_radare2_columns(session: FakeSession) -> None:
         },
     ]
     lines = fmt_listing.format_imports(rows, session)
-    assert lines[0].split() == ["nth", "vaddr", "bind", "type", "lib", "name"]
+    assert lines[0] == "nth vaddr      bind   type   lib name"
+    assert lines[1] == "-" * 37
     assert lines[2].split() == ["3", "0x0000e740", "GLOBAL", "FUNC", "pthread_detach"]
     assert lines[3].split() == [
         "50", "----------", "WEAK", "NOTYPE", "_ITM_deregisterTMCloneTable",

@@ -171,23 +171,27 @@ def format_symbols(symbols: list[dict[str, Any]], session: Any) -> list[str]:
 
 
 def format_imports(imports: list[dict[str, Any]], session: Any) -> list[str]:
-    """``ii`` -- nth/vaddr/bind/type/lib/name."""
+    """``ii`` -- r2's fixed nth/vaddr/bind/type/lib/name layout.
+
+    The rule is 37 characters (the header width), independent of how long the
+    symbol names are; r2 lets long names overflow the table.
+    """
     width = addr_width(session.info.get("bits"))
-    headers = ("nth", "vaddr", "bind", "type", "lib", "name")
-    rows = []
+    lines = [
+        "nth vaddr      bind   type   lib name",
+        "-" * 37,
+    ]
     for item in imports:
         vaddr = item.get("vaddr", item.get("ea", 0))
-        rows.append(
-            [
-                str(item.get("ordinal", 0)),
-                fmt_addr(int(vaddr), width) if vaddr is not None else "----------",
-                item.get("bind") or "NONE",
-                item.get("type") or "NONE",
-                item.get("lib", item.get("module", "")) or "",
-                item["name"],
-            ]
+        lines.append(
+            f"{str(item.get('ordinal', 0)):<4}"
+            f"{(fmt_addr(int(vaddr), width) if vaddr is not None else '----------'):<11}"
+            f"{(item.get('bind') or 'NONE'):<7}"
+            f"{(item.get('type') or 'NONE'):<7}"
+            f"{(item.get('lib', item.get('module', '')) or ''):<4}"
+            f"{item['name']}"
         )
-    return table(headers, rows)
+    return lines
 
 
 def format_entry_points(rows: list[dict[str, Any]], session: Any) -> list[str]:

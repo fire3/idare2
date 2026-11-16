@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ii` now resolves the vaddr of function imports from their PLT stub (IDA
+  names the stub `.puts` while the import is `puts`), so the column matches r2
+  instead of `----------`. The table also uses r2's fixed 37-character rule,
+  even when a long symbol name overflows it.
 - `iIj` is now a real token (`iI` as JSON), and `-j` maps `iI` onto it. The
   JSON bundle workflows that call `iIj` no longer fail with "unsupported
   information command 'Ij'".
