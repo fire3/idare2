@@ -883,6 +883,18 @@ def test_undo_is_allowed_in_a_read_only_session() -> None:
     ]
 
 
+def test_repeat_prefix_repeats_the_output() -> None:
+    """r2 prints `3?e x` as three lines, not one."""
+    session, _ = make_session()
+    assert session.run("3?e x") == ["x", "x", "x"]
+
+
+def test_backtick_substitution_runs_the_inner_command() -> None:
+    session, _ = make_session()
+    assert session.run("?e v-`?e sub`") == ["v-sub"]
+    assert session.run("?e v-$(?e sub)") == ["v-sub"]
+
+
 def test_alias_is_a_variable() -> None:
     session, _ = make_session()
     session.run("$m=main")

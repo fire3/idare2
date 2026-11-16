@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The numeric repeat prefix now repeats the command's output too:
+  `3?e x` prints `x` three times instead of only the last iteration.
+- Backtick and `$(...)` substitution run before parsing, so
+  `?e v-`?e sub`` prints `v-sub` like r2 (nested substitution is bounded).
 - `u`/`U` (undo/redo) now work in a read-only session. They only replay IDA's
   undo/redo history, so reverting a patch that an earlier `-w` session wrote
   succeeds instead of failing with "could modify the database".

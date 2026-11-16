@@ -36,6 +36,10 @@ from idare2.parser import Statement
 #: r2's default block size.
 DEFAULT_BLOCKSIZE = 0x100
 
+_BACKTICK = re.compile(r"`([^`]*)`")
+_DOLLAR_SUBST = re.compile(r"\$\(([^()]*)\)")
+MAX_BACKTICK_DEPTH = 8
+
 _NAME_RE = re.compile(r"[A-Za-z_.][A-Za-z0-9_.$:]*")
 
 
@@ -106,6 +110,7 @@ class Session:
         self.env: dict[str, str] = dict(os.environ)
         #: Text-log entries for `T` (r2's message log).
         self.text_log: list[dict[str, Any]] = []
+        self._backtick_depth = 0
         # Command modules register themselves on import; doing it here means a
         # Session is usable on its own, without going through the CLI.
         cmd.load_all()
@@ -231,6 +236,30 @@ class Session:
 
     # -- execution ---------------------------------------------------------
 
+    def _expand_backticks(self, line: str) -> str:
+        """Replace ``\u0060cmd\u0060`` / ``$(cmd)`` with the inner command's output.
+
+        radare2 substitutes the first output line before parsing the outer
+        statement, so ``?e v-\u0060?e sub\u0060`` prints ``v-sub``.
+        """
+        if "`" not in line and "$(" not in line:
+            return line
+        if line.count("`") % 2:
+            raise UsageError("unterminated backtick substitution")
+        if self._backtick_depth >= MAX_BACKTICK_DEPTH:
+            raise UsageError("backtick substitution nested too deeply")
+        self._backtick_depth += 1
+        try:
+
+            def replace_match(match: re.Match[str]) -> str:
+                produced = self.run(match.group(1))
+                return produced[0].strip() if produced else ""
+
+            line = _DOLLAR_SUBST.sub(replace_match, line)
+            return _BACKTICK.sub(replace_match, line)
+        finally:
+            self._backtick_depth -= 1
+
     def run(
         self,
         line: str,
@@ -250,6 +279,13 @@ class Session:
         happened later and the output reads out of order.
         """
         out: list[str] = []
+        try:
+            line = self._expand_backticks(line)
+        except Idare2Error as exc:
+            self.failed = True
+            self.last_error = exc
+            self.stderr(self.colors.error(f"ERROR: {exc}"))
+            return []
         for statement in parser.parse(line):
             try:
                 produced = self.run_statement(statement)
@@ -273,6 +309,13 @@ class Session:
         the outer statement.
         """
         produced: list[str] = []
+        try:
+            text = self._expand_backticks(text)
+        except Idare2Error as exc:
+            self.failed = True
+            self.last_error = exc
+            self.stderr(self.colors.error(f"ERROR: {exc}"))
+            return produced
         for statement in parser.parse(text):
             try:
                 produced.extend(self.run_statement(statement))
@@ -295,7 +338,9 @@ class Session:
         lines: list[str] = []
         for _ in range(max(statement.repeat, 1)):
             with self._temporary(statement):
-                lines = self.dispatch(statement)
+                # r2's numeric prefix repeats the command *and* its output;
+                # keeping only the last iteration printed `3?e x` once.
+                lines.extend(self.dispatch(statement))
         return self.postprocess(lines, statement)
 
     def dispatch(self, statement: Statement) -> list[str]:
