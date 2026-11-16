@@ -298,9 +298,7 @@ def _base64(session: Session, modifier: str, argument: str) -> list[str]:
 @command(
     "u",
     usage="",
-    summary="undo the last database change",
-    detail="Replays IDA's undo history; allowed in a read-only session because "
-    "it only restores content that was changed earlier",
+    summary="undo the last database change (allowed in read-only sessions)",
     writes=True,
     readonly_ok=True,
 )
@@ -315,8 +313,7 @@ def undo(session: Session, statement: Statement) -> list[str]:
 @command(
     "U",
     usage="",
-    summary="redo the last undone change",
-    detail="Replays IDA's undo history; allowed in a read-only session",
+    summary="redo the last undone change (allowed in read-only sessions)",
     writes=True,
     readonly_ok=True,
 )
