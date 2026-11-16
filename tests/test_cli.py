@@ -353,3 +353,35 @@ def test_command_line_evals_beat_the_rc_file(monkeypatch, tmp_path: Path, capsys
     assert "3" in run("-q", "-c", "e scr.color", "sample.bin").split()
     # With -e the command line wins, rc notwithstanding.
     assert "0" in run("-q", "-e", "scr.color=0", "-c", "e scr.color", "sample.bin").split()
+
+
+def test_run_stdin_executes_piped_commands(monkeypatch, capsys) -> None:
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("# comment\n\nie\nq\n"))
+    session = _Session()
+    cli._run_stdin(session)
+    assert session.lines == ["ie", "q"]
+
+
+def test_run_stdin_is_a_noop_for_a_tty(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "sys.stdin", SimpleNamespace(isatty=lambda: True, __iter__=lambda self: iter(["ie\n"]))
+    )
+    session = _Session()
+    cli._run_stdin(session)
+    assert session.lines == []
+
+
+def test_run_stdin_propagates_the_quit_code(monkeypatch) -> None:
+    import io
+
+    class _QuittingSession(_Session):
+        def run(self, line: str, emit=None) -> list[str]:
+            super().run(line, emit)
+            raise QuitRequested(3)
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("q\n"))
+    with pytest.raises(QuitRequested) as caught:
+        cli._run_stdin(_QuittingSession())
+    assert caught.value.code == 3

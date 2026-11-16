@@ -220,6 +220,10 @@ def _run(options: argv_parser.Options) -> int:
 
         if interactive:
             return _repl(session, options)
+        if not options.commands and not options.pre_scripts and not options.post_scripts:
+            # r2 reads commands from a pipe when no -c/-i was given.  A batch
+            # invocation's stdin is /dev/null, so this ends immediately there.
+            _run_stdin(session)
         # A batch run's exit code reflects whether every command succeeded,
         # the way r2's does.
         return EXIT_FAIL if session.failed else EXIT_OK
@@ -323,6 +327,21 @@ def _emit(lines: list[str]) -> None:
         sys.stdout.write(line)
         sys.stdout.write("\n")
     sys.stdout.flush()
+
+
+def _run_stdin(session: Session) -> None:
+    """Run commands read from stdin, the way ``r2 -q`` does in a pipeline.
+
+    Blank lines and ``#`` comments are ignored.  ``q`` still unwinds through
+    ``QuitRequested`` so the quit code is preserved.
+    """
+    if sys.stdin.isatty():
+        return
+    for line in sys.stdin:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        session.run(stripped, emit=_emit)
 
 
 def _load_rc(session: Session, options: argv_parser.Options) -> None:

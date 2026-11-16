@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A quiet batch invocation with no `-c`/`-i` now reads commands from stdin
+  like r2: `printf 'ie\nq\n' | idare2 -q file` prints the entry table and
+  exits.  Piped commands used to be ignored entirely, leaving stdout empty.
 - `s entry0` (and any `@ entry0`) now resolves to the program entry point.
   radare2 synthesises an `entry0` flag, while IDA keeps the loader's own
   spelling (`_start`, `start`, ...), so the r2 name used to fail with
