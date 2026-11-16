@@ -21,7 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A database IDA cannot open is now reported as one actionable line naming the
   `.i64` and the IDA diagnosis (`Database initialization failed with error 4`),
   with a pointer at `--reimport`, and exits 3 (no database) instead of 4
-  (transport). Other worker-start failures keep their original error.
+  (transport). When no IDB existed before the attempt the message says so
+  instead of pointing at `--reimport`: IDA has no loader or processor for the
+  file (an sBPF ELF, for example), and `-a/-b` forces a raw import. Other
+  worker-start failures keep their original error.
 
 ## [0.2.1] - 2026-11-16
 

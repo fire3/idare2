@@ -178,6 +178,7 @@ def open_handle(selection: Any, target: Target, *, timeout: float, linger: float
             # Nexus documents: this environment switch forces idalib workers.
             os.environ["IDA_NEXUS_IDALIB_ONLY"] = "1"
         hints = _import_hints_requested(target)
+        existing_db = _database_exists(selection)
         try:
             return DatabaseHandle.open(
                 selection,
@@ -197,7 +198,8 @@ def open_handle(selection: Any, target: Target, *, timeout: float, linger: float
                 ),
             )
         except Exception as exc:
-            translated = _open_failure(selection, target, exc)
+            translated = _open_failure(selection, target, exc,
+                                       existing_db=existing_db)
             if translated is exc:
                 raise
             raise translated from exc
@@ -229,13 +231,34 @@ def _database_diagnosis(text: str) -> str:
     return "; ".join(dict.fromkeys(line for line in lines if line))[:300]
 
 
-def _open_failure(selection: Any, target: Target, exc: Exception) -> Exception:
-    """Turn "the IDB could not be opened" into an actionable error.
+def _database_exists(source: str) -> bool:
+    """Whether an IDB for `source` was already on disk before we opened it.
 
-    A worker killed mid-save leaves a truncated ``.i64``; IDA then prints its
-    b-tree banner and ``Open database failed with result: 4``, Nexus surfaces
-    the whole log as ``WorkerStartError``, and every later invocation fails
-    the same way with exit 4 (transport) and no hint about the real problem.
+    This is what separates the two failures behind IDA's status 4: an existing
+    database that cannot be read (a truncated `.i64`) from a fresh import of a
+    file IDA has no loader or processor for.
+    """
+    text = str(source)
+    candidates = [text] if text.lower().endswith((".i64", ".idb")) else [text + ".i64"]
+    for candidate in candidates:
+        try:
+            path = Path(candidate)
+            if path.is_file() and path.stat().st_size > 0:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _open_failure(selection: Any, target: Target, exc: Exception, *,
+                  existing_db: bool = True) -> Exception:
+    """Turn "the database could not be opened" into an actionable error.
+
+    Two very different causes both surface as IDA status 4 with its b-tree
+    banner: an existing ``.i64`` that cannot be read (a worker killed
+    mid-save), and a fresh import of a file IDA cannot load (an sBPF ELF, for
+    example). Nexus reports the whole log as ``WorkerStartError``; every later
+    invocation then fails with exit 4 (transport) and no hint.
     """
     if isinstance(exc, Idare2Error):
         return exc
@@ -244,6 +267,12 @@ def _open_failure(selection: Any, target: Target, exc: Exception) -> Exception:
     source = str(target.path or selection)
     idb = source if source.lower().endswith((".i64", ".idb")) else source + ".i64"
     detail = _database_diagnosis(str(exc)) or "a database open error"
+    if not existing_db:
+        return NoDatabaseError(
+            f"cannot create database {idb}: {detail} - IDA has no loader or "
+            f"processor for this file; pass -a/-b to force a raw import, or "
+            f"use a tool that reads the format"
+        )
     if target.reimport:
         hint = ("--reimport could not rebuild it either; check that the input "
                 "file is readable")

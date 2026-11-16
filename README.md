@@ -353,6 +353,19 @@ annotations)
 `--reimport` re-creates the database from the input file in one step; the old
 IDB's analysis, names and comments are lost, so it is opt-in.
 
+When no IDB existed before the attempt, IDA failed to *create* one, which means
+it has no loader or processor for the format (an sBPF ELF, for example).
+idare2 says that instead of suggesting `--reimport`, and `-a/-b` forces a raw
+import:
+
+```console
+$ idare2 -qc iI hello_sbpf.so
+ERROR: cannot create database hello_sbpf.so.i64: Database initialization failed
+with error 4; Open database failed with result: 4 - IDA has no loader or
+processor for this file; pass -a/-b to force a raw import, or use a tool that
+reads the format
+```
+
 ### Writing changes
 
 Sessions are read-only by default. Pass `-w` to allow writes:

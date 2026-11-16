@@ -317,6 +317,38 @@ def test_database_failure_after_reimport_says_so(tmp_path) -> None:
     assert "--reimport could not rebuild it" in text
 
 
+def test_a_file_ida_cannot_load_gets_the_creation_hint(tmp_path) -> None:
+    """A fresh import that dies with status 4 is not a truncated database.
+
+    IDA has no loader/processor for an sBPF ELF, so it fails to *create* the
+    IDB; telling the user to --reimport or delete the .i64 would send them in
+    circles.
+    """
+    from ida_nexus import WorkerStartError
+
+    source = str(tmp_path / "hello_sbpf.so")
+    exc = WorkerStartError(_IDA_TRUNCATED_LOG)
+    out = nexus._open_failure(source, Target(path=source), exc, existing_db=False)
+    text = str(out)
+    assert "cannot create database" in text
+    assert "no loader or processor" in text
+    assert "-a/-b" in text
+    assert "--reimport" not in text
+
+
+def test_database_exists_looks_next_to_the_input(tmp_path) -> None:
+    source = tmp_path / "sample"
+    source.write_bytes(b"\x7fELF")
+    assert nexus._database_exists(str(source)) is False
+    (tmp_path / "sample.i64").write_bytes(b"\x00" * 16)
+    assert nexus._database_exists(str(source)) is True
+    assert nexus._database_exists(str(tmp_path / "sample.i64")) is True
+    empty = tmp_path / "empty"
+    empty.write_bytes(b"")
+    (tmp_path / "empty.i64").write_bytes(b"")
+    assert nexus._database_exists(str(empty)) is False
+
+
 def test_other_worker_failures_keep_their_original_error(tmp_path) -> None:
     from ida_nexus import WorkerStartError
 
