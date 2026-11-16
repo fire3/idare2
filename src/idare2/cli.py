@@ -18,7 +18,7 @@ import os
 import sys
 from pathlib import Path
 
-from idare2 import __version__
+from idare2 import __version__, arch
 from idare2 import argv as argv_parser
 from idare2.config import Config
 from idare2.errors import (
@@ -52,8 +52,7 @@ Targeting
 
 Behaviour
   -A, -AA                 wait for analysis (deep with -AA)
-  -a <arch> -b <bits>     import hints for a database Nexus has to create
-  --endian big|little     byte order for a raw binary (default: little)
+  -a <arch> -b <bits>     raw import hints (r2 names: x86, arm, mips, ...)
   -B <baddr>, -m <addr>   load base address
   -n                      do not start autoanalysis
   -N                      skip the user rc file
@@ -208,6 +207,10 @@ def _run(options: argv_parser.Options) -> int:
         # still reports 0).  The rc file runs through `session.run`, so it
         # would otherwise overwrite whatever the user forced on the CLI.
         for key, value in options.evals:
+            if key == "cfg.bigendian":
+                # Applied as an import hint before the worker spawned; the
+                # session reflects the real byte order from the database.
+                continue
             session.config.set(key, value)
         session._resolve_color()
 
@@ -226,13 +229,26 @@ def _config_from(options: argv_parser.Options) -> Config:
     # Only the output-mode switches are applied here: the `-e` evals are
     # re-applied after the rc file so the command line wins (see _run).
     config = Config()
-    if options.color is not None:
-        config.set("scr.color", options.color)
     if options.json:
         config.set("scr.color", 0)
-    for key, _value in options.evals:
-        config.get(key)  # unknown keys fail before a database is opened
+    for key, value in options.evals:
+        # Unknown keys and malformed values fail before a database is opened.
+        config.parse(key, value)
     return config
+
+
+def _endian_from(options: argv_parser.Options) -> str | None:
+    """The byte order for a raw import.
+
+    ``cfg.bigendian`` is r2's spelling and has to be read before the database
+    is opened, because IDA's raw loader is what needs it.  The alias can also
+    imply one (``mipsbe``, ``ppc64le``).
+    """
+    endian = arch.implied_endian(options.arch)
+    for key, value in options.evals:
+        if key == "cfg.bigendian":
+            endian = "big" if Config().parse(key, value) else "little"
+    return endian
 
 
 def _target_from(options: argv_parser.Options) -> Target:
@@ -245,8 +261,8 @@ def _target_from(options: argv_parser.Options) -> Target:
         spawn=options.spawn,
         backend=options.backend,
         processor=options.arch,
-        bits=_parse_bits(options.bits) if options.bits else None,
-        endian=options.endian,
+        bits=_parse_bits(options.bits) if options.bits else arch.implied_bits(options.arch),
+        endian=_endian_from(options),
         image_base=_parse_base(options.base) if options.base else None,
         auto_analysis=not options.no_analysis,
         save_on_close=bool(options.save_on_close),

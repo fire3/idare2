@@ -94,6 +94,17 @@ def test_processor_hint_selects_the_arm_subtype() -> None:
     assert _processor_hint("arm:ARMv7", 64) == "arm:ARMv7"
 
 
+def test_processor_hint_accepts_r2_architecture_names() -> None:
+    from idare2.nexus import _processor_hint
+
+    assert _processor_hint("x86", 64) == "metapc"
+    assert _processor_hint("mips", 32, "big") == "mipsb"
+    assert _processor_hint("mips", 32) == "mipsl"
+    assert _processor_hint("sparc", 32, "big") == "sparcb"
+    assert _processor_hint("m68k", 32) == "68000"
+    assert _processor_hint("sh", 32) == "sh4"
+
+
 def test_connect_applies_import_hints_before_analysis(stubbed_nexus, monkeypatch) -> None:
     import idare2.nexus as nexus
 

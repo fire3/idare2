@@ -6,7 +6,7 @@ Run with::
     uv run pytest -m arch_matrix -q -k mips32be
 
 Each entry is a raw binary made of one instruction repeated to at least 64
-bytes, imported at ``0x1000`` with ``--processor``/``bits``/``--endian``.  The
+bytes, imported at ``0x1000`` with ``-a``/``-b``/``-e cfg.bigendian``.  The
 sample bytes were verified with ``rasm2 -a <arch> -b <bits> [-e big] -d``
 before being frozen here; the test itself does not need radare2.
 

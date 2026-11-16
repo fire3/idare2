@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `-a` now accepts radare2 architecture names (`x86`, `arm`, `mips`, `ppc`,
+  `riscv`, `m68k`, `sparc`, `sh`, `s390`, ...) and maps them to the IDA
+  processor module they select. `-a x86` used to be passed to IDA verbatim,
+  which failed with "The processor type 'x86' is not included" because IDA
+  calls that module `metapc`. IDA processor names (`metapc`, `mipsb`,
+  `sparcb`, `arm:ARMv7`, ...) still work unchanged.
+- Removed the idare2-only `--color` and `--endian` long options. Their
+  radare2 spellings work instead: `-e scr.color=0` and
+  `-e cfg.bigendian=true|false` (the latter is applied as a raw-import hint
+  before the database is opened).
+
 ## [0.2.0] - 2026-11-14
 
 Output-format alignment with radare2 6.2.6, from the CLI-difference

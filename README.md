@@ -299,16 +299,20 @@ Specify the processor, bitness, byte order, and load address when importing a
 binary without an ELF or PE header:
 
 ```bash
+idare2 -a x86 -b 64 -B 0x1000 firmware.bin
 idare2 -a arm -b 32 -B 0x1000 firmware.bin
-idare2 -a mipsb -b 32 --endian big -B 0x1000 firmware.bin
+idare2 -a mips -b 32 -e cfg.bigendian=true -B 0x1000 firmware.bin
 ```
 
-- `-a` is an IDA processor name, for example `metapc`, `arm:ARMv7`,
-  `arm:ARMv8`, `armb`, `mipsl`, `mipsb`, `ppc`, `riscv`, `s390x`, `68000`,
-  `sparcb`, or `sh4`.
+- `-a` uses radare2's `asm.arch` names, for example `x86`, `arm`, `mips`,
+  `ppc`, `riscv`, `m68k`, `sparc`, `sh`, `s390`, `avr`, `wasm` or `6502`.
+  Aliases such as `x86_64`/`amd64`, `arm64`/`aarch64`, `mipsbe`/`mipsle`
+  and `ppc64le` are accepted too. IDA processor names (`metapc`, `mipsb`,
+  `sparcb`, `arm:ARMv7`, `68000`, ...) keep working unchanged.
 - `-b` must be `16`, `32`, or `64`.
-- `--endian big|little` overrides the byte order the raw loader would pick for
-  that processor.
+- `-e cfg.bigendian=true|false` overrides the byte order the alias or IDA's
+  raw loader would pick. Bare `mips`, `sparc` and `xtensa` default to
+  little-endian, radare2's default, when no byte order is given.
 - `-B` is the load base and must be non-negative and 16-byte aligned.
 
 These options apply when a new IDB is created. When `-B` is set, it also becomes

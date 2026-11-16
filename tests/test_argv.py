@@ -61,18 +61,30 @@ def test_import_hints() -> None:
     assert (options.arch, options.bits, options.base) == ("arm", "32", "0x8000")
 
 
-def test_endian_import_hint() -> None:
-    options = argv.parse(["--endian", "big", "-a", "mips", "firmware.bin"])
-    assert options.endian == "big"
-    target = cli._target_from(options)
+def test_cfg_bigendian_is_a_raw_import_hint() -> None:
+    target = cli._target_from(
+        argv.parse(["-e", "cfg.bigendian=true", "-a", "mips", "firmware.bin"])
+    )
     assert target.endian == "big"
-    assert argv.parse(["firmware.bin"]).endian is None
+
+    target = cli._target_from(
+        argv.parse(["-e", "cfg.bigendian=false", "-a", "mips", "firmware.bin"])
+    )
+    assert target.endian == "little"
 
 
 @pytest.mark.parametrize("value", ["BE", "native", "both"])
-def test_invalid_endian_is_a_usage_error(value: str) -> None:
-    with pytest.raises(UsageError, match="--endian must be big or little"):
-        argv.parse([f"--endian={value}"])
+def test_invalid_cfg_bigendian_is_a_usage_error(value: str) -> None:
+    with pytest.raises(UsageError, match="expected a boolean"):
+        cli._target_from(
+            argv.parse(["-e", f"cfg.bigendian={value}", "firmware.bin"])
+        )
+
+
+@pytest.mark.parametrize("option", ["--color", "--endian"])
+def test_idare2_only_long_options_are_rejected(option: str) -> None:
+    with pytest.raises(UsageError, match="unknown option"):
+        argv.parse([option, "0"])
 
 
 def test_import_hints_become_typed_target_fields() -> None:
@@ -80,6 +92,20 @@ def test_import_hints_become_typed_target_fields() -> None:
         argv.parse(["-a", "arm", "-b", "32", "-B", "0x8000", "firmware.bin"])
     )
     assert (target.processor, target.bits, target.image_base) == ("arm", 32, 0x8000)
+
+
+def test_r2_arch_names_are_kept_for_the_processor_hint() -> None:
+    target = cli._target_from(
+        argv.parse(
+            ["-a", "x86", "-b", "64", "-e", "cfg.bigendian=false", "firmware.bin"]
+        )
+    )
+    assert (target.processor, target.bits, target.endian) == ("x86", 64, "little")
+
+
+def test_arch_alias_implies_width_and_byte_order() -> None:
+    target = cli._target_from(argv.parse(["-a", "mips64", "firmware.bin"]))
+    assert (target.processor, target.bits, target.endian) == ("mips64", 64, "little")
 
 
 @pytest.mark.parametrize("bits", ["0", "24", "128", "not-a-number"])

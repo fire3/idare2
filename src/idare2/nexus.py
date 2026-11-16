@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from idare2 import arch
 from idare2.errors import (
     Idare2Error,
     NoDatabaseError,
@@ -184,7 +185,9 @@ def open_handle(selection: Any, target: Target, *, timeout: float, linger: float
                 # starts quiet, idare2 applies the raw-binary bitness/entry,
                 # and connect() drains analysis afterwards.
                 auto_analysis=target.auto_analysis and not hints,
-                processor=_processor_hint(target.processor, target.bits),
+                processor=_processor_hint(
+                    target.processor, target.bits, target.endian
+                ),
                 image_base=target.image_base,
             ),
         )
@@ -323,16 +326,16 @@ def _import_hints_requested(target: Target) -> bool:
     )
 
 
-def _processor_hint(processor: str | None, bits: int | None) -> str | None:
-    """Choose the processor subtype that matches a requested bitness."""
-    if not processor or bits is None or ":" in processor:
-        return processor
-    if processor.lower() == "arm":
-        if bits == 32:
-            return f"{processor}:ARMv7"
-        if bits == 64:
-            return f"{processor}:ARMv8"
-    return processor
+def _processor_hint(
+    processor: str | None, bits: int | None, endian: str | None = None
+) -> str | None:
+    """Choose the IDA processor subtype that matches the requested hints.
+
+    ``-a`` accepts radare2's architecture names (``x86``, ``mips``, ``arm``);
+    :mod:`idare2.arch` maps them to the IDA processor modules, including the
+    width and byte-order variants.  IDA names pass through unchanged.
+    """
+    return arch.resolve(processor, bits, endian)
 
 
 def _apply_import_hints(handle: Any, target: Target) -> None:

@@ -166,6 +166,18 @@ class Config:
     def get_str(self, name: str) -> str:
         return str(self.get(name))
 
+    def parse(self, name: str, value: Any) -> Any:
+        """Coerce ``value`` for ``name`` without storing it.
+
+        Used for settings that are import hints (``cfg.bigendian``) rather
+        than runtime configuration: they must be validated before the
+        database is opened, and then reflected from the database afterwards.
+        """
+        key = _BY_NAME.get(name)
+        if key is None:
+            raise UsageError(f"unknown configuration key {name!r}")
+        return _coerce(key, value)
+
     def set(self, name: str, value: Any) -> None:
         key = _BY_NAME.get(name)
         if key is None:

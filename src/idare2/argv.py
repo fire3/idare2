@@ -63,8 +63,6 @@ LONG_WITH_VALUE = frozenset(
         "idle",
         "timeout",
         "startup-timeout",
-        "color",
-        "endian",
     }
 )
 LONG_BOOLEAN = frozenset(
@@ -96,16 +94,12 @@ class Options:
     json: bool = False
     readonly: bool = True
     skip_rc: int = 0
-    color: int | None = None
     seek: str | None = None
     project: str | None = None
 
     arch: str | None = None
     bits: str | None = None
     base: str | None = None
-    #: Raw-binary import hint: ``big`` or ``little``.  Spelled ``--endian``
-    #: because ``-e`` is r2's config-eval flag (and already is here).
-    endian: str | None = None
     no_analysis: bool = False
 
     attach: str | None = None
@@ -193,12 +187,6 @@ def _apply_long_value(options: Options, name: str, value: str) -> None:
         options.timeout = _positive(value, "--timeout")
     elif name == "startup-timeout":
         options.startup_timeout = _positive(value, "--startup-timeout")
-    elif name == "color":
-        options.color = _int(value, "--color")
-    elif name == "endian":
-        if value not in ("big", "little"):
-            raise UsageError("--endian must be big or little")
-        options.endian = value
 
 
 def _apply_long_flag(options: Options, name: str) -> None:
@@ -344,13 +332,6 @@ def _nonnegative(value: str, what: str) -> float:
     if number != number or number in (float("inf"), float("-inf")) or number < 0:
         raise UsageError(f"{what} must be zero or a positive number, got {value!r}")
     return number
-
-
-def _int(value: str, what: str) -> int:
-    try:
-        return int(value, 0)
-    except ValueError:
-        raise UsageError(f"{what} needs a number, got {value!r}") from None
 
 
 def iter_ignored(options: Options) -> Iterator[str]:
