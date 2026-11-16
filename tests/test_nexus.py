@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pytest
 
+import idare2.nexus as nexus
 from idare2.errors import QuitRequested, TransportError, UsageError
 from idare2.nexus import Target, connect, open_handle, resolve
 
@@ -270,6 +271,79 @@ def test_backend_gui_cannot_open_a_path(tmp_path) -> None:
     target = Target(path=str(tmp_path / "sample"), backend="gui")
     with pytest.raises(NoDatabaseError, match="--backend gui"):
         open_handle(str(tmp_path / "sample"), target, timeout=1, linger=0)
+
+
+# ---------------------------------------------------------------------------
+# a database IDA cannot open must not surface as a wall of b-tree noise
+# ---------------------------------------------------------------------------
+
+_IDA_TRUNCATED_LOG = """\
+bytes   pages size description
+--------- ----- ---- --------------------------------------------
+   524288    64 8192 allocating memory for b-tree...
+Database is empty -> OK
+Database initialization failed with error 4
+Open database failed with result: 4
+ -> OK
+"""
+
+
+def test_truncated_database_is_reported_with_the_recovery_hint(tmp_path) -> None:
+    from ida_nexus import WorkerStartError
+
+    from idare2.errors import NoDatabaseError
+
+    source = str(tmp_path / "sample")
+    target = Target(path=source)
+    exc = WorkerStartError(f"idat worker 42 exited with status 4\n\n{_IDA_TRUNCATED_LOG}")
+    out = nexus._open_failure(source, target, exc)
+    assert isinstance(out, NoDatabaseError)
+    assert out.exit_code == 3
+    text = str(out)
+    assert f"{source}.i64" in text
+    assert "Open database failed with result: 4" in text
+    assert "--reimport" in text
+    # the b-tree banner is noise, not a diagnosis
+    assert "allocating memory" not in text
+
+
+def test_database_failure_after_reimport_says_so(tmp_path) -> None:
+    from ida_nexus import WorkerStartError
+
+    source = str(tmp_path / "sample")
+    target = Target(path=source, reimport=True)
+    exc = WorkerStartError(_IDA_TRUNCATED_LOG)
+    text = str(nexus._open_failure(source, target, exc))
+    assert "--reimport could not rebuild it" in text
+
+
+def test_other_worker_failures_keep_their_original_error(tmp_path) -> None:
+    from ida_nexus import WorkerStartError
+
+    source = str(tmp_path / "sample")
+    exc = WorkerStartError("idalib worker launcher 42 exited with status 127")
+    assert nexus._open_failure(source, Target(path=source), exc) is exc
+
+
+def test_reimport_reaches_nexus_as_new_database(monkeypatch, tmp_path) -> None:
+    from ida_nexus import DatabaseOpenOptions
+
+    import idare2.nexus as nexus_mod
+
+    seen: list[DatabaseOpenOptions] = []
+
+    class _Handle:
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    def _open(path, options=None):
+        seen.append(options)
+        return _Handle()
+
+    monkeypatch.setattr("ida_nexus.DatabaseHandle.open", _open)
+    target = Target(path=str(tmp_path / "sample"), reimport=True)
+    nexus_mod.open_handle(str(tmp_path / "sample"), target, timeout=1, linger=0)
+    assert seen and seen[0].new_database is True
 
 
 def test_shutdown_discards_even_without_take_snapshot() -> None:

@@ -94,6 +94,19 @@ def test_import_hints_become_typed_target_fields() -> None:
     assert (target.processor, target.bits, target.image_base) == ("arm", 32, 0x8000)
 
 
+def test_reimport_is_a_target_field() -> None:
+    """A truncated .i64 can only be recovered by rebuilding it from the input;
+    the flag has to reach Nexus as new_database."""
+    target = cli._target_from(argv.parse(["--reimport", "firmware.bin"]))
+    assert target.reimport is True
+    assert target.path == "firmware.bin"
+
+
+def test_reimport_needs_a_path() -> None:
+    with pytest.raises(UsageError, match="--reimport"):
+        cli._target_from(argv.parse(["--reimport", "--attach", "12345-abcdef"]))
+
+
 def test_r2_arch_names_are_kept_for_the_processor_hint() -> None:
     target = cli._target_from(
         argv.parse(

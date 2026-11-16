@@ -72,6 +72,7 @@ LONG_BOOLEAN = frozenset(
         "no-spawn",
         "save-on-close",
         "no-save-on-close",
+        "reimport",
         "sessions",
         "json",
     }
@@ -106,6 +107,7 @@ class Options:
     idb: str | None = None
     spawn: bool = True
     backend: str = "any"
+    reimport: bool = False
     linger: float | None = None
     idle: float | None = None
     timeout: float | None = None
@@ -200,6 +202,8 @@ def _apply_long_flag(options: Options, name: str) -> None:
         options.save_on_close = True
     elif name == "no-save-on-close":
         options.save_on_close = False
+    elif name == "reimport":
+        options.reimport = True
     elif name == "sessions":
         options.list_sessions = True
     elif name == "json":

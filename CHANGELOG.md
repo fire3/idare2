@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--reimport` rebuilds the database from the input file. A `.i64` that a
+  crash (or a worker killed mid-save) left truncated cannot be opened by IDA
+  at all: every later command used to fail with `ERROR: WorkerStartError:
+  idat worker N exited with status 4` plus IDA's b-tree banner. The flag is
+  opt-in because rebuilding discards the database's analysis, names and
+  comments.
+
+### Fixed
+
+- A database IDA cannot open is now reported as one actionable line naming the
+  `.i64` and the IDA diagnosis (`Database initialization failed with error 4`),
+  with a pointer at `--reimport`, and exits 3 (no database) instead of 4
+  (transport). Other worker-start failures keep their original error.
+
 ## [0.2.1] - 2026-11-16
 
 ### Fixed

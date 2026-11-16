@@ -44,6 +44,9 @@ class Target:
     record_id: str | None = None
     spawn: bool = True
     backend: str = "any"
+    #: Rebuild the database from the input file, discarding an existing IDB
+    #: that cannot be opened (a crash-truncated .i64, for example).
+    reimport: bool = False
     #: Import hints, applied only when Nexus has to create the database.
     processor: str | None = None
     bits: int | None = None
@@ -175,28 +178,80 @@ def open_handle(selection: Any, target: Target, *, timeout: float, linger: float
             # Nexus documents: this environment switch forces idalib workers.
             os.environ["IDA_NEXUS_IDALIB_ONLY"] = "1"
         hints = _import_hints_requested(target)
-        return DatabaseHandle.open(
-            selection,
-            options=DatabaseOpenOptions(
-                startup_timeout=timeout,
-                keepalive=linger,
-                spawn=target.spawn,
-                # Import hints must be applied before analysis.  The worker
-                # starts quiet, idare2 applies the raw-binary bitness/entry,
-                # and connect() drains analysis afterwards.
-                auto_analysis=target.auto_analysis and not hints,
-                processor=_processor_hint(
-                    target.processor, target.bits, target.endian
+        try:
+            return DatabaseHandle.open(
+                selection,
+                options=DatabaseOpenOptions(
+                    startup_timeout=timeout,
+                    keepalive=linger,
+                    spawn=target.spawn,
+                    # Import hints must be applied before analysis.  The worker
+                    # starts quiet, idare2 applies the raw-binary bitness/entry,
+                    # and connect() drains analysis afterwards.
+                    auto_analysis=target.auto_analysis and not hints,
+                    processor=_processor_hint(
+                        target.processor, target.bits, target.endian
+                    ),
+                    image_base=target.image_base,
+                    new_database=target.reimport,
                 ),
-                image_base=target.image_base,
-            ),
-        )
+            )
+        except Exception as exc:
+            translated = _open_failure(selection, target, exc)
+            if translated is exc:
+                raise
+            raise translated from exc
     try:
         return DatabaseHandle.attach(selection, keepalive=linger)
     except NexusConnectionError as exc:
         raise NotReadyError(
             f"instance {selection.record_id} refused a lease (it may have just exited): {exc}"
         ) from exc
+
+
+#: Log markers IDA prints when the IDB itself cannot be read.  A worker that
+#: dies for another reason (license, crash, timeout) must keep its original
+#: error so the user sees the real cause.
+_DB_OPEN_MARKERS = (
+    "open database failed",
+    "database initialization failed",
+    "failed to open database",
+    "cannot open database",
+    "database is empty",
+)
+
+
+def _database_diagnosis(text: str) -> str:
+    """The database-shaped lines of a worker log, without the b-tree banner."""
+    keys = ("open database", "initialization failed", "database is empty")
+    lines = [line.strip() for line in text.splitlines()
+             if any(key in line.lower() for key in keys)]
+    return "; ".join(dict.fromkeys(line for line in lines if line))[:300]
+
+
+def _open_failure(selection: Any, target: Target, exc: Exception) -> Exception:
+    """Turn "the IDB could not be opened" into an actionable error.
+
+    A worker killed mid-save leaves a truncated ``.i64``; IDA then prints its
+    b-tree banner and ``Open database failed with result: 4``, Nexus surfaces
+    the whole log as ``WorkerStartError``, and every later invocation fails
+    the same way with exit 4 (transport) and no hint about the real problem.
+    """
+    if isinstance(exc, Idare2Error):
+        return exc
+    if not any(marker in str(exc).lower() for marker in _DB_OPEN_MARKERS):
+        return exc
+    source = str(target.path or selection)
+    idb = source if source.lower().endswith((".i64", ".idb")) else source + ".i64"
+    detail = _database_diagnosis(str(exc)) or "a database open error"
+    if target.reimport:
+        hint = ("--reimport could not rebuild it either; check that the input "
+                "file is readable")
+    else:
+        hint = ("the database is truncated or locked by another process; "
+                "delete it or pass --reimport to rebuild it from the input "
+                "file (this discards its analysis and annotations)")
+    return NoDatabaseError(f"cannot open database {idb}: {detail} - {hint}")
 
 
 def await_analysis(handle: Any, timeout: float, mode: str = "wait") -> None:

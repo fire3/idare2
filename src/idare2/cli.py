@@ -46,6 +46,9 @@ needed) or attached to an IDA GUI session that already has it open.
 Targeting
   --idb <path>            target this IDB or executable
   --attach <record-id>    attach to exactly this Nexus instance
+  --reimport              rebuild the database from the input file (a .i64
+                          left truncated by a crash cannot be opened; this
+                          discards its analysis and annotations)
   --no-spawn              fail instead of spawning a worker
   --backend gui|idalib|any
   -L, --sessions          list registered databases
@@ -259,11 +262,14 @@ def _target_from(options: argv_parser.Options) -> Target:
     if options.attach and options.idb:
         raise UsageError("pass either --attach or --idb, not both")
     path = options.idb or options.file
+    if options.reimport and (options.attach or not path):
+        raise UsageError("--reimport needs a file or --idb path to rebuild from")
     return Target(
         path=path,
         record_id=options.attach,
         spawn=options.spawn,
         backend=options.backend,
+        reimport=options.reimport,
         processor=options.arch,
         bits=_parse_bits(options.bits) if options.bits else arch.implied_bits(options.arch),
         endian=_endian_from(options),

@@ -337,6 +337,22 @@ idare2 --attach <session-id> -qc 'axt'
 
 Session IDs are shown by `idare2 -L`.
 
+A database that was left truncated (a worker killed mid-save, or a `.i64`
+somebody else still holds) cannot be opened by IDA at all. idare2 reports it
+with the IDA diagnosis instead of the worker's b-tree banner, and exits 3:
+
+```console
+$ idare2 -qc iI firmware.bin
+ERROR: cannot open database firmware.i64: Database is empty -> OK; Database
+initialization failed with error 4; Open database failed with result: 4 - the
+database is truncated or locked by another process; delete it or pass
+--reimport to rebuild it from the input file (this discards its analysis and
+annotations)
+```
+
+`--reimport` re-creates the database from the input file in one step; the old
+IDB's analysis, names and comments are lost, so it is opt-in.
+
 ### Writing changes
 
 Sessions are read-only by default. Pass `-w` to allow writes:
