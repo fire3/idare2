@@ -34,6 +34,9 @@ class Command:
     summary: str = ""
     #: True for commands that change the database (they need ``-w``).
     writes: bool = False
+    #: A revert (``u``/``U``): it touches the database, but only restores
+    #: content that was already changed, so a read-only session may run it.
+    readonly_ok: bool = False
     #: Additional rows for the ``?`` help table: ``(token, args, description)``.
     detail: list[tuple[str, str, str]] = field(default_factory=list)
     #: ``<cmd>? <arg>`` is a *query*, not a help request (r2's ``f?name``).
@@ -132,6 +135,7 @@ def command(
     usage: str = "",
     summary: str = "",
     writes: bool = False,
+    readonly_ok: bool = False,
     detail: list[tuple[str, str, str]] | None = None,
     query_suffix: bool = False,
     json_suffix: bool = False,
@@ -161,6 +165,7 @@ def command(
                 usage=usage,
                 summary=summary,
                 writes=writes,
+                readonly_ok=readonly_ok,
                 detail=list(detail or []),
                 query_suffix=query_suffix,
                 json_suffix=json_suffix,

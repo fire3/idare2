@@ -124,6 +124,8 @@ class FakeRemote:
             ],
             "patch_bytes": lambda: {"ea": arguments["ea"], "size": 2},
             "patch_many": lambda: {"patches": len(arguments["patches"])},
+            "undo": lambda: {"undone": False},
+            "redo": lambda: {"redone": False},
             "assemble": lambda: {
                 "ea": arguments["ea"],
                 "size": len(self.assembly),
@@ -867,6 +869,18 @@ def test_r2_entry0_name_resolves_to_the_entry_point() -> None:
     assert session.lookup_name("entry0") == 0x1000
     assert session.run("s entry0") == []
     assert session.seek == 0x1000
+
+
+def test_undo_is_allowed_in_a_read_only_session() -> None:
+    """`u`/`U` replay IDA's undo history; they do not need -w to revert."""
+    session, remote = make_session()
+    session.readonly = True
+    assert session.run("u") == ["-- nothing to undo --"]
+    assert session.run("U") == ["-- nothing to redo --"]
+    assert [name for name in remote.operations if name in ("undo", "redo")] == [
+        "undo",
+        "redo",
+    ]
 
 
 def test_alias_is_a_variable() -> None:

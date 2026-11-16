@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `u`/`U` (undo/redo) now work in a read-only session. They only replay IDA's
+  undo/redo history, so reverting a patch that an earlier `-w` session wrote
+  succeeds instead of failing with "could modify the database".
 - A quiet batch invocation with no `-c`/`-i` now reads commands from stdin
   like r2: `printf 'ie\nq\n' | idare2 -q file` prints the entry table and
   exits.  Piped commands used to be ignored entirely, leaving stdout empty.

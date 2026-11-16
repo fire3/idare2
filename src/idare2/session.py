@@ -329,7 +329,7 @@ class Session:
             not command.query_suffix or not statement.args.strip()
         ):
             return cmd.help_for(command)
-        if command.writes:
+        if command.writes and not command.readonly_ok:
             cmd.require_write(self, f"'{statement.cmd}'")
         if (
             self.json_default

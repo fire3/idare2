@@ -295,9 +295,16 @@ def _base64(session: Session, modifier: str, argument: str) -> list[str]:
 # --------------------------------------------------------------------------
 
 
-@command("u", usage="", summary="undo the last database change", writes=True)
+@command(
+    "u",
+    usage="",
+    summary="undo the last database change",
+    detail="Replays IDA's undo history; allowed in a read-only session because "
+    "it only restores content that was changed earlier",
+    writes=True,
+    readonly_ok=True,
+)
 def undo(session: Session, statement: Statement) -> list[str]:
-    cmd_module.require_write(session, "'u'")
     payload = session.remote.call("undo")
     session.invalidate_segments()
     if not payload.get("undone"):
@@ -305,9 +312,15 @@ def undo(session: Session, statement: Statement) -> list[str]:
     return []
 
 
-@command("U", usage="", summary="redo the last undone change", writes=True)
+@command(
+    "U",
+    usage="",
+    summary="redo the last undone change",
+    detail="Replays IDA's undo history; allowed in a read-only session",
+    writes=True,
+    readonly_ok=True,
+)
 def redo(session: Session, statement: Statement) -> list[str]:
-    cmd_module.require_write(session, "'U'")
     payload = session.remote.call("redo")
     session.invalidate_segments()
     if not payload.get("redone"):
