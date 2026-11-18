@@ -718,7 +718,10 @@ class Session:
         if self.flags.seeded:
             return
         payload, _ = self.remote.call_with_meta("symbols", offset=0, count=-1)
-        self.flags.seed((int(item["ea"]), item["name"]) for item in payload)
+        self.flags.seed(
+            (int(item["ea"]), item["name"], int(item.get("size") or 1))
+            for item in payload
+        )
         # `symbols` reads the input file's symbol table; the IDB may carry
         # additional (or renamed) names from an earlier session.  The IDB name
         # wins at a given address, the way a GUI analyst would see it.

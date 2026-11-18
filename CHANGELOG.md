@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `f` now seeds flags with the symbol-table size, so `f~func_a` prints the
+  same width as r2 instead of 1.
 - `pd N` on a raw blob is now a linear decode like r2: it continues past a
   `return`, and decodes bytes IDA had not marked as code (the item is created
   only for the render pass and removed afterwards). Previously `pd 6` on

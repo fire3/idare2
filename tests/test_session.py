@@ -2129,6 +2129,16 @@ def test_ph_reads_at_the_seek() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_flag_seed_keeps_the_symbol_table_size() -> None:
+    """r2's `f~func_a` prints 8; a seeded IDA name alone has no width."""
+    from idare2.flags import FlagStore
+
+    store = FlagStore()
+    store.seed([(0x1000, "func_a", 8), (0x2000, "data_sym")])
+    assert store.get("func_a").size == 8
+    assert store.get("data_sym").size == 1
+
+
 def _flag(session, name: str):
     session._ensure_flags()
     return session.flags._by_name.get(name)

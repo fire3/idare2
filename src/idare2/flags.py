@@ -35,12 +35,18 @@ class FlagStore:
     def seeded(self) -> bool:
         return self._seeded
 
-    def seed(self, pairs: Iterable[tuple[int, str]]) -> None:
-        """Populate from IDA's name table.  Existing session flags win."""
-        for ea, name in pairs:
+    def seed(self, entries: Iterable[tuple[int, str] | tuple[int, str, int]]) -> None:
+        """Populate from IDA's name table.  Existing session flags win.
+
+        Entries may carry the symbol-table size as a third item; r2's `f`
+        reports that size, while an IDA name alone has no width.
+        """
+        for entry in entries:
+            ea, name = entry[0], entry[1]
+            size = int(entry[2]) if len(entry) > 2 else 1
             if not name or name in self._by_name:
                 continue
-            flag = Flag(name=name, ea=int(ea))
+            flag = Flag(name=name, ea=int(ea), size=size)
             self._by_name[name] = flag
             self._by_ea.setdefault(int(ea), []).append(name)
         self._seeded = True
