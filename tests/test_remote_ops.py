@@ -1247,6 +1247,38 @@ def test_disasm_backward_decodes_raw_bytes_across_gaps(monkeypatch) -> None:
     assert _disasm_addresses(envelope["result"]) == [0x1000, 0x1004]
 
 
+class _CreatingInstructions(_Instructions):
+    """Defines a 4-byte instruction on demand, like IDA's create_insn."""
+
+    def create(self, ea: int) -> int:
+        if ea in self.by_address:
+            return int(self.by_address[ea].size)
+        self.addresses = sorted([*self.addresses, ea])
+        self.by_address[ea] = _Insn(ea)
+        return 4
+
+
+def test_disasm_forward_keeps_decoding_past_a_return() -> None:
+    """r2's `pd N` is linear; analysis stopping at `ret` must not end `pd`.
+
+    The listing only defines 0x1000, and the fake `create` fills the rest one
+    instruction at a time.  The walk should return all four addresses and then
+    stop at the inclusive maximum.
+    """
+    instructions = _CreatingInstructions([0x1000])
+    db = SimpleNamespace(
+        functions=SimpleNamespace(get_at=lambda ea: None),
+        instructions=instructions,
+        bytes=_Bytes(instructions.addresses),
+        comments=_Comments(),
+        maximum_ea=0x1010,
+        minimum_ea=0x1000,
+    )
+    envelope = dispatch.invoke(db, "disasm", {"ea": 0x1000, "count": 4})
+    assert protocol.is_ok(envelope), envelope
+    assert _disasm_addresses(envelope["result"]) == [0x1000, 0x1004, 0x1008, 0x100C]
+
+
 # ---------------------------------------------------------------------------
 # iI metadata: stripped/lsyms come from the input's symbol table
 # ---------------------------------------------------------------------------

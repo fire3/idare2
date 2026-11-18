@@ -271,7 +271,7 @@ def _target_from(options: argv_parser.Options) -> Target:
         backend=options.backend,
         reimport=options.reimport,
         processor=options.arch,
-        bits=_parse_bits(options.bits) if options.bits else arch.implied_bits(options.arch),
+        bits=_import_bits(options.bits) if options.bits else arch.implied_bits(options.arch),
         endian=_endian_from(options),
         image_base=_parse_base(options.base) if options.base else None,
         auto_analysis=not options.no_analysis,
@@ -301,9 +301,19 @@ def _parse_bits(text: str) -> int:
         bits = int(text, 0)
     except ValueError:
         raise UsageError(f"expected a bit width, got {text!r}") from None
-    if bits not in (16, 32, 64):
-        raise UsageError(f"-b must be 16, 32 or 64, not {bits}")
+    if bits not in (8, 16, 32, 64):
+        raise UsageError(f"-b must be 8, 16, 32 or 64, not {bits}")
     return bits
+
+
+def _import_bits(text: str) -> int:
+    """r2 accepts `-b 8` for 6502/8051/AVR; IDA models those as 16-bit.
+
+    The flag is an r2 script fact, not an IDA addressing mode, so translate it
+    instead of rejecting it (the byte-wide processors cannot be set to 8).
+    """
+    bits = _parse_bits(text)
+    return 16 if bits == 8 else bits
 
 
 def _run_scripts(session: Session, options: argv_parser.Options) -> int | None:

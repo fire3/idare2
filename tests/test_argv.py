@@ -127,6 +127,12 @@ def test_invalid_bitness_is_a_usage_error(bits: str) -> None:
         cli._target_from(argv.parse(["-b", bits, "firmware.bin"]))
 
 
+def test_r2_byte_width_is_accepted_for_mcu_processors() -> None:
+    """r2 spells 6502/8051/AVR as `-b 8`; IDA models them as 16-bit."""
+    target = cli._target_from(argv.parse(["-a", "6502", "-b", "8", "rom.bin"]))
+    assert (target.processor, target.bits) == ("6502", 16)
+
+
 @pytest.mark.parametrize(("base", "message"), [("0x1001", "16-byte aligned"), ("-16", "non-negative")])
 def test_invalid_load_base_is_a_usage_error(base: str, message: str) -> None:
     with pytest.raises(UsageError, match=message):

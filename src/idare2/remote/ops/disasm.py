@@ -66,18 +66,29 @@ def _comment(db: Any, ea: int) -> str:
     return info.comment if info is not None else ""
 
 
-def _walk(db: Any, start: int, limit: int, max_count: int | None) -> Iterator[Any]:
+def _walk(
+    db: Any,
+    start: int,
+    limit: int,
+    max_count: int | None,
+    temporary: list[tuple[int, int]] | None = None,
+) -> Iterator[Any]:
     """Yield instructions from ``start`` upward, stopping at ``limit``.
 
     A negative ``max_count`` means "no limit", which is what the ``@@i``
     iterator asks for.
 
     ``limit`` is an *inclusive* last valid address: ``db.maximum_ea`` is
-    exclusive, and passing it to ``get_next_head`` raises because IDA validates
-    the bound.
+    exclusive, so the last byte must not be stepped past.
+
+    The walk is linear (`cur += size`), like r2's ``pd``, rather than following
+    IDA's next-head chain.  When IDA has not defined code at ``cur`` the item
+    is created just long enough to render it and is removed by the caller.
     """
     if max_count is not None and max_count < 0:
         max_count = None
+    if temporary is None:
+        temporary = []
     cur: int | None = start
     emitted = 0
     while cur is not None and cur <= limit:
@@ -85,15 +96,66 @@ def _walk(db: Any, start: int, limit: int, max_count: int | None) -> Iterator[An
             return
         if emitted >= HARD_CAP:
             return
-        insn = db.instructions.get_at(cur)
+        insn = _defined_instruction(db, cur)
         if insn is None:
-            return
+            # r2's `pd` is a linear decode: after a return, or in a raw blob
+            # whose analysis stopped early, it keeps decoding the next bytes.
+            # IDA renders an instruction from its database flags, not from a
+            # bare `insn_t`, so create the item temporarily.  The caller drops
+            # it only after the records have been rendered; a read-only `pd`
+            # must not grow the database.
+            size = _create_temporary_insn(db, cur)
+            if size <= 0:
+                return
+            temporary.append((cur, size))
+            insn = db.instructions.get_at(cur)
+            if insn is None:
+                return
         yield insn
         emitted += 1
-        nxt = db.bytes.get_next_head(cur, limit)
-        if nxt is None or int(nxt) <= cur:
+        size = int(insn.size)
+        if size <= 0:
             return
-        cur = int(nxt)
+        nxt = cur + size
+        if nxt <= cur or nxt > limit:
+            return
+        cur = nxt
+
+
+def _defined_instruction(db: Any, ea: int) -> Any | None:
+    """The instruction at ``ea`` only when IDA has actually defined code there.
+
+    ``db.instructions.get_at`` decodes any bytes, including undefined items;
+    rendering those through ``generate_disasm_line`` yields `.byte`/`DCB`
+    instead of the instruction r2 would print.  Unit-test fakes have no byte
+    flags API, in which case the decode is trusted.
+    """
+    try:
+        if not db.bytes.is_code_at(ea):
+            return None
+    except Exception:
+        pass
+    return db.instructions.get_at(ea)
+
+
+def _create_temporary_insn(db: Any, ea: int) -> int:
+    """Define one instruction so IDA can render it, returning its size."""
+    try:
+        return int(db.instructions.create(ea))
+    except Exception:
+        return 0
+
+
+def _drop_temporary_insn(ea: int, size: int) -> None:
+    """Remove an instruction created only for rendering a `pd` line."""
+    try:
+        import ida_bytes
+
+        ida_bytes.del_items(ea, ida_bytes.DELIT_SIMPLE, size)
+    except Exception:
+        # Read-only databases (and unit tests without the IDA SDK) reject the
+        # cleanup.  Nothing was persisted in that case, so there is no leak.
+        return
 
 
 def _walk_back(db: Any, start: int, max_count: int) -> list[Any]:
@@ -208,6 +270,7 @@ def disasm(
     ``before`` prepends that many instructions from immediately before ``ea``
     (``pd -N`` and ``pd-- N``); they are returned in ascending address order.
     """
+    temporary: list[tuple[int, int]] = []
     func = db.functions.get_at(ea)
     header = None
     if func is not None:
@@ -231,24 +294,33 @@ def disasm(
         cap = helpers.FUNC_CAP
     elif mode == "bytes":
         span = count if count else helpers.DISASM_DEFAULT
-        source = _walk_until_bytes(db, ea, span)
+        source = _walk_until_bytes(db, ea, span, temporary)
         cap = helpers.FUNC_CAP
     else:
         cap = helpers.FUNC_CAP
         limit = helpers.DISASM_DEFAULT if count is None else count
         backward = _walk_back(db, ea, before) if before else []
-        source = chain(backward, _walk(db, ea, _limit(db), limit))
+        source = chain(backward, _walk(db, ea, _limit(db), limit, temporary))
 
     records, next_offset = helpers.paginate(source, offset, cap)
-    lines = [instruction_record(db, insn) for insn in records]
+    try:
+        lines = [instruction_record(db, insn) for insn in records]
+    finally:
+        for address, size in temporary:
+            _drop_temporary_insn(address, size)
     result = {"mode": mode, "ea": ea, "func": header, "lines": lines}
     return result, helpers.page_meta(lines, next_offset)
 
 
-def _walk_until_bytes(db: Any, start: int, span: int) -> Iterator[Any]:
+def _walk_until_bytes(
+    db: Any,
+    start: int,
+    span: int,
+    temporary: list[tuple[int, int]] | None = None,
+) -> Iterator[Any]:
     limit = _limit(db)
     covered = 0
-    for insn in _walk(db, start, limit, None):
+    for insn in _walk(db, start, limit, None, temporary):
         if covered >= span:
             return
         yield insn

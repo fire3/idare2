@@ -73,7 +73,9 @@ def test_aliases_imply_width_when_it_is_in_the_name() -> None:
 def test_byte_order_aliases_and_r2_default() -> None:
     assert arch.implied_endian("mips") == "little"
     assert arch.implied_endian("sparc") == "little"
+    assert arch.implied_endian("ppc") == "little"
     assert arch.implied_endian("mipsbe") == "big"
+    assert arch.implied_endian("ppcbe") == "big"
     assert arch.implied_endian("ppc64le") == "little"
     assert arch.implied_endian("mips", "big") == "big"
     assert arch.implied_endian("x86") is None

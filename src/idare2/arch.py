@@ -91,7 +91,7 @@ _FAMILY = {
 }
 
 #: Families whose IDA processor name encodes the byte order.
-_ENDIAN_FAMILIES = frozenset({"mips", "sparc", "xtensa"})
+_ENDIAN_FAMILIES = frozenset({"mips", "sparc", "xtensa", "ppc"})
 
 #: IDA processor name for families that need no width/endian special case.
 _IDA_NAME = {
@@ -181,7 +181,9 @@ def implied_endian(name: str | None, endian: str | None = None) -> str | None:
     An explicit ``-e cfg.bigendian`` always wins.  Suffixes such as
     ``mipsbe`` next.  For MIPS, SPARC and Xtensa the IDA processor name itself
     has to choose a byte order; radare2's default is little-endian, so that is
-    the fallback.  Other families leave the choice to IDA, as before.
+    the fallback.  IDA's PowerPC processor defaults to big-endian, which also
+    disagrees with r2, so ppc is included; other families leave the choice to
+    IDA, as before.
     """
     if endian is not None:
         return endian

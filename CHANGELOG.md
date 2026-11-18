@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `pd N` on a raw blob is now a linear decode like r2: it continues past a
+  `return`, and decodes bytes IDA had not marked as code (the item is created
+  only for the render pass and removed afterwards). Previously `pd 6` on
+  ARM/MIPS/PPC/6502/AVR raw targets stopped after one or two instructions.
+- `-b 8` is accepted for the byte-wide processors (6502/8051/AVR). IDA models
+  them as 16-bit, so the hint is translated instead of rejected; r2 scripts
+  that pass `-b 8` now work unchanged.
+- A bare `-a ppc` now defaults to little-endian, matching r2's
+  `cfg.bigendian=false`; IDA's PowerPC processor defaults to big-endian, which
+  made little-endian raw PPC targets produce no disassembly.
 - A database IDA cannot open is now reported as one actionable line naming the
   `.i64` and the IDA diagnosis (`Database initialization failed with error 4`),
   with a pointer at `--reimport`, and exits 3 (no database) instead of 4
